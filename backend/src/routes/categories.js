@@ -21,16 +21,18 @@ router.get("/tree/all", async (req, res) => {
   try {
     const categories = await prisma.category.findMany({ orderBy: { name: "asc" } });
     const byParent = new Map();
+
     categories.forEach((category) => {
       const key = category.parentId ?? "ROOT";
       if (!byParent.has(key)) byParent.set(key, []);
       byParent.get(key).push({ ...category, children: [] });
     });
 
-    const build = (parentId = "ROOT") => (byParent.get(parentId) ?? []).map((category) => ({
-      ...category,
-      children: build(category.id),
-    }));
+    const build = (parentId = "ROOT") =>
+      (byParent.get(parentId) ?? []).map((category) => ({
+        ...category,
+        children: build(category.id),
+      }));
 
     res.json(build());
   } catch (error) {
@@ -43,7 +45,15 @@ async function getCategory(idOrSlug, byId = false) {
   return prisma.category.findFirst({
     where: byId ? { id: idOrSlug } : { slug: idOrSlug },
     include: {
-      parent: true,
+      parent: {
+        include: {
+          parent: {
+            include: {
+              parent: true,
+            },
+          },
+        },
+      },
       children: { orderBy: { name: "asc" } },
       products: {
         include: {
@@ -84,20 +94,55 @@ router.get("/:slug", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     const { name, slug, parentId } = req.body;
-    if (!name?.trim() || !slug?.trim()) return res.status(400).json({ error: "Name and slug are required" });
+    if (!name?.trim() || !slug?.trim()) {
+      return res.status(400).json({ error: "Name and slug are required" });
+    }
+
+    let parent = null;
+    let parentDepth = 0;
 
     if (parentId) {
-      const parent = await prisma.category.findUnique({ where: { id: parentId } });
-      if (!parent) return res.status(404).json({ error: "Parent category not found" });
+      parent = await prisma.category.findUnique({
+        where: { id: parentId },
+        include: { parent: { include: { parent: true } } },
+      });
+
+      if (!parent) {
+        return res.status(404).json({ error: "Parent category not found" });
+      }
+
+      parentDepth = 1;
+      let current = parent.parent;
+      while (current) {
+        parentDepth += 1;
+        current = current.parent;
+      }
+
+      // Category hierarchy is intentionally limited to three category levels:
+      // main category -> subcategory -> product type.
+      if (parentDepth >= 3) {
+        return res.status(400).json({
+          error: "Product types are the final category level. Products belong directly to this level.",
+        });
+      }
     }
 
     const category = await prisma.category.create({
-      data: { name: name.trim(), slug: slug.trim().toLowerCase(), parentId: parentId || null },
+      data: {
+        name: name.trim(),
+        slug: slug.trim().toLowerCase(),
+        parentId: parentId || null,
+      },
     });
+
     res.status(201).json(category);
   } catch (error) {
     console.error(error);
-    if (error.code === "P2002") return res.status(409).json({ error: "A category with this name/slug already exists at this level" });
+    if (error.code === "P2002") {
+      return res.status(409).json({
+        error: "A category with this name/slug already exists at this level",
+      });
+    }
     res.status(500).json({ error: "Failed to create category" });
   }
 });
@@ -108,9 +153,14 @@ router.delete("/:id", async (req, res) => {
       where: { id: req.params.id },
       include: { children: true, products: true },
     });
+
     if (!category) return res.status(404).json({ error: "Category not found" });
-    if (category.children.length > 0) return res.status(400).json({ error: "Cannot delete a category that has subcategories" });
-    if (category.products.length > 0) return res.status(400).json({ error: "Cannot delete a category that contains products" });
+    if (category.children.length > 0) {
+      return res.status(400).json({ error: "Cannot delete a category that has subcategories" });
+    }
+    if (category.products.length > 0) {
+      return res.status(400).json({ error: "Cannot delete a category that contains products" });
+    }
 
     await prisma.category.delete({ where: { id: req.params.id } });
     res.json({ message: "Category deleted successfully" });
