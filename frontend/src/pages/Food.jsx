@@ -60,9 +60,7 @@ function Food() {
 
   return (
     <div className="products-page">
-      <Link to="/products" className="back-link">
-        ← Back to Products
-      </Link>
+      <Link to="/products" className="back-link">← Back to Products</Link>
 
       <div className="page-header">
         <p className="eyebrow">PRODUCT CATEGORY</p>
@@ -73,9 +71,6 @@ function Food() {
       {message && <div className="status-message">{message}</div>}
 
       <section className="product-actions category-toolbar">
-        <Link to="/products/register" className="register-product-button">
-          Register New Food Product
-        </Link>
         <button
           type="button"
           className="secondary-action"
@@ -92,9 +87,7 @@ function Food() {
             onChange={(event) => setSubcategoryName(event.target.value)}
             placeholder="New Food subcategory"
           />
-          <button type="button" onClick={addSubcategory}>
-            Add Subcategory
-          </button>
+          <button type="button" onClick={addSubcategory}>Add Subcategory</button>
         </div>
       )}
 
@@ -102,10 +95,7 @@ function Food() {
         <div className="section-heading">
           <div>
             <h2>Food Subcategories</h2>
-            <p>
-              Choose a subcategory such as Ready to Eat, Ready to Cook, Dairy,
-              or Staples.
-            </p>
+            <p>Choose a subcategory such as Ready to Eat, Ready to Cook, Dairy, or Staples.</p>
           </div>
         </div>
 
@@ -125,7 +115,7 @@ function Food() {
                 className="category-card"
               >
                 <h3>{category.name}</h3>
-                <p>Open {category.name} and choose its product types.</p>
+                <p>Open {category.name} and manage its product types.</p>
               </Link>
             ))}
           </div>
