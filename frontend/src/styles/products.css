@@ -200,3 +200,81 @@
   .category-form button { width: 100%; }
   .hierarchy-level { width: 100%; margin-right: 0; }
 }
+/* Category item wrapper */
+.category-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Delete button for categories, subcategories and product types */
+.delete-category-button {
+  width: 100%;
+  border: 1px solid #dc2626;
+  background: #fff;
+  color: #dc2626;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.delete-category-button:hover {
+  background: #dc2626;
+  color: #fff;
+}
+
+.delete-category-button:active {
+  transform: scale(0.98);
+}
+
+/* Keep the selected category visually obvious */
+.category-card.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+/* Make category buttons behave like cards */
+.category-card {
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+}
+
+/* Add-category cards */
+.category-grid > .category-card {
+  min-height: 110px;
+}
+
+/* Forms used for adding categories/subcategories/product types */
+.category-form {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.category-form input {
+  flex: 1;
+  min-width: 220px;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.category-form button {
+  border: none;
+  background: #2563eb;
+  color: white;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.category-form button:hover {
+  background: #1d4ed8;
+}
