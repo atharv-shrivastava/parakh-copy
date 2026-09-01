@@ -1,8 +1,38 @@
-
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import "../styles/products.css";
 
+const API_URL = "http://localhost:5000";
+
 function Food() {
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    async function loadCategories() {
+      try {
+        const response = await fetch(`${API_URL}/api/categories`);
+
+        if (!response.ok) {
+          throw new Error("Failed to load categories");
+        }
+
+        const data = await response.json();
+        const food = data.find((category) => category.slug === "food");
+
+        setCategories(food?.children ?? []);
+      } catch (err) {
+        console.error(err);
+        setError("Unable to load food categories.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadCategories();
+  }, []);
+
   return (
     <div className="products-page">
       <Link to="/products" className="back-link">
@@ -11,9 +41,7 @@ function Food() {
 
       <div className="page-header">
         <p className="eyebrow">PRODUCT CATEGORY</p>
-
         <h1>Food</h1>
-
         <p>
           Browse food products by category and explore their
           compliance information.
@@ -28,77 +56,27 @@ function Food() {
           </div>
         </div>
 
-        <div className="category-grid">
-          <Link
-            to="/products/food/ready-to-eat"
-            className="category-card"
-          >
-            <h3>Ready to Eat</h3>
-            <p>
-              Food products that can be consumed directly after opening.
-            </p>
-          </Link>
+        {loading && <p>Loading categories...</p>}
+        {error && <p>{error}</p>}
 
-          <Link
-            to="/products/food/ready-to-cook"
-            className="category-card"
-          >
-            <h3>Ready to Cook</h3>
-            <p>
-              Food products that require cooking or preparation.
-            </p>
-          </Link>
+        {!loading && !error && categories.length === 0 && (
+          <p>No food categories found.</p>
+        )}
 
-          <Link
-            to="/products/food/staples"
-            className="category-card"
-          >
-            <h3>Staples</h3>
-            <p>
-              Essential food commodities such as rice, flour and pulses.
-            </p>
-          </Link>
-
-          <Link
-            to="/products/food/cooking-essentials"
-            className="category-card"
-          >
-            <h3>Cooking Essentials</h3>
-            <p>
-              Oils, ghee, spices, sauces and other cooking ingredients.
-            </p>
-          </Link>
-
-          <Link
-            to="/products/food/beverages"
-            className="category-card"
-          >
-            <h3>Beverages</h3>
-            <p>
-              Packaged drinks, juices, tea, coffee and drinking water.
-            </p>
-          </Link>
-
-          <Link
-            to="/products/food/dairy"
-            className="category-card"
-          >
-            <h3>Dairy</h3>
-            <p>
-              Milk, curd, butter, cheese and other dairy products.
-            </p>
-          </Link>
-
-          <Link
-            to="/products/food/other"
-            className="category-card"
-          >
-            <h3>Other Food</h3>
-            <p>
-              Food products that don't fit another category.
-            </p>
-          </Link>
-        </div>
+        {!loading && !error && categories.length > 0 && (
+          <div className="category-grid">
+            {categories.map((category) => (
+              <Link
+                key={category.id}
+                to={`/products/food/${category.slug}`}
+                className="category-card"
+              >
+                <h3>{category.name}</h3>
+                <p>Browse products in this category.</p>
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="product-actions">
