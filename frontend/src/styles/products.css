@@ -1,172 +1,170 @@
-
 .products-page {
   width: 100%;
   max-width: 1100px;
 }
 
-.product-categories {
+.product-categories,
+.product-actions,
+.registration-form {
   margin-top: 36px;
 }
 
 .category-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
   margin-top: 20px;
 }
 
 .category-card {
   display: block;
+  width: 100%;
   padding: 24px;
-  background: #ffffff;
+  background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   color: inherit;
   text-decoration: none;
-  transition: 0.2s ease;
+  text-align: left;
+  cursor: pointer;
+  transition: .2s ease;
 }
 
 .category-card:hover {
-  border-color: #cbd5e1;
+  border-color: #94a3b8;
   transform: translateY(-2px);
 }
 
-.category-card h3 {
-  margin: 0 0 8px;
-  font-size: 18px;
-}
+.category-card h3 { margin: 0 0 8px; font-size: 18px; }
+.category-card p { margin: 0; color: #6b7280; font-size: 14px; line-height: 1.5; }
 
-.category-card p {
-  margin: 0;
-  color: #6b7280;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.product-actions {
-  margin-top: 40px;
-}
-
-.register-product-button {
-  display: inline-block;
-  margin-top: 18px;
-  padding: 11px 16px;
-  border-radius: 8px;
-  background: #2563eb;
-  color: #ffffff;
-  text-decoration: none;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.register-product-button:hover {
-  background: #1d4ed8;
-}
-
-@media (max-width: 800px) {
-  .category-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 550px) {
-  .category-grid {
-    grid-template-columns: 1fr;
-  }
-}
-/* =========================================
-   Food Product Registration
-   ========================================= */
-
-.category-item {
+.category-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
-.category-item .category-card {
-  width: 100%;
-}
-
-.category-card.selected {
-  border: 2px solid currentColor;
-  transform: translateY(-2px);
-}
-
-.delete-category-button {
-  border: 1px solid #d0d0d0;
-  background: transparent;
-  color: #c62828;
-  padding: 8px 14px;
+.register-product-button,
+.secondary-action {
+  display: inline-block;
+  padding: 11px 16px;
+  border: 0;
   border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  transition: 0.2s ease;
+  cursor: pointer;
+  text-decoration: none;
 }
 
-.delete-category-button:hover {
-  background: #c62828;
-  color: white;
-  border-color: #c62828;
-}
+.register-product-button { background: #2563eb; color: #fff; }
+.register-product-button:hover { background: #1d4ed8; }
+.secondary-action { background: #111827; color: #fff; }
+.secondary-action:hover { background: #374151; }
 
 .category-form {
   display: flex;
   gap: 12px;
-  margin-top: 20px;
+  margin-top: 18px;
   padding: 18px;
-  border: 1px solid #ddd;
+  border: 1px solid #e5e7eb;
   border-radius: 12px;
-  background: #fafafa;
+  background: #f8fafc;
 }
 
-.category-form input {
-  flex: 1;
+.category-form input,
+.category-form button,
+.hierarchy-level select,
+.filter-panel input,
+.filter-panel select,
+.form-grid input,
+.form-grid select,
+.form-grid textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+}
+
+.category-form button { width: auto; padding-inline: 20px; background: #111827; color: #fff; border: 0; cursor: pointer; font-weight: 600; }
+
+.filter-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 20px 0;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.product-list { display: grid; gap: 10px; }
+.product-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr auto;
+  gap: 20px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  text-decoration: none;
+  color: inherit;
+  background: #fff;
+}
+
+.product-row > div { display: grid; gap: 4px; }
+.product-row span { color: #6b7280; font-size: 13px; }
+
+.compliance-badge {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.compliance-badge.okay { background: #dcfce7; color: #166534; }
+.compliance-badge.violation { background: #fee2e2; color: #991b1b; }
+.compliance-badge.needs_review { background: #fef3c7; color: #92400e; }
+
+.status-message {
+  margin-top: 18px;
   padding: 12px 14px;
-  border: 1px solid #ccc;
   border-radius: 8px;
-  font-size: 14px;
-  outline: none;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
 }
 
-.category-form input:focus {
-  border-color: currentColor;
+.hierarchy-level {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 220px;
+  margin: 10px 12px 0 0;
+}
+.hierarchy-level label { font-size: 12px; font-weight: 700; color: #6b7280; }
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+.form-grid label { display: grid; gap: 7px; font-size: 13px; font-weight: 600; }
+.form-grid textarea { min-height: 100px; resize: vertical; }
+.full-width { grid-column: 1 / -1; }
+
+@media (max-width: 800px) {
+  .category-grid, .filter-panel, .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .product-row { grid-template-columns: 1fr; }
 }
 
-.category-form button {
-  padding: 12px 20px;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-  background: #222;
-  color: white;
-  transition: 0.2s ease;
+@media (max-width: 550px) {
+  .category-grid, .filter-panel, .form-grid { grid-template-columns: 1fr; }
+  .category-form { flex-direction: column; }
+  .category-form button { width: 100%; }
+  .hierarchy-level { width: 100%; margin-right: 0; }
 }
-
-.category-form button:hover {
-  opacity: 0.85;
-}
-
-.product-actions {
-  margin-top: 32px;
-}
-
-.product-actions p {
-  margin-top: 8px;
-}
-
-@media (max-width: 700px) {
-  .category-form {
-    flex-direction: column;
-  }
-
-  .category-form button {
-    width: 100%;
-  }
-
-  .delete-category-button {
-    width: 100%;
-  }
-}npm
