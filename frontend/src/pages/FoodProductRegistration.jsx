@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams, useNavigate } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import "../styles/products.css";
 
 const API_URL = "http://localhost:5000/api";
 
 function FoodProductRegistration() {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
   const [roots, setRoots] = useState([]);
   const [levels, setLevels] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -47,14 +46,6 @@ function FoodProductRegistration() {
     loadRoots();
   }, [searchParams]);
 
-  async function loadChildren(categoryId, levelIndex) {
-    const response = await fetch(`${API_URL}/categories/id/${categoryId}`);
-    if (!response.ok) throw new Error("Unable to load the next category level");
-    const category = await response.json();
-
-    setLevels((current) => [...current.slice(0, levelIndex + 1), category]);
-  }
-
   async function selectLevel(levelIndex, id) {
     const nextIds = selectedIds.slice(0, levelIndex);
     nextIds[levelIndex] = id;
@@ -66,6 +57,19 @@ function FoodProductRegistration() {
       if (!response.ok) throw new Error("Unable to load category");
       const category = await response.json();
       setLevels((current) => [...current.slice(0, levelIndex), category]);
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function selectChoice(choiceId) {
+    try {
+      const response = await fetch(`${API_URL}/categories/id/${choiceId}`);
+      if (!response.ok) throw new Error("Unable to load category");
+      const category = await response.json();
+      setLevels((current) => [...current, category]);
+      setSelectedIds((current) => [...current, category.id]);
+      setMessage("");
     } catch (error) {
       setMessage(error.message);
     }
@@ -110,7 +114,6 @@ function FoodProductRegistration() {
   return (
     <div className="products-page">
       <Link to="/products" className="back-link">← Back to Products</Link>
-
       <div className="page-header">
         <p className="eyebrow">PRODUCT REGISTRATION</p>
         <h1>Register New Product</h1>
@@ -129,26 +132,26 @@ function FoodProductRegistration() {
                 <label>Level {index + 1}</label>
                 <select value={selectedIds[index] || level.id} onChange={(event) => selectLevel(index, event.target.value)}>
                   <option value={level.id}>{level.name}</option>
-                  {index === 0 && roots.filter((item) => item.id !== level.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                  {index > 0 && (levels[index - 1]?.children ?? []).filter((item) => item.id !== level.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  {(index === 0 ? roots : (levels[index - 1]?.children ?? [])).filter((item) => item.id !== level.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                 </select>
               </div>
             ))}
 
-            <div className="category-grid">
-              {choices.map((choice) => (
-                <button key={choice.id} type="button" className="category-card" onClick={() => loadChildren(choice.id, levels.length)}>
-                  <h3>{choice.name}</h3>
-                  <p>{choice.children?.length ? "Continue to next level" : "Final product type"}</p>
-                </button>
-              ))}
-            </div>
+            {choices.length > 0 && (
+              <div className="category-grid">
+                {choices.map((choice) => (
+                  <button key={choice.id} type="button" className="category-card" onClick={() => selectChoice(choice.id)}>
+                    <h3>{choice.name}</h3>
+                    <p>{choice.children?.length ? "Continue to next level" : "Final product type"}</p>
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
 
           {isLeaf && (
             <form className="registration-form" onSubmit={registerProduct}>
               <div className="section-heading"><div><h2>Product details</h2><p>Selected: {selectedPath}</p></div></div>
-
               <div className="form-grid">
                 <label>Company / Manufacturer / Brand<input value={form.brandName} onChange={(e) => updateForm("brandName", e.target.value)} placeholder="e.g. Company name" /></label>
                 <label>Product name *<input required value={form.productName} onChange={(e) => updateForm("productName", e.target.value)} /></label>
@@ -158,7 +161,6 @@ function FoodProductRegistration() {
                 <label>Barcode<input value={form.barcode} onChange={(e) => updateForm("barcode", e.target.value)} /></label>
                 <label className="full-width">Description<textarea value={form.description} onChange={(e) => updateForm("description", e.target.value)} /></label>
               </div>
-
               <button className="register-product-button" type="submit" disabled={saving}>{saving ? "Registering..." : "Register Product"}</button>
             </form>
           )}
