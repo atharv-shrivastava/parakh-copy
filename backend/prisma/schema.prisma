@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  role      String   @default("WORKER")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inspections Inspection[]
+  scans       Scan[]
+}
+
+model Shop {
+  id        String   @id @default(cuid())
+  name      String
+  address   String?
+  city      String?
+  state     String?
+  latitude  Float?
+  longitude Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inspections Inspection[]
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parentId String?
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryHierarchy")
+
+  products Product[]
+
+  @@unique([parentId, slug])
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  brandName   String?
+  productName String
+  description String?
+  netQuantity String?
+  unit        String?
+  mrp         Float?
+  barcode     String?
+  imageUrl    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  inspections Inspection[]
+
+  @@index([categoryId])
+  @@index([brandName])
+  @@index([productName])
+  @@index([barcode])
+}
+
+model Scan {
+  id        String   @id @default(cuid())
+  imageUrl  String?
+  ocrText   String?
+  status    String   @default("PENDING")
+  createdAt DateTime @default(now())
+
+  workerId String
+  worker   User   @relation(fields: [workerId], references: [id])
+
+  inspection Inspection?
+}
+
+model Inspection {
+  id          String   @id @default(cuid())
+  status      String   @default("NEEDS_REVIEW")
+  notes       String?
+  inspectedAt DateTime @default(now())
+
+  workerId String
+  worker   User   @relation(fields: [workerId], references: [id])
+
+  shopId String
+  shop   Shop   @relation(fields: [shopId], references: [id])
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  scanId String? @unique
+  scan   Scan?   @relation(fields: [scanId], references: [id])
+
+  @@index([shopId])
+  @@index([productId])
+  @@index([workerId])
+  @@index([inspectedAt])
+}
