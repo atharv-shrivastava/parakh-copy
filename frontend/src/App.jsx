@@ -1,3 +1,4 @@
+
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 import Layout from "./components/Layout";
@@ -12,6 +13,7 @@ import ShopProducts from "./pages/ShopProducts";
 import Products from "./pages/Products";
 import ProductDetails from "./pages/ProductDetails";
 import CategoryPage from "./pages/CategoryPage";
+import FoodProductRegistration from "./pages/FoodProductRegistration";
 
 import Food from "./pages/Food";
 
@@ -50,9 +52,15 @@ function App() {
           {/* Food */}
           <Route path="/products/food" element={<Food />} />
 
-          {/* Dynamic Categories */}
+          {/* Register New Food Product */}
           <Route
-            path="/products/:categorySlug"
+            path="/products/register/food"
+            element={<FoodProductRegistration />}
+          />
+
+          {/* Food Subcategories / Product Types */}
+          <Route
+            path="/products/food/:categorySlug"
             element={<CategoryPage />}
           />
 

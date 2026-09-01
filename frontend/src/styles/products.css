@@ -74,3 +74,99 @@
     grid-template-columns: 1fr;
   }
 }
+/* =========================================
+   Food Product Registration
+   ========================================= */
+
+.category-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.category-item .category-card {
+  width: 100%;
+}
+
+.category-card.selected {
+  border: 2px solid currentColor;
+  transform: translateY(-2px);
+}
+
+.delete-category-button {
+  border: 1px solid #d0d0d0;
+  background: transparent;
+  color: #c62828;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: 0.2s ease;
+}
+
+.delete-category-button:hover {
+  background: #c62828;
+  color: white;
+  border-color: #c62828;
+}
+
+.category-form {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  background: #fafafa;
+}
+
+.category-form input {
+  flex: 1;
+  padding: 12px 14px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+}
+
+.category-form input:focus {
+  border-color: currentColor;
+}
+
+.category-form button {
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  background: #222;
+  color: white;
+  transition: 0.2s ease;
+}
+
+.category-form button:hover {
+  opacity: 0.85;
+}
+
+.product-actions {
+  margin-top: 32px;
+}
+
+.product-actions p {
+  margin-top: 8px;
+}
+
+@media (max-width: 700px) {
+  .category-form {
+    flex-direction: column;
+  }
+
+  .category-form button {
+    width: 100%;
+  }
+
+  .delete-category-button {
+    width: 100%;
+  }
+}npm
