@@ -16,6 +16,10 @@
   margin-top: 20px;
 }
 
+.category-item {
+  min-width: 0;
+}
+
 .category-card {
   display: block;
   width: 100%;
@@ -61,6 +65,8 @@
 .register-product-button:hover { background: #1d4ed8; }
 .secondary-action { background: #111827; color: #fff; }
 .secondary-action:hover { background: #374151; }
+.secondary-action:disabled,
+.register-product-button:disabled { opacity: .6; cursor: not-allowed; }
 
 .category-form {
   display: flex;
@@ -90,6 +96,32 @@
 }
 
 .category-form button { width: auto; padding-inline: 20px; background: #111827; color: #fff; border: 0; cursor: pointer; font-weight: 600; }
+
+.hierarchy-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.hierarchy-path button {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 999px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.hierarchy-path button::after {
+  content: " →";
+  color: #9ca3af;
+  margin-left: 8px;
+}
+
+.hierarchy-path button:last-child::after { content: ""; margin: 0; }
+.hierarchy-path button.active { background: #eff6ff; border-color: #93c5fd; }
 
 .filter-panel {
   display: grid;
