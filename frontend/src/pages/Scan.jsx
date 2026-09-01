@@ -4,6 +4,13 @@ import "../styles/scan.css";
 
 const API_URL = "http://localhost:5000/api";
 
+function flattenCategories(nodes, path = []) {
+  return nodes.flatMap((node) => {
+    const nextPath = [...path, node];
+    return [{ ...node, path: nextPath }, ...flattenCategories(node.children ?? [], nextPath)];
+  });
+}
+
 function Scan() {
   const [categories, setCategories] = useState([]);
   const [imageName, setImageName] = useState("");
@@ -12,23 +19,26 @@ function Scan() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    fetch(`${API_URL}/categories`)
+    fetch(`${API_URL}/categories/tree/all`)
       .then((response) => response.json())
       .then(setCategories)
       .catch(() => setMessage("Unable to load categories."));
   }, []);
 
+  const flatCategories = flattenCategories(categories);
+  const suggestedCategory = flatCategories
+    .filter((category) => {
+      const text = ocrText.toLowerCase();
+      return text.includes(category.name.toLowerCase()) || text.includes(category.slug.replaceAll("-", " "));
+    })
+    .sort((a, b) => b.name.length - a.name.length)[0];
+
   function handleImage(event) {
     const file = event.target.files?.[0];
     if (!file) return;
     setImageName(file.name);
-    setMessage("Image ready for OCR review. Confirm its category before saving.");
+    setMessage("Image selected. The OCR provider can populate the review text, and the inspector can correct the suggested category before saving.");
   }
-
-  const suggestedCategory = categories.find((category) => {
-    const text = ocrText.toLowerCase();
-    return text.includes(category.name.toLowerCase()) || text.includes(category.slug.replaceAll("-", " "));
-  });
 
   function applySuggestion() {
     if (!suggestedCategory) {
@@ -36,7 +46,7 @@ function Scan() {
       return;
     }
     setSelectedCategoryId(suggestedCategory.id);
-    setMessage(`Suggested category selected: ${suggestedCategory.name}`);
+    setMessage(`Suggested category selected: ${suggestedCategory.path.map((item) => item.name).join(" → ")}`);
   }
 
   return (
@@ -61,7 +71,7 @@ function Scan() {
         <div className="section-heading">
           <div>
             <h2>OCR review and category assignment</h2>
-            <p>The inspector can accept a suggestion or manually define the category.</p>
+            <p>Automatic classification is only a suggestion. The inspector can always define the correct destination.</p>
           </div>
         </div>
 
@@ -72,7 +82,7 @@ function Scan() {
 
         {suggestedCategory && (
           <div className="scan-suggestion">
-            Suggested category: <strong>{suggestedCategory.name}</strong>
+            <span>Suggested: <strong>{suggestedCategory.path.map((item) => item.name).join(" → ")}</strong></span>
             <button type="button" className="secondary-button" onClick={applySuggestion}>Use suggestion</button>
           </div>
         )}
@@ -81,7 +91,7 @@ function Scan() {
           Define category manually
           <select value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)}>
             <option value="">Select category</option>
-            {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+            {flatCategories.map((category) => <option key={category.id} value={category.id}>{"— ".repeat(category.path.length - 1)}{category.name}</option>)}
           </select>
         </label>
 
