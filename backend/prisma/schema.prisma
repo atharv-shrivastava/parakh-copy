@@ -5,3 +5,97 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+model User {
+  id          String        @id @default(cuid())
+  name        String
+  email       String        @unique
+  role        String        @default("WORKER")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  scans       Scan[]
+  inspections Inspection[]
+}
+
+model Shop {
+  id          String        @id @default(cuid())
+  name        String
+  address     String?
+  city        String?
+  state       String?
+  latitude    Float?
+  longitude   Float?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  inspections Inspection[]
+}
+
+model Category {
+  id        String     @id @default(cuid())
+  name      String
+  slug      String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  parentId  String?
+  parent    Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Category[] @relation("CategoryHierarchy")
+  products  Product[]
+
+  @@unique([parentId, slug])
+}
+
+model Product {
+  id               String        @id @default(cuid())
+  brandName        String?
+  productName      String
+  description      String?
+  netQuantity      String?
+  unit             String?
+  mrp              Float?
+  barcode          String?
+  imageUrl         String?
+  complianceStatus String        @default("NEEDS_REVIEW")
+  violationReason  String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  categoryId       String
+  category         Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  inspections      Inspection[]
+
+  @@index([categoryId])
+  @@index([brandName])
+  @@index([productName])
+  @@index([barcode])
+  @@index([complianceStatus])
+}
+
+model Scan {
+  id          String        @id @default(cuid())
+  imageUrl    String?
+  ocrText     String?
+  status      String        @default("PENDING")
+  createdAt   DateTime      @default(now())
+  workerId    String
+  worker      User          @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  inspection  Inspection?
+}
+
+model Inspection {
+  id          String    @id @default(cuid())
+  status      String    @default("NEEDS_REVIEW")
+  notes       String?
+  inspectedAt DateTime  @default(now())
+  workerId    String
+  shopId      String
+  productId   String
+  scanId      String?   @unique
+  worker      User      @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  shop        Shop      @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  scan        Scan?     @relation(fields: [scanId], references: [id], onDelete: SetNull)
+
+  @@index([shopId])
+  @@index([productId])
+  @@index([workerId])
+  @@index([inspectedAt])
+}
