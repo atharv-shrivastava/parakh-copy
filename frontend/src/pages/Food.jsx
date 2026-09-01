@@ -34,7 +34,7 @@ function Food() {
       </div>
 
       <section className="product-actions category-toolbar">
-        <Link to="/products/register?parentId=food" className="register-product-button">Register New Food Product</Link>
+        <Link to="/products/register" className="register-product-button">Register New Food Product</Link>
       </section>
 
       <section className="product-categories">
