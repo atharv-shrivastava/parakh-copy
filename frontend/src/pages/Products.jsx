@@ -1,8 +1,36 @@
-
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import "../styles/products.css";
 
+const API_URL = "http://localhost:5000/api";
+
 function Products() {
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    async function loadCategories() {
+      try {
+        const response = await fetch(`${API_URL}/categories`);
+
+        if (!response.ok) {
+          throw new Error("Failed to load categories");
+        }
+
+        const data = await response.json();
+        setCategories(data);
+      } catch (err) {
+        console.error(err);
+        setError("Could not load categories. Make sure the backend is running.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadCategories();
+  }, []);
+
   return (
     <div className="products-page">
       <div className="page-header">
@@ -24,32 +52,32 @@ function Products() {
           </div>
         </div>
 
-        <div className="category-grid">
-          <Link to="/products/food" className="category-card">
-            <h3>Food</h3>
-            <p>Packaged food and food commodities.</p>
-          </Link>
+        {loading && <p>Loading categories...</p>}
 
-          <Link to="/products/utensils" className="category-card">
-            <h3>Utensils</h3>
-            <p>Kitchen and household utensils.</p>
-          </Link>
+        {error && <p>{error}</p>}
 
-          <Link to="/products/cleaning" className="category-card">
-            <h3>Cleaning</h3>
-            <p>Cleaning and household products.</p>
-          </Link>
+        {!loading && !error && categories.length === 0 && (
+          <p>No categories have been added yet.</p>
+        )}
 
-          <Link to="/products/personal-care" className="category-card">
-            <h3>Personal Care</h3>
-            <p>Personal hygiene and care products.</p>
-          </Link>
-
-          <Link to="/products/other" className="category-card">
-            <h3>Other</h3>
-            <p>Products that don't fit another category.</p>
-          </Link>
-        </div>
+        {!loading && !error && categories.length > 0 && (
+          <div className="category-grid">
+            {categories.map((category) => (
+              <Link
+                key={category.id}
+                to={`/products/${category.slug}`}
+                className="category-card"
+              >
+                <h3>{category.name}</h3>
+                <p>
+                  {category.children?.length
+                    ? `${category.children.length} subcategories`
+                    : "Browse products in this category."}
+                </p>
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="product-actions">
