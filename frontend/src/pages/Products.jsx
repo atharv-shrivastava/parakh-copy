@@ -8,62 +8,74 @@ function Products() {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function loadCategories() {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_URL}/categories`);
+      if (!response.ok) throw new Error("Failed to load categories");
+      setCategories(await response.json());
+    } catch (err) {
+      console.error(err);
+      setError("Could not load categories. Make sure the backend is running.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    async function loadCategories() {
-      try {
-        const response = await fetch(`${API_URL}/categories`);
-        if (!response.ok) throw new Error("Failed to load categories");
-        setCategories(await response.json());
-      } catch (err) {
-        console.error(err);
-        setError("Could not load categories. Make sure the backend is running.");
-      } finally {
-        setLoading(false);
-      }
-    }
     loadCategories();
   }, []);
+
+  async function deleteCategory(category) {
+    if (!window.confirm(`Delete "${category.name}"? This cannot be undone.`)) return;
+
+    try {
+      const response = await fetch(`${API_URL}/categories/${category.id}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not delete category");
+      setMessage(`"${category.name}" deleted successfully.`);
+      await loadCategories();
+    } catch (err) {
+      setMessage(err.message);
+    }
+  }
 
   return (
     <div className="products-page">
       <div className="page-header">
         <p className="eyebrow">PRODUCT DATABASE</p>
         <h1>Products</h1>
-        <p>
-          Browse inspected products by category and explore their compliance information.
-        </p>
+        <p>Browse inspected products by category and explore their compliance information.</p>
       </div>
+
+      {message && <div className="status-message">{message}</div>}
 
       <section className="product-categories">
         <div className="section-heading">
-          <div>
-            <h2>Categories</h2>
-            <p>Choose a main category.</p>
-          </div>
+          <div><h2>Categories</h2><p>Choose a main category.</p></div>
         </div>
 
         {loading && <p>Loading categories...</p>}
         {error && <p>{error}</p>}
-        {!loading && !error && categories.length === 0 && (
-          <p>No categories have been added yet.</p>
-        )}
+        {!loading && !error && categories.length === 0 && <p>No categories have been added yet.</p>}
 
         {!loading && !error && categories.length > 0 && (
           <div className="category-grid">
             {categories.map((category) => (
               <div key={category.id} className="category-item">
-                <Link
-                  to={`/products/category/${category.id}`}
-                  className="category-card"
-                >
+                <Link to={`/products/category/${category.id}`} className="category-card">
                   <h3>{category.name}</h3>
-                  <p>
-                    {category.children?.length
-                      ? `${category.children.length} child categories`
-                      : "Open category"}
-                  </p>
+                  <p>{category.children?.length ? `${category.children.length} child categories` : "Open category"}</p>
                 </Link>
+                <button
+                  type="button"
+                  className="delete-category-button"
+                  onClick={() => deleteCategory(category)}
+                >
+                  Delete
+                </button>
               </div>
             ))}
           </div>
@@ -74,15 +86,10 @@ function Products() {
         <div className="section-heading">
           <div>
             <h2>Category management</h2>
-            <p>
-              Create a new Level 1 category. Actual products are added through scanning.
-            </p>
+            <p>Create a new Level 1 category. Actual products are added through scanning.</p>
           </div>
         </div>
-        <Link
-          to="/products/register"
-          className="register-product-button"
-        >
+        <Link to="/products/register" className="register-product-button">
           Register New Category
         </Link>
       </section>
