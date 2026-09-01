@@ -1,33 +1,50 @@
-import { Link, Outlet } from "react-router-dom";
+
+
+import { NavLink, Outlet } from "react-router-dom";
 
 function Layout() {
   return (
     <div className="app-layout">
       <aside className="sidebar">
         <div className="logo">
-          PARAKH
+          <h2>PARAKH</h2>
+          <span>Compliance Platform</span>
         </div>
 
-        <nav className="sidebar-nav">
-          <Link to="/">Dashboard</Link>
-          <Link to="/scan">Scan</Link>
-          <Link to="/shops">Shops</Link>
-          <Link to="/products">Products</Link>
-          <Link to="/history">History</Link>
-          <Link to="/reports">Reports</Link>
-          <Link to="/profile">Profile</Link>
+        <nav className="navigation">
+          <NavLink to="/" end>
+            Dashboard
+          </NavLink>
+
+          <NavLink to="/scan" end>
+            Scan
+          </NavLink>
+
+          <NavLink to="/shops">
+            Shops
+          </NavLink>
+
+          <NavLink to="/products" end>
+            Products
+          </NavLink>
+
+          <NavLink to="/history" end>
+            History
+          </NavLink>
+
+          <NavLink to="/reports" end>
+            Reports
+          </NavLink>
+
+          <NavLink to="/profile" end>
+            Profile
+          </NavLink>
         </nav>
       </aside>
 
-      <div className="main-area">
-        <header className="topbar">
-          <h1>Parakh</h1>
-        </header>
-
-        <main className="page-content">
-          <Outlet />
-        </main>
-      </div>
+      <main className="main-content">
+        <Outlet />
+      </main>
     </div>
   );
 }

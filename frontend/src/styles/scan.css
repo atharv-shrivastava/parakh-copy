@@ -1,0 +1,117 @@
+.scan-page {
+  max-width: 1000px;
+}
+
+.scan-area {
+  padding: 48px 32px;
+  text-align: center;
+  background: #ffffff;
+  border: 2px dashed #d1d5db;
+  border-radius: 16px;
+  margin-bottom: 32px;
+}
+
+.scan-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 32px;
+  font-weight: 300;
+}
+
+.scan-area h2 {
+  margin: 0 0 8px;
+}
+
+.scan-area p {
+  max-width: 520px;
+  margin: 0 auto;
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.scan-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.primary-button,
+.secondary-button {
+  padding: 11px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary-button {
+  border: 1px solid #2563eb;
+  background: #2563eb;
+  color: white;
+}
+
+.secondary-button {
+  border: 1px solid #d1d5db;
+  background: white;
+  color: #374151;
+}
+
+.primary-button:hover,
+.secondary-button:hover {
+  opacity: 0.9;
+}
+
+.scan-info {
+  margin-top: 32px;
+}
+
+.scan-info h2 {
+  margin-bottom: 16px;
+}
+
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.check-item {
+  padding: 20px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.check-item strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.check-item span {
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+@media (max-width: 700px) {
+  .check-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .scan-actions {
+    flex-direction: column;
+  }
+
+  .primary-button,
+  .secondary-button {
+    width: 100%;
+  }
+}

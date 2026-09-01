@@ -1,87 +1,66 @@
-.scan-card {
-  background: #111827;
-  color: white;
-  border-radius: 16px;
-  padding: 32px;
+.app-layout {
+  min-height: 100vh;
+  display: flex;
+}
+
+.sidebar {
+  width: 240px;
+  min-height: 100vh;
+  padding: 24px 16px;
+  border-right: 1px solid #e5e7eb;
+  background: #ffffff;
+  flex-shrink: 0;
+}
+
+.logo {
   margin-bottom: 40px;
 }
 
-.scan-card-content {
-  max-width: 650px;
+.logo h2 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: 1px;
 }
 
-.scan-card .eyebrow {
-  color: #9ca3af;
-}
-
-.scan-card h2 {
-  margin: 0 0 12px;
-  font-size: 26px;
-}
-
-.scan-card p {
-  color: #d1d5db;
-  line-height: 1.6;
-}
-
-.scan-button {
-  display: inline-block;
-  margin-top: 20px;
-  padding: 11px 18px;
-  background: white;
-  color: #111827;
-  border-radius: 8px;
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.scan-button:hover {
-  opacity: 0.9;
-}
-
-.inspection-card {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 20px;
-}
-
-.inspection-card-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.inspection-product {
-  font-weight: 600;
-}
-
-.inspection-date {
-  margin-top: 18px;
+.logo span {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
   color: #6b7280;
-  font-size: 14px;
 }
 
-.status {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 5px 8px;
-  border-radius: 999px;
-  white-space: nowrap;
+.navigation {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.status-compliant {
-  background: #dcfce7;
-  color: #166534;
+.navigation a {
+  display: block;
+  padding: 12px 14px;
+  border-radius: 8px;
+  text-decoration: none;
+  color: #374151;
+  font-size: 15px;
 }
 
-.status-needs-review {
-  background: #fef3c7;
-  color: #92400e;
+.navigation a:hover {
+  background: #f3f4f6;
 }
 
-.status-non-compliant {
-  background: #fee2e2;
-  color: #991b1b;
+.navigation a.active {
+  background: #2563eb;
+  color: white;
+}
+
+.main-content {
+  flex: 1;
+  min-width: 0;
+  padding: 40px;
+  display: flex;
+  justify-content: center;
+}
+.main-content > * {
+  width: 100%;
+  max-width: 1100px;
 }
