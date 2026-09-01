@@ -30,7 +30,9 @@ function Products() {
       <div className="page-header">
         <p className="eyebrow">PRODUCT DATABASE</p>
         <h1>Products</h1>
-        <p>Browse inspected products by category and explore their compliance information.</p>
+        <p>
+          Browse inspected products by category and explore their compliance information.
+        </p>
       </div>
 
       <section className="product-categories">
@@ -43,15 +45,26 @@ function Products() {
 
         {loading && <p>Loading categories...</p>}
         {error && <p>{error}</p>}
-        {!loading && !error && categories.length === 0 && <p>No categories have been added yet.</p>}
+        {!loading && !error && categories.length === 0 && (
+          <p>No categories have been added yet.</p>
+        )}
 
         {!loading && !error && categories.length > 0 && (
           <div className="category-grid">
             {categories.map((category) => (
-              <Link key={category.id} to={`/products/category/${category.id}`} className="category-card">
-                <h3>{category.name}</h3>
-                <p>{category.children?.length ? `${category.children.length} child categories` : "Open category"}</p>
-              </Link>
+              <div key={category.id} className="category-item">
+                <Link
+                  to={`/products/category/${category.id}`}
+                  className="category-card"
+                >
+                  <h3>{category.name}</h3>
+                  <p>
+                    {category.children?.length
+                      ? `${category.children.length} child categories`
+                      : "Open category"}
+                  </p>
+                </Link>
+              </div>
             ))}
           </div>
         )}
@@ -60,11 +73,18 @@ function Products() {
       <section className="product-actions">
         <div className="section-heading">
           <div>
-            <h2>Product registration</h2>
-            <p>Choose the hierarchy and register a product at the final product-type level.</p>
+            <h2>Category management</h2>
+            <p>
+              Create a new Level 1 category. Actual products are added through scanning.
+            </p>
           </div>
         </div>
-        <Link to="/products/register" className="register-product-button">Register New Product</Link>
+        <Link
+          to="/products/register"
+          className="register-product-button"
+        >
+          Register New Category
+        </Link>
       </section>
     </div>
   );
