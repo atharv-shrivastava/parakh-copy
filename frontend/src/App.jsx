@@ -28,8 +28,8 @@ function App() {
           <Route path="/products" element={<Products />} />
           <Route path="/products/food" element={<Food />} />
 
+          {/* This page creates a Level 1 category only. Products are created from Scan. */}
           <Route path="/products/register" element={<FoodProductRegistration />} />
-          <Route path="/products/register/food" element={<FoodProductRegistration />} />
 
           <Route path="/products/category/:categoryId" element={<CategoryPage />} />
           <Route path="/products/item/:id" element={<ProductDetails />} />
