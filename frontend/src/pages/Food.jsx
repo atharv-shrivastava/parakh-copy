@@ -67,18 +67,13 @@ function Food() {
       <div className="page-header">
         <p className="eyebrow">PRODUCT CATEGORY</p>
         <h1>Food</h1>
-        <p>
-          Main category → subcategory → product type → inspected products.
-        </p>
+        <p>Main category → subcategory → product type → inspected products.</p>
       </div>
 
       {message && <div className="status-message">{message}</div>}
 
       <section className="product-actions category-toolbar">
-        <Link
-          to="/products/register?parentId=food"
-          className="register-product-button"
-        >
+        <Link to="/products/register" className="register-product-button">
           Register New Food Product
         </Link>
         <button
@@ -107,7 +102,10 @@ function Food() {
         <div className="section-heading">
           <div>
             <h2>Food Subcategories</h2>
-            <p>Choose a subcategory such as Ready to Eat, Ready to Cook, Dairy, or Staples.</p>
+            <p>
+              Choose a subcategory such as Ready to Eat, Ready to Cook, Dairy,
+              or Staples.
+            </p>
           </div>
         </div>
 
@@ -127,9 +125,7 @@ function Food() {
                 className="category-card"
               >
                 <h3>{category.name}</h3>
-                <p>
-                  Open {category.name} and choose its product types.
-                </p>
+                <p>Open {category.name} and choose its product types.</p>
               </Link>
             ))}
           </div>
