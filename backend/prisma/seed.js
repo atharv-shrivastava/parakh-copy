@@ -2,28 +2,14 @@ import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
-const adapter = new PrismaPg({
-  connectionString: process.env.DIRECT_URL,
-});
-
+const adapter = new PrismaPg({ connectionString: process.env.DIRECT_URL });
 const prisma = new PrismaClient({ adapter });
 
 async function getOrCreateCategory(name, slug, parentId = null) {
   if (parentId === null) {
-    const existing = await prisma.category.findFirst({
-      where: { parentId: null, slug },
-    });
-
-    if (existing) {
-      return prisma.category.update({
-        where: { id: existing.id },
-        data: { name },
-      });
-    }
-
-    return prisma.category.create({
-      data: { name, slug, parentId: null },
-    });
+    const existing = await prisma.category.findFirst({ where: { parentId: null, slug } });
+    if (existing) return prisma.category.update({ where: { id: existing.id }, data: { name } });
+    return prisma.category.create({ data: { name, slug, parentId: null } });
   }
 
   return prisma.category.upsert({
@@ -49,9 +35,9 @@ async function main() {
   await getOrCreateCategory("Biscuits", "biscuits", readyToEat.id);
   await getOrCreateCategory("Namkeen", "namkeen", readyToEat.id);
 
-  const frozenFoods = await getOrCreateCategory("Frozen Foods", "frozen-foods", readyToCook.id);
-  await getOrCreateCategory("McCain", "mccain", frozenFoods.id);
+  await getOrCreateCategory("McCain", "mccain", readyToCook.id);
   await getOrCreateCategory("Instant Mixes", "instant-mixes", readyToCook.id);
+  await getOrCreateCategory("Frozen Snacks", "frozen-snacks", readyToCook.id);
 
   await getOrCreateCategory("Cookware", "cookware", utensils.id);
   await getOrCreateCategory("Storage", "storage", utensils.id);
@@ -71,6 +57,4 @@ main()
     console.error(error);
     process.exit(1);
   })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .finally(async () => prisma.$disconnect());
