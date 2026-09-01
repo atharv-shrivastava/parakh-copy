@@ -1,600 +1,166 @@
-
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
+import "../styles/products.css";
 
-const API_URL = "http://localhost:5000";
+const API_URL = "http://localhost:5000/api";
 
 function FoodProductRegistration() {
-  const [categories, setCategories] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState(null);
-  const [selectedSubcategory, setSelectedSubcategory] = useState(null);
-  const [selectedType, setSelectedType] = useState(null);
-
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [showNewCategory, setShowNewCategory] = useState(false);
-
-  const [newSubcategoryName, setNewSubcategoryName] = useState("");
-  const [showNewSubcategory, setShowNewSubcategory] = useState(false);
-
-  const [newProductTypeName, setNewProductTypeName] = useState("");
-  const [showNewProductType, setShowNewProductType] = useState(false);
-
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [roots, setRoots] = useState([]);
+  const [levels, setLevels] = useState([]);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [form, setForm] = useState({ brandName: "", productName: "", description: "", netQuantity: "", unit: "", mrp: "", barcode: "" });
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    loadCategories();
-  }, []);
+    async function loadRoots() {
+      try {
+        const response = await fetch(`${API_URL}/categories`);
+        if (!response.ok) throw new Error("Unable to load categories");
+        const data = await response.json();
+        setRoots(data);
 
-  async function loadCategories() {
-    try {
-      const response = await fetch(`${API_URL}/api/categories`);
-
-      if (!response.ok) {
-        throw new Error("Failed to load categories");
+        const parentId = searchParams.get("parentId");
+        if (parentId) {
+          const categoryResponse = await fetch(`${API_URL}/categories/id/${parentId}`);
+          if (categoryResponse.ok) {
+            const category = await categoryResponse.json();
+            const chain = [];
+            let current = category;
+            while (current) {
+              chain.unshift(current);
+              current = current.parent;
+            }
+            setLevels(chain);
+            setSelectedIds(chain.map((item) => item.id));
+          }
+        }
+      } catch (error) {
+        setMessage(error.message);
+      } finally {
+        setLoading(false);
       }
+    }
+    loadRoots();
+  }, [searchParams]);
 
-      const data = await response.json();
-      setCategories(data);
+  async function loadChildren(categoryId, levelIndex) {
+    const response = await fetch(`${API_URL}/categories/id/${categoryId}`);
+    if (!response.ok) throw new Error("Unable to load the next category level");
+    const category = await response.json();
+
+    setLevels((current) => [...current.slice(0, levelIndex + 1), category]);
+  }
+
+  async function selectLevel(levelIndex, id) {
+    const nextIds = selectedIds.slice(0, levelIndex);
+    nextIds[levelIndex] = id;
+    setSelectedIds(nextIds);
+    setMessage("");
+
+    try {
+      const response = await fetch(`${API_URL}/categories/id/${id}`);
+      if (!response.ok) throw new Error("Unable to load category");
+      const category = await response.json();
+      setLevels((current) => [...current.slice(0, levelIndex), category]);
     } catch (error) {
-      console.error(error);
-      setMessage("Unable to load categories.");
+      setMessage(error.message);
+    }
+  }
+
+  function updateForm(key, value) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  const selectedCategory = levels[levels.length - 1];
+  const choices = levels.length === 0 ? roots : selectedCategory?.children ?? [];
+  const selectedPath = levels.map((level) => level.name).join(" → ");
+  const isLeaf = Boolean(selectedCategory && selectedCategory.children?.length === 0);
+
+  async function registerProduct(event) {
+    event.preventDefault();
+    if (!selectedCategory || !isLeaf) {
+      setMessage("Select the final product type before registering the product.");
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+    try {
+      const response = await fetch(`${API_URL}/products`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, categoryId: selectedCategory.id }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Registration failed");
+
+      setMessage(data.complianceStatus === "VIOLATION" ? `Product registered. Result: VIOLATION. ${data.violationReason}` : "Product registered. Basic compliance screening passed.");
+      setForm({ brandName: "", productName: "", description: "", netQuantity: "", unit: "", mrp: "", barcode: "" });
+    } catch (error) {
+      setMessage(error.message);
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   }
-
-  function createSlug(name) {
-    return name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-  }
-
-  function handleCategorySelect(category) {
-    setSelectedCategory(category);
-    setSelectedSubcategory(null);
-    setSelectedType(null);
-    setShowNewSubcategory(false);
-    setShowNewProductType(false);
-    setMessage("");
-  }
-
-  function handleSubcategorySelect(subcategory) {
-    setSelectedSubcategory(subcategory);
-    setSelectedType(null);
-    setShowNewProductType(false);
-    setMessage("");
-  }
-
-  function handleProductTypeSelect(type) {
-    setSelectedType(type);
-    setMessage("");
-  }
-
-  async function addCategory() {
-    if (!newCategoryName.trim()) {
-      setMessage("Please enter a category name.");
-      return;
-    }
-
-    const name = newCategoryName.trim();
-    const slug = createSlug(name);
-
-    try {
-      const response = await fetch(`${API_URL}/api/categories`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name,
-          slug,
-          parentId: null,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to create category");
-      }
-
-      setNewCategoryName("");
-      setShowNewCategory(false);
-
-      await loadCategories();
-
-      setMessage(`"${name}" added successfully.`);
-    } catch (error) {
-      console.error(error);
-      setMessage(error.message);
-    }
-  }
-
-  async function addSubcategory() {
-    if (!newSubcategoryName.trim() || !selectedCategory) {
-      setMessage("Please enter a subcategory name.");
-      return;
-    }
-
-    const name = newSubcategoryName.trim();
-    const slug = createSlug(name);
-
-    try {
-      const response = await fetch(`${API_URL}/api/categories`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name,
-          slug,
-          parentId: selectedCategory.id,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to create subcategory");
-      }
-
-      setNewSubcategoryName("");
-      setShowNewSubcategory(false);
-
-      await loadCategories();
-
-      const updatedResponse = await fetch(
-        `${API_URL}/api/categories/${selectedCategory.slug}`
-      );
-
-      if (!updatedResponse.ok) {
-        throw new Error("Subcategory created, but refresh failed.");
-      }
-
-      const updatedCategory = await updatedResponse.json();
-
-      setSelectedCategory(updatedCategory);
-      setMessage(`"${name}" added successfully.`);
-    } catch (error) {
-      console.error(error);
-      setMessage(error.message);
-    }
-  }
-
-  async function addProductType() {
-    if (!newProductTypeName.trim() || !selectedSubcategory) {
-      setMessage("Please enter a product type name.");
-      return;
-    }
-
-    const name = newProductTypeName.trim();
-    const slug = createSlug(name);
-
-    try {
-      const response = await fetch(`${API_URL}/api/categories`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name,
-          slug,
-          parentId: selectedSubcategory.id,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to create product type");
-      }
-
-      setNewProductTypeName("");
-      setShowNewProductType(false);
-
-      const updatedResponse = await fetch(
-        `${API_URL}/api/categories/${selectedSubcategory.slug}`
-      );
-
-      if (!updatedResponse.ok) {
-        throw new Error("Product type created, but refresh failed.");
-      }
-
-      const updatedSubcategory = await updatedResponse.json();
-
-      setSelectedSubcategory(updatedSubcategory);
-
-      setMessage(`"${name}" added successfully.`);
-    } catch (error) {
-      console.error(error);
-      setMessage(error.message);
-    }
-  }
-
-  async function deleteCategory(category) {
-    const confirmed = window.confirm(
-      `Delete "${category.name}"? This cannot be undone.`
-    );
-
-    if (!confirmed) return;
-
-    try {
-      const response = await fetch(
-        `${API_URL}/api/categories/${category.id}`,
-        {
-          method: "DELETE",
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to delete category");
-      }
-
-      if (selectedCategory?.id === category.id) {
-        setSelectedCategory(null);
-        setSelectedSubcategory(null);
-        setSelectedType(null);
-      }
-
-      await loadCategories();
-
-      setMessage(`"${category.name}" deleted successfully.`);
-    } catch (error) {
-      console.error(error);
-      setMessage(error.message);
-    }
-  }
-
-  async function deleteSubcategory(subcategory) {
-    const confirmed = window.confirm(
-      `Delete "${subcategory.name}"? This cannot be undone.`
-    );
-
-    if (!confirmed) return;
-
-    try {
-      const response = await fetch(
-        `${API_URL}/api/categories/${subcategory.id}`,
-        {
-          method: "DELETE",
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to delete subcategory");
-      }
-
-      if (selectedSubcategory?.id === subcategory.id) {
-        setSelectedSubcategory(null);
-        setSelectedType(null);
-      }
-
-      await loadCategories();
-
-      if (selectedCategory) {
-        const updatedResponse = await fetch(
-          `${API_URL}/api/categories/${selectedCategory.slug}`
-        );
-
-        if (updatedResponse.ok) {
-          const updatedCategory = await updatedResponse.json();
-          setSelectedCategory(updatedCategory);
-        }
-      }
-
-      setMessage(`"${subcategory.name}" deleted successfully.`);
-    } catch (error) {
-      console.error(error);
-      setMessage(error.message);
-    }
-  }
-
-  async function deleteProductType(productType) {
-    const confirmed = window.confirm(
-      `Delete "${productType.name}"? This cannot be undone.`
-    );
-
-    if (!confirmed) return;
-
-    try {
-      const response = await fetch(
-        `${API_URL}/api/categories/${productType.id}`,
-        {
-          method: "DELETE",
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to delete product type");
-      }
-
-      if (selectedType?.id === productType.id) {
-        setSelectedType(null);
-      }
-
-      if (selectedSubcategory) {
-        const updatedResponse = await fetch(
-          `${API_URL}/api/categories/${selectedSubcategory.slug}`
-        );
-
-        if (updatedResponse.ok) {
-          const updatedSubcategory = await updatedResponse.json();
-          setSelectedSubcategory(updatedSubcategory);
-        }
-      }
-
-      setMessage(`"${productType.name}" deleted successfully.`);
-    } catch (error) {
-      console.error(error);
-      setMessage(error.message);
-    }
-  }
-
-  const subcategories = selectedCategory?.children ?? [];
-  const productTypes = selectedSubcategory?.children ?? [];
 
   return (
     <div className="products-page">
-      <Link to="/products/food" className="back-link">
-        ← Back to Food
-      </Link>
+      <Link to="/products" className="back-link">← Back to Products</Link>
 
       <div className="page-header">
         <p className="eyebrow">PRODUCT REGISTRATION</p>
-
-        <h1>Register New Food Product</h1>
-
-        <p>
-          Select the appropriate category, subcategory, and product type.
-        </p>
+        <h1>Register New Product</h1>
+        <p>Choose the hierarchy dynamically. The same registration flow works for Food, Utensils, and every future category.</p>
       </div>
 
-      {message && <p>{message}</p>}
+      {message && <div className="status-message">{message}</div>}
 
-      {loading ? (
-        <p>Loading categories...</p>
-      ) : (
+      {loading ? <p>Loading categories...</p> : (
         <>
-          {/* MAIN CATEGORIES */}
-
           <section className="product-categories">
-            <div className="section-heading">
-              <div>
-                <h2>Category</h2>
-                <p>Select a main product category.</p>
+            <div className="section-heading"><div><h2>Product hierarchy</h2><p>{selectedPath || "Start with a main category."}</p></div></div>
+
+            {levels.map((level, index) => (
+              <div className="hierarchy-level" key={level.id}>
+                <label>Level {index + 1}</label>
+                <select value={selectedIds[index] || level.id} onChange={(event) => selectLevel(index, event.target.value)}>
+                  <option value={level.id}>{level.name}</option>
+                  {index === 0 && roots.filter((item) => item.id !== level.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  {index > 0 && (levels[index - 1]?.children ?? []).filter((item) => item.id !== level.id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
               </div>
-            </div>
+            ))}
 
             <div className="category-grid">
-              {categories.map((category) => (
-                <div key={category.id} className="category-item">
-                  <button
-                    type="button"
-                    className={`category-card ${
-                      selectedCategory?.id === category.id
-                        ? "selected"
-                        : ""
-                    }`}
-                    onClick={() => handleCategorySelect(category)}
-                  >
-                    <h3>{category.name}</h3>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="delete-category-button"
-                    onClick={() => deleteCategory(category)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              ))}
-
-              <button
-                type="button"
-                className="category-card"
-                onClick={() => setShowNewCategory(!showNewCategory)}
-              >
-                <h3>+ Add New Category</h3>
-              </button>
-            </div>
-
-            {showNewCategory && (
-              <div className="category-form">
-                <input
-                  type="text"
-                  placeholder="New category name"
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                />
-
-                <button type="button" onClick={addCategory}>
-                  Add Category
+              {choices.map((choice) => (
+                <button key={choice.id} type="button" className="category-card" onClick={() => loadChildren(choice.id, levels.length)}>
+                  <h3>{choice.name}</h3>
+                  <p>{choice.children?.length ? "Continue to next level" : "Final product type"}</p>
                 </button>
-              </div>
-            )}
+              ))}
+            </div>
           </section>
 
-          {/* SUBCATEGORIES */}
+          {isLeaf && (
+            <form className="registration-form" onSubmit={registerProduct}>
+              <div className="section-heading"><div><h2>Product details</h2><p>Selected: {selectedPath}</p></div></div>
 
-          {selectedCategory && (
-            <section className="product-categories">
-              <div className="section-heading">
-                <div>
-                  <h2>{selectedCategory.name} Subcategories</h2>
-                  <p>Select a subcategory.</p>
-                </div>
+              <div className="form-grid">
+                <label>Company / Manufacturer / Brand<input value={form.brandName} onChange={(e) => updateForm("brandName", e.target.value)} placeholder="e.g. Company name" /></label>
+                <label>Product name *<input required value={form.productName} onChange={(e) => updateForm("productName", e.target.value)} /></label>
+                <label>Net quantity<input value={form.netQuantity} onChange={(e) => updateForm("netQuantity", e.target.value)} placeholder="e.g. 100" /></label>
+                <label>Unit<select value={form.unit} onChange={(e) => updateForm("unit", e.target.value)}><option value="">Select unit</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="pcs">pcs</option><option value="m">m</option></select></label>
+                <label>MRP<input type="number" min="0" step="0.01" value={form.mrp} onChange={(e) => updateForm("mrp", e.target.value)} /></label>
+                <label>Barcode<input value={form.barcode} onChange={(e) => updateForm("barcode", e.target.value)} /></label>
+                <label className="full-width">Description<textarea value={form.description} onChange={(e) => updateForm("description", e.target.value)} /></label>
               </div>
 
-              <div className="category-grid">
-                {subcategories.map((subcategory) => (
-                  <div
-                    key={subcategory.id}
-                    className="category-item"
-                  >
-                    <button
-                      type="button"
-                      className={`category-card ${
-                        selectedSubcategory?.id === subcategory.id
-                          ? "selected"
-                          : ""
-                      }`}
-                      onClick={() =>
-                        handleSubcategorySelect(subcategory)
-                      }
-                    >
-                      <h3>{subcategory.name}</h3>
-                    </button>
-
-                    <button
-                      type="button"
-                      className="delete-category-button"
-                      onClick={() =>
-                        deleteSubcategory(subcategory)
-                      }
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ))}
-
-                <button
-                  type="button"
-                  className="category-card"
-                  onClick={() =>
-                    setShowNewSubcategory(!showNewSubcategory)
-                  }
-                >
-                  <h3>+ Add New Subcategory</h3>
-                </button>
-              </div>
-
-              {showNewSubcategory && (
-                <div className="category-form">
-                  <input
-                    type="text"
-                    placeholder={`New ${selectedCategory.name} subcategory`}
-                    value={newSubcategoryName}
-                    onChange={(e) =>
-                      setNewSubcategoryName(e.target.value)
-                    }
-                  />
-
-                  <button type="button" onClick={addSubcategory}>
-                    Add Subcategory
-                  </button>
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* PRODUCT TYPES */}
-
-          {selectedSubcategory && (
-            <section className="product-categories">
-              <div className="section-heading">
-                <div>
-                  <h2>{selectedSubcategory.name} Product Types</h2>
-                  <p>Select a product type or create a new one.</p>
-                </div>
-              </div>
-
-              <div className="category-grid">
-                {productTypes.map((productType) => (
-                  <div
-                    key={productType.id}
-                    className="category-item"
-                  >
-                    <button
-                      type="button"
-                      className={`category-card ${
-                        selectedType?.id === productType.id
-                          ? "selected"
-                          : ""
-                      }`}
-                      onClick={() =>
-                        handleProductTypeSelect(productType)
-                      }
-                    >
-                      <h3>{productType.name}</h3>
-                    </button>
-
-                    <button
-                      type="button"
-                      className="delete-category-button"
-                      onClick={() =>
-                        deleteProductType(productType)
-                      }
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ))}
-
-                <button
-                  type="button"
-                  className="category-card"
-                  onClick={() =>
-                    setShowNewProductType(!showNewProductType)
-                  }
-                >
-                  <h3>+ Add New Product Type</h3>
-                </button>
-              </div>
-
-              {productTypes.length === 0 && !showNewProductType && (
-                <p>No product types yet. Add one to continue.</p>
-              )}
-
-              {showNewProductType && (
-                <div className="category-form">
-                  <input
-                    type="text"
-                    placeholder={`New ${selectedSubcategory.name} product type`}
-                    value={newProductTypeName}
-                    onChange={(e) =>
-                      setNewProductTypeName(e.target.value)
-                    }
-                  />
-
-                  <button type="button" onClick={addProductType}>
-                    Add Product Type
-                  </button>
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* SELECTED PRODUCT TYPE */}
-
-          {selectedType && (
-            <section className="product-actions">
-              <div className="section-heading">
-                <div>
-                  <h2>{selectedType.name}</h2>
-
-                  <p>
-                    {selectedCategory?.name} →{" "}
-                    {selectedSubcategory?.name} →{" "}
-                    {selectedType.name}
-                  </p>
-                </div>
-              </div>
-
-              <p>
-                Products registered under this product type will appear
-                here once the product registration form is connected.
-              </p>
-            </section>
+              <button className="register-product-button" type="submit" disabled={saving}>{saving ? "Registering..." : "Register Product"}</button>
+            </form>
           )}
         </>
       )}
