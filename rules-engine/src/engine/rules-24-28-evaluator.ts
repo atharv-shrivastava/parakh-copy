@@ -13,8 +13,8 @@ function bool(r: InspectionRequest, field: string): boolean | undefined {
   if (v === false || String(v).toLowerCase() === 'false') return false;
   return undefined;
 }
-function finding(rule: string, id: string, status: EvaluationStatus, field: string, message: string, reason?: string, missing?: string[]): Finding {
-  return { findingId: id, ruleId: `PCR-R${rule}`, ruleCode: `PCR-R${rule}`, ruleNumber: rule, ruleVersion: 1, status, field, message, violationReason: reason, missingEvidence: missing, legalReferences: [SOURCES.PRINCIPAL_2011], severity: status === 'VIOLATION' ? 'CRITICAL' : 'HIGH', requiresLegalReview: false };
+function finding(rule: string, id: string, status: EvaluationStatus, field: string, message: string, reason?: string, missing?: string[], source = SOURCES.PRINCIPAL_2011): Finding {
+  return { findingId: id, ruleId: `PCR-R${rule}`, ruleCode: `PCR-R${rule}`, ruleNumber: rule, ruleVersion: 1, status, field, message, violationReason: reason, missingEvidence: missing, legalReferences: [source], severity: status === 'VIOLATION' ? 'CRITICAL' : 'HIGH', requiresLegalReview: false };
 }
 
 export function rule24Findings(r: InspectionRequest): Finding[] {
@@ -51,13 +51,14 @@ export function rule26Findings(r: InspectionRequest): Finding[] {
   const exemptionClaimed = bool(r, 'rule26.exemptionClaimed');
   const exemptionBasis = String(value(r, 'rule26.exemptionBasis') ?? '').toLowerCase();
   if (exemptionClaimed !== true && exemptionClaimed !== false) return [];
+  const panMasalaExclusionActive = r.inspectionDate.slice(0, 10) >= '2026-02-01';
   if (exemptionClaimed === true) {
-    if (category.includes('pan masala') && exemptionBasis.includes('10g')) return [finding('26', 'PCR-R26-PAN-MASALA-VIOLATION', 'VIOLATION', 'rule26.exemptionBasis', 'The claimed small-package exemption is not available to pan masala under the amendment effective 1 February 2026.', 'G.S.R. 881(E) added a proviso to Rule 26(a) excluding pan masala from that clause.')];
+    if (panMasalaExclusionActive && category.includes('pan masala') && exemptionBasis.includes('10g')) return [finding('26', 'PCR-R26-PAN-MASALA-VIOLATION', 'VIOLATION', 'rule26.exemptionBasis', 'The claimed small-package exemption is not available to pan masala for this inspection date.', 'G.S.R. 881(E) added a proviso to Rule 26(a) excluding pan masala from that clause with effect from 1 February 2026.', undefined, SOURCES.AMEND_2025_881E)];
     const recognised = ['10g', '10ml', 'fast food', 'restaurant', 'hotel', 'drug', 'scheduled formulation', 'non-scheduled formulation'].some(x => exemptionBasis.includes(x));
     if (!recognised) return [finding('26', 'PCR-R26-BASIS-UNVERIFIED', 'UNABLE_TO_VERIFY', 'rule26.exemptionBasis', 'A Rule 26 exemption was claimed, but the supplied exemption basis is not a recognised current basis.', undefined, ['rule26.exemptionBasis'])];
-    return [finding('26', 'PCR-R26-PASS', 'PASS', 'rule26.exemptionBasis', 'The supplied evidence identifies a current Rule 26 exemption basis.')];
+    return [finding('26', 'PCR-R26-PASS', 'PASS', 'rule26.exemptionBasis', 'The supplied evidence identifies a Rule 26 exemption basis applicable to the inspection date.')];
   }
-  if (category.includes('pan masala') && net !== undefined && (unit === 'g' || unit === 'gram' || unit === 'grams') && net <= 10) return [finding('26', 'PCR-R26-PAN-MASALA-NOT-EXEMPT', 'PASS', 'rule26.exemptionClaimed', 'Pan masala is not treated as exempt under the Rule 26(a) small-package exemption, including where the declared quantity is 10 g or less.')];
+  if (panMasalaExclusionActive && category.includes('pan masala') && net !== undefined && ['g', 'gram', 'grams'].includes(unit) && net <= 10) return [finding('26', 'PCR-R26-PAN-MASALA-NOT-EXEMPT', 'PASS', 'rule26.exemptionClaimed', 'Pan masala is not treated as exempt under the Rule 26(a) small-package exemption for this inspection date.', undefined, undefined, SOURCES.AMEND_2025_881E)];
   return [finding('26', 'PCR-R26-NO-EXEMPTION', 'PASS', 'rule26.exemptionClaimed', 'No Rule 26 exemption was claimed in the supplied inspection evidence.')];
 }
 
@@ -65,7 +66,8 @@ export function rule27Findings(r: InspectionRequest): Finding[] {
   const applicable = bool(r, 'administrative.rule27RegistrationApplicable');
   const registered = bool(r, 'administrative.rule27Registered');
   if (applicable !== true && registered === undefined) return [];
-  if (registered === false) return [finding('27', 'PCR-R27-NOT-REGISTERED', 'VIOLATION', 'administrative.rule27Registered', 'The applicable manufacturer/packer/importer is recorded as not registered under Rule 27.', 'Rule 27 requires the prescribed registration with the Director or Controller.')];
+  const source = r.inspectionDate.slice(0, 10) >= SOURCES.AMEND_2026_418E.effectiveFrom ? SOURCES.AMEND_2026_418E : SOURCES.PRINCIPAL_2011;
+  if (registered === false) return [finding('27', 'PCR-R27-NOT-REGISTERED', 'VIOLATION', 'administrative.rule27Registered', 'The applicable manufacturer/packer/importer is recorded as not registered under Rule 27.', 'Rule 27 requires the prescribed registration with the Director or Controller.', undefined, source)];
   const particulars = bool(r, 'administrative.rule27RequiredParticularsComplete');
   const responsibleDirector = bool(r, 'administrative.rule27ResponsibleDirectorDeclared');
   const annualUpdate = bool(r, 'administrative.rule27AnnualUpdateComplete');
@@ -74,9 +76,9 @@ export function rule27Findings(r: InspectionRequest): Finding[] {
   if (particulars === undefined) missing.push('administrative.rule27RequiredParticularsComplete');
   if (responsibleDirector === undefined) missing.push('administrative.rule27ResponsibleDirectorDeclared');
   if (annualUpdate === undefined) missing.push('administrative.rule27AnnualUpdateComplete');
-  if (missing.length) return [finding('27', 'PCR-R27-UNVERIFIED', 'UNABLE_TO_VERIFY', 'administrative.rule27', 'Rule 27 applies to the supplied administrative inspection context, but registration particulars are incomplete.', undefined, missing)];
-  if (!particulars || !responsibleDirector || !annualUpdate) return [finding('27', 'PCR-R27-INCOMPLETE', 'VIOLATION', 'administrative.rule27', 'The Rule 27 registration record is incomplete or its required annual update/particulars are not compliant.', 'The registration record must contain the prescribed particulars, including the responsible Director information added by amendment and the required annual information.')];
-  return [finding('27', 'PCR-R27-PASS', 'PASS', 'administrative.rule27', 'The supplied Rule 27 administrative evidence establishes registration with the required particulars and annual update.')];
+  if (missing.length) return [finding('27', 'PCR-R27-UNVERIFIED', 'UNABLE_TO_VERIFY', 'administrative.rule27', 'Rule 27 applies to the supplied administrative inspection context, but registration particulars are incomplete.', undefined, missing, source)];
+  if (!particulars || !responsibleDirector || !annualUpdate) return [finding('27', 'PCR-R27-INCOMPLETE', 'VIOLATION', 'administrative.rule27', 'The Rule 27 registration record is incomplete or its required annual update/particulars are not compliant.', 'The registration record must contain the prescribed particulars, including the responsible Director information added by amendment and the required annual information.', undefined, source)];
+  return [finding('27', 'PCR-R27-PASS', 'PASS', 'administrative.rule27', 'The supplied Rule 27 administrative evidence establishes registration with the required particulars and annual update.', undefined, undefined, source)];
 }
 
 export function rule28Findings(r: InspectionRequest): Finding[] {
