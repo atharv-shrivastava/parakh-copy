@@ -49,11 +49,13 @@ model Product {
   brandName        String?
   productName      String
   description      String?
+  ocrData          String?
   netQuantity      String?
   unit             String?
   mrp              Float?
   barcode          String?
   imageUrl         String?
+  imageUrls        String?
   complianceStatus String        @default("NEEDS_REVIEW")
   violationReason  String?
   createdAt        DateTime      @default(now())
