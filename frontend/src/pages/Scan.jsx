@@ -49,6 +49,7 @@ function Scan() {
   const [analyzing, setAnalyzing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const OCR_CLIENT_TIMEOUT_MS = 135000;
 
   useEffect(() => {
     apiFetch(`${API_URL}/categories/tree/all`)
@@ -181,7 +182,17 @@ function Scan() {
       fd.append("consumerType", "general");
       fd.append("isImported", "false");
       fd.append("packageType", "retail");
-      const response = await fetch(OCR_URL, { method: "POST", body: fd });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), OCR_CLIENT_TIMEOUT_MS);
+      let response;
+      try {
+        response = await fetch(OCR_URL, { method: "POST", body: fd, signal: controller.signal });
+      } catch (error) {
+        if (error?.name === "AbortError") throw new Error("OCR analysis timed out. Check that Gemini and the Rules Engine are running, then try again.");
+        throw new Error(`Could not reach OCR service: ${error.message}`);
+      } finally {
+        clearTimeout(timeout);
+      }
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Inspection analysis failed");
       setOcr(data.ocr);
