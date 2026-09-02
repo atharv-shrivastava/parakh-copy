@@ -1,173 +1,124 @@
 import express from "express";
 import prisma from "../lib/prisma.js";
+import { authenticate } from "../middleware/auth.js";
 
 const router = express.Router();
+router.use(authenticate);
+
+function slugify(value) {
+  return String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function depthOf(category) {
+  let depth = 1;
+  let current = category;
+  while (current?.parent) { depth += 1; current = current.parent; }
+  return depth;
+}
+
+function buildTree(categories) {
+  const byParent = new Map();
+  for (const category of categories) {
+    const key = category.parentId ?? "ROOT";
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push({ ...category, children: [] });
+  }
+  const build = (parentId = "ROOT") => (byParent.get(parentId) ?? []).map((node) => ({ ...node, children: build(node.id) }));
+  return build();
+}
+
+async function visibleCategoryWhere(userId, id) {
+  return { id, OR: [{ isGlobal: true }, { ownerId: userId }] };
+}
 
 router.get("/", async (req, res) => {
   try {
     const categories = await prisma.category.findMany({
-      where: { parentId: null },
+      where: { parentId: null, OR: [{ isGlobal: true }, { ownerId: req.user.id }] },
       include: { children: { orderBy: { name: "asc" } } },
       orderBy: { name: "asc" },
     });
     res.json(categories);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to fetch categories" });
-  }
+  } catch (error) { console.error(error); res.status(500).json({ error: "Failed to fetch categories" }); }
 });
 
 router.get("/tree/all", async (req, res) => {
   try {
-    const categories = await prisma.category.findMany({ orderBy: { name: "asc" } });
-    const byParent = new Map();
-
-    categories.forEach((category) => {
-      const key = category.parentId ?? "ROOT";
-      if (!byParent.has(key)) byParent.set(key, []);
-      byParent.get(key).push({ ...category, children: [] });
-    });
-
-    const build = (parentId = "ROOT") =>
-      (byParent.get(parentId) ?? []).map((category) => ({
-        ...category,
-        children: build(category.id),
-      }));
-
-    res.json(build());
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to build category tree" });
-  }
+    const categories = await prisma.category.findMany({ where: { OR: [{ isGlobal: true }, { ownerId: req.user.id }] }, orderBy: { name: "asc" } });
+    res.json(buildTree(categories));
+  } catch (error) { console.error(error); res.status(500).json({ error: "Failed to build category tree" }); }
 });
-
-async function getCategory(idOrSlug, byId = false) {
-  return prisma.category.findFirst({
-    where: byId ? { id: idOrSlug } : { slug: idOrSlug },
-    include: {
-      parent: {
-        include: {
-          parent: {
-            include: {
-              parent: true,
-            },
-          },
-        },
-      },
-      children: { orderBy: { name: "asc" } },
-      products: {
-        include: {
-          inspections: {
-            include: { shop: true },
-            orderBy: { inspectedAt: "desc" },
-            take: 1,
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      },
-    },
-  });
-}
 
 router.get("/id/:id", async (req, res) => {
   try {
-    const category = await getCategory(req.params.id, true);
+    const category = await prisma.category.findFirst({
+      where: { id: req.params.id, OR: [{ isGlobal: true }, { ownerId: req.user.id }] },
+      include: {
+        parent: { include: { parent: { include: { parent: true } } } },
+        children: { orderBy: { name: "asc" } },
+        products: {
+          where: { ownerId: req.user.id },
+          include: { inspections: { include: { shop: true }, orderBy: { inspectedAt: "desc" }, take: 1 } },
+          orderBy: { createdAt: "desc" },
+        },
+      },
+    });
     if (!category) return res.status(404).json({ error: "Category not found" });
     res.json(category);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to fetch category" });
-  }
-});
-
-router.get("/:slug", async (req, res) => {
-  try {
-    const category = await getCategory(req.params.slug);
-    if (!category) return res.status(404).json({ error: "Category not found" });
-    res.json(category);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to fetch category" });
-  }
+  } catch (error) { console.error(error); res.status(500).json({ error: "Failed to fetch category" }); }
 });
 
 router.post("/", async (req, res) => {
   try {
-    const { name, slug, parentId } = req.body;
-    if (!name?.trim() || !slug?.trim()) {
-      return res.status(400).json({ error: "Name and slug are required" });
-    }
+    const name = String(req.body.name || "").trim();
+    const parentId = req.body.parentId || null;
+    const isFinal = Boolean(req.body.isFinal);
+    const makeGlobal = Boolean(req.body.global);
+    if (!name) return res.status(400).json({ error: "Category name is required" });
+    if (makeGlobal && req.user.role !== "ADMIN") return res.status(403).json({ error: "Only admins can create global categories" });
 
-    let parent = null;
-    let parentDepth = 0;
-
+    let depth = 1;
     if (parentId) {
-      parent = await prisma.category.findUnique({
-        where: { id: parentId },
-        include: { parent: { include: { parent: true } } },
+      const parent = await prisma.category.findFirst({
+        where: { id: parentId, OR: [{ isGlobal: true }, { ownerId: req.user.id }] },
+        include: { parent: { include: { parent: { include: { parent: true } } } } },
       });
-
-      if (!parent) {
-        return res.status(404).json({ error: "Parent category not found" });
-      }
-
-      parentDepth = 1;
-      let current = parent.parent;
-      while (current) {
-        parentDepth += 1;
-        current = current.parent;
-      }
-
-      // Category hierarchy is intentionally limited to three category levels:
-      // main category -> subcategory -> product type.
-      if (parentDepth >= 3) {
-        return res.status(400).json({
-          error: "Product types are the final category level. Products belong directly to this level.",
-        });
-      }
+      if (!parent) return res.status(404).json({ error: "Parent category not found" });
+      depth = depthOf(parent) + 1;
+      if (depth > 4) return res.status(400).json({ error: "Maximum category hierarchy is four levels" });
+      if (parent.isFinal) return res.status(400).json({ error: "Final categories cannot contain subcategories" });
     }
 
     const category = await prisma.category.create({
-      data: {
-        name: name.trim(),
-        slug: slug.trim().toLowerCase(),
-        parentId: parentId || null,
-      },
+      data: { name, slug: slugify(req.body.slug || name), parentId, isFinal, isGlobal: makeGlobal, ownerId: makeGlobal ? null : req.user.id },
     });
-
     res.status(201).json(category);
   } catch (error) {
     console.error(error);
-    if (error.code === "P2002") {
-      return res.status(409).json({
-        error: "A category with this name/slug already exists at this level",
-      });
-    }
+    if (error.code === "P2002") return res.status(409).json({ error: "A category with this slug already exists at this level" });
     res.status(500).json({ error: "Failed to create category" });
   }
 });
 
+router.patch("/:id/final", async (req, res) => {
+  try {
+    const category = await prisma.category.findFirst({ where: await visibleCategoryWhere(req.user.id, req.params.id), include: { children: true } });
+    if (!category) return res.status(404).json({ error: "Category not found" });
+    if (category.isGlobal && req.user.role !== "ADMIN") return res.status(403).json({ error: "Only admins can change global categories" });
+    if (category.children.length) return res.status(400).json({ error: "A category with subcategories cannot be final" });
+    res.json(await prisma.category.update({ where: { id: category.id }, data: { isFinal: true } }));
+  } catch (error) { console.error(error); res.status(500).json({ error: "Failed to mark category final" }); }
+});
+
 router.delete("/:id", async (req, res) => {
   try {
-    const category = await prisma.category.findUnique({
-      where: { id: req.params.id },
-      include: { children: true, products: true },
-    });
-
+    const category = await prisma.category.findFirst({ where: await visibleCategoryWhere(req.user.id, req.params.id), include: { children: true, products: true } });
     if (!category) return res.status(404).json({ error: "Category not found" });
-    if (category.children.length > 0) {
-      return res.status(400).json({ error: "Cannot delete a category that has subcategories" });
-    }
-    if (category.products.length > 0) {
-      return res.status(400).json({ error: "Cannot delete a category that contains products" });
-    }
-
-    await prisma.category.delete({ where: { id: req.params.id } });
+    if (category.isGlobal && req.user.role !== "ADMIN") return res.status(403).json({ error: "Global categories cannot be deleted by users" });
+    if (category.children.length || category.products.length) return res.status(400).json({ error: "Cannot delete a category containing subcategories or products" });
+    await prisma.category.delete({ where: { id: category.id } });
     res.json({ message: "Category deleted successfully" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Failed to delete category" });
-  }
+  } catch (error) { console.error(error); res.status(500).json({ error: "Failed to delete category" }); }
 });
 
 export default router;
