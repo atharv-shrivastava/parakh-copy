@@ -6,7 +6,9 @@ import "../styles/shop-details.css";
 const API_URL = "http://localhost:5000/api";
 
 function statusClass(status) {
-  return status === "VIOLATION" ? "non-compliant" : status === "NEEDS_REVIEW" || status === "UNABLE_TO_VERIFY" ? "review" : "compliant";
+  if (["VIOLATION", "NON_COMPLIANT", "NON-COMPLIANT"].includes(status)) return "non-compliant";
+  if (["NEEDS_REVIEW", "UNABLE_TO_VERIFY", "REVIEW"].includes(status)) return "review";
+  return "compliant";
 }
 
 function ShopDetails() {
