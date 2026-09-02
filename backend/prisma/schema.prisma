@@ -7,18 +7,19 @@ datasource db {
 }
 
 model User {
-  id             String        @id @default(cuid())
-  name           String
-  email          String        @unique
-  passwordHash   String?
-  role           String        @default("USER")
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  sessions       Session[]
-  scans          Scan[]
-  inspections   Inspection[]
-  categories     Category[]
-  products       Product[]
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  passwordHash String?
+  role         String        @default("USER")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sessions     Session[]
+  scans        Scan[]
+  inspections  Inspection[]
+  categories   Category[]
+  products     Product[]
+  shops        Shop[]
 }
 
 model Session {
@@ -41,32 +42,36 @@ model Shop {
   state       String?
   latitude    Float?
   longitude   Float?
+  ownerId     String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
+  owner       User?         @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   inspections Inspection[]
 
   @@index([name])
+  @@index([ownerId])
 }
 
 model Category {
-  id        String     @id @default(cuid())
-  name      String
-  slug      String
-  isFinal   Boolean    @default(false)
-  isGlobal  Boolean    @default(false)
-  ownerId   String?
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  parentId  String?
-  parent    Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children  Category[] @relation("CategoryHierarchy")
-  products  Product[]
-  owner     User?      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  id                 String     @id @default(cuid())
+  name               String
+  slug               String
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  parentId           String?
+  isSystem           Boolean    @default(false)
+  ownerId            String?
+  isFinalProductType Boolean    @default(false)
+  parent             Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children           Category[] @relation("CategoryHierarchy")
+  products           Product[]
+  owner              User?      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   @@unique([parentId, slug])
   @@index([ownerId])
-  @@index([isGlobal])
+  @@index([isSystem])
   @@index([parentId])
+  @@index([isFinalProductType])
 }
 
 model Product {
@@ -76,11 +81,11 @@ model Product {
   description      String?
   ocrData          String?
   netQuantity      String?
-  unit              String?
+  unit             String?
   mrp              Float?
   barcode          String?
   imageUrl         String?
-  imageUrls        String?
+  imageUrls        Json          @default("[]")
   complianceStatus String        @default("NEEDS_REVIEW")
   violationReason  String?
   ownerId          String?
