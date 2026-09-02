@@ -4,6 +4,7 @@ import { evaluateInspection as evaluateBase } from './evaluator.js';
 import { SOURCES } from '../legal/sources.js';
 import { secondScheduleAppliesOn } from '../legal/second-schedule.js';
 import { tableIIFinding } from './table-ii-evaluator.js';
+import { unitSalePriceFinding } from './unit-sale-price-evaluator.js';
 
 const SOURCE = SOURCES.PRINCIPAL_2011;
 function path(input: unknown, key: string): unknown { return key.split('.').reduce<unknown>((v, p) => v != null && typeof v === 'object' ? (v as Record<string, unknown>)[p] : undefined, input); }
@@ -72,7 +73,8 @@ export function evaluateInspectionComplete(r: InspectionRequest): OverallInspect
   const base = evaluateBase(r);
   const historicalFindings = secondScheduleAppliesOn(r.inspectionDate) ? base.findings : base.findings.filter(f => f.ruleCode !== 'PCR-R5-SCHEDULE-II');
   const tableII = tableIIFinding(r);
-  const added = [...rule11(r), ...rule12_6(r), ...rule13_5_ii(r), ...rule18(r), ...(tableII ? [tableII] : [])];
+  const unitSalePrice = unitSalePriceFinding(r);
+  const added = [...rule11(r), ...rule12_6(r), ...rule13_5_ii(r), ...rule18(r), ...(tableII ? [tableII] : []), ...(unitSalePrice ? [unitSalePrice] : [])];
   const findings = [...historicalFindings, ...added];
   const summary = { totalRulesEvaluated: findings.length, passed: findings.filter(f => f.status === 'PASS').length, violations: findings.filter(f => f.status === 'VIOLATION').length, unableToVerify: findings.filter(f => f.status === 'UNABLE_TO_VERIFY').length, notApplicable: findings.filter(f => f.status === 'NOT_APPLICABLE').length };
   const overallStatus: EvaluationStatus = summary.violations > 0 ? 'VIOLATION' : summary.unableToVerify > 0 ? 'UNABLE_TO_VERIFY' : summary.passed > 0 ? 'PASS' : 'NOT_APPLICABLE';
