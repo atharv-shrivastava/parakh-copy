@@ -84,7 +84,7 @@ async function runPuterOcr(files) {
   if (!rawText.trim()) throw new Error("Puter OCR found no readable text.");
   if (!puter.ai.chat) return normalizePuterOcr({}, rawText);
   const prompt = "Convert this OCR text into JSON fields for PARAKH. Never invent data. For every field use {value,raw,confidence,evidence,status}; status is found, absent, unreadable or ambiguous. Return only JSON. Fields: " + OCR_FIELDS.join(", ") + ". Also return otherDeclarations, rawText, warnings, unreadableFields, needsReview. OCR text:\n\n" + rawText;
-  const response = await puter.ai.chat(prompt, { model: "gpt-5.6-luna", temperature: 0, max_tokens: 5000 });
+  const response = await puter.ai.chat(prompt, { model: "gpt-5.6-luna", max_tokens: 5000 });
   return normalizePuterOcr(parsePuterJson(response?.message?.content || response?.content || response?.text || ""), rawText);
 }
 function Scan() {
