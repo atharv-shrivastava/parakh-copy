@@ -75,3 +75,23 @@ test('Rule 6(11) returns unable to verify when unit-sale-price evidence is missi
   const r = evaluateInspectionComplete(request({ evidence: [ev('declarations.netQuantity', '500 g', 500), ev('declarations.netQuantityUnit', 'g')] }));
   assert.equal(r.findings.find(f => f.ruleCode === 'PCR-R6-11-UNIT-SALE-PRICE')?.status, 'UNABLE_TO_VERIFY');
 });
+test('Rule 6(10A) is not applied before 1 July 2027', () => {
+  const r = evaluateInspectionComplete(request({ inspectionDate: '2027-06-30', context: 'ecommerce_listing', productMetadata: { commodityCategory: 'electronics', packageType: 'retail', isImported: true }, evidence: [ev('ecommerce.countryOfOriginFilter', false)] }));
+  assert.equal(r.findings.some(f => f.ruleCode === 'PCR-R6-10A-COUNTRY-ORIGIN-FILTER'), false);
+});
+test('Rule 6(10A) passes an imported e-commerce listing with the required filter', () => {
+  const r = evaluateInspectionComplete(request({ inspectionDate: '2027-07-01', context: 'ecommerce_listing', productMetadata: { commodityCategory: 'electronics', packageType: 'retail', isImported: true }, evidence: [ev('ecommerce.countryOfOriginFilter', true)] }));
+  assert.equal(r.findings.find(f => f.ruleCode === 'PCR-R6-10A-COUNTRY-ORIGIN-FILTER')?.status, 'PASS');
+});
+test('Rule 6(10A) flags an imported e-commerce listing without the required filter', () => {
+  const r = evaluateInspectionComplete(request({ inspectionDate: '2027-07-01', context: 'ecommerce_listing', productMetadata: { commodityCategory: 'electronics', packageType: 'retail', isImported: true }, evidence: [ev('ecommerce.countryOfOriginFilter', false)] }));
+  assert.equal(r.findings.find(f => f.ruleCode === 'PCR-R6-10A-COUNTRY-ORIGIN-FILTER')?.status, 'VIOLATION');
+});
+test('Rule 6(10A) does not apply to a domestic e-commerce product', () => {
+  const r = evaluateInspectionComplete(request({ inspectionDate: '2027-07-01', context: 'ecommerce_listing', productMetadata: { commodityCategory: 'biscuits', packageType: 'retail', isImported: false }, evidence: [] }));
+  assert.equal(r.findings.some(f => f.ruleCode === 'PCR-R6-10A-COUNTRY-ORIGIN-FILTER'), false);
+});
+test('Rule 6(10A) refuses to invent imported status', () => {
+  const r = evaluateInspectionComplete(request({ inspectionDate: '2027-07-01', context: 'ecommerce_listing', productMetadata: { commodityCategory: 'electronics', packageType: 'retail' }, evidence: [] }));
+  assert.equal(r.findings.find(f => f.ruleCode === 'PCR-R6-10A-COUNTRY-ORIGIN-FILTER')?.status, 'UNABLE_TO_VERIFY');
+});
