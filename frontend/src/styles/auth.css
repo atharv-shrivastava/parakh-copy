@@ -1,0 +1,130 @@
+:root {
+  --auth-bg: #f4f7fb;
+  --auth-card: #ffffff;
+  --auth-text: #172033;
+  --auth-muted: #667085;
+  --auth-border: #d9dee8;
+  --auth-primary: #1f5eff;
+  --auth-primary-hover: #174bd0;
+  --auth-danger-bg: #fff1f0;
+  --auth-danger-text: #b42318;
+}
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--auth-bg);
+  box-sizing: border-box;
+}
+
+.auth-card {
+  width: min(100%, 430px);
+  padding: 32px;
+  border: 1px solid var(--auth-border);
+  border-radius: 16px;
+  background: var(--auth-card);
+  box-shadow: 0 12px 35px rgba(16, 24, 40, 0.08);
+  color: var(--auth-text);
+  box-sizing: border-box;
+}
+
+.auth-card .eyebrow {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.auth-card h1 {
+  margin: 0 0 8px;
+  font-size: 30px;
+  line-height: 1.2;
+}
+
+.auth-card > p:not(.eyebrow) {
+  margin: 0 0 22px;
+  color: var(--auth-muted);
+}
+
+.auth-card form {
+  display: grid;
+  gap: 16px;
+}
+
+.auth-card label {
+  display: grid;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.auth-card input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--auth-border);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--auth-text);
+  font: inherit;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.auth-card input:focus {
+  border-color: var(--auth-primary);
+  box-shadow: 0 0 0 3px rgba(31, 94, 255, 0.12);
+}
+
+.primary-button {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--auth-primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: var(--auth-primary-hover);
+}
+
+.primary-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.status-message {
+  padding: 10px 12px;
+  border: 1px solid #fecdca;
+  border-radius: 8px;
+  background: var(--auth-danger-bg);
+  color: var(--auth-danger-text);
+  font-size: 14px;
+}
+
+.auth-card a {
+  color: var(--auth-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.auth-card a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 520px) {
+  .auth-page {
+    padding: 16px;
+  }
+
+  .auth-card {
+    padding: 24px;
+  }
+}
