@@ -3,6 +3,7 @@ import cors from "cors";
 import categoriesRouter from "./routes/categories.js";
 import productsRouter from "./routes/products.js";
 import authRouter from "./routes/auth.js";
+import shopsRouter from "./routes/shops.js";
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -13,6 +14,7 @@ app.get("/health", (_req, res) => res.json({ status: "ok", service: "parakh-back
 app.use("/api/auth", authRouter);
 app.use("/api/categories", categoriesRouter);
 app.use("/api/products", productsRouter);
+app.use("/api/shops", shopsRouter);
 
 const PORT = Number(process.env.PORT || 5000);
 app.listen(PORT, () => console.log(`PARAKH backend running on http://localhost:${PORT}`));
