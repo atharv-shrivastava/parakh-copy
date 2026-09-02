@@ -49,6 +49,8 @@ function Reports() {
       p.category,
     ].filter(Boolean).map((x) => x.name).join(" → ");
     const images = parseImages(p.imageUrls, p.imageUrl);
+    let stored = null; try { stored = p.ocrData ? (typeof p.ocrData === "string" ? JSON.parse(p.ocrData) : p.ocrData) : null; } catch { stored = null; }
+    const compliance = stored?.compliance;
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>PARAKH Report - ${p.productName}</title><style>
       body{font-family:Arial,sans-serif;padding:32px;color:#111;max-width:900px;margin:auto}
       h1{margin:0 0 6px}.muted{color:#666}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:24px 0}.box{border:1px solid #ddd;padding:12px;border-radius:8px}
