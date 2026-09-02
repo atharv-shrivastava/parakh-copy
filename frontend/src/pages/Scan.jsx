@@ -194,7 +194,7 @@ function Scan() {
         clearTimeout(timeout);
       }
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || "Inspection analysis failed");
+      if (!response.ok) {\n        const errorMessage = typeof data.error === "string" ? data.error : data.error?.message || data.error?.code || "Inspection analysis failed";\n        throw new Error(errorMessage);\n      }
       setOcr(data.ocr);
       setCompliance(data.compliance || null);
       setForm((current) => ({
