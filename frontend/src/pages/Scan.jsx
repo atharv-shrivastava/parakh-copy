@@ -78,7 +78,7 @@ function Scan() {
   }, [images]);
 
   const flatCategories = flattenCategories(categories);
-  const finalCategories = flatCategories.filter((c) => Boolean(c.isFinalProductType) || !(c.children?.length));
+  const finalCategories = flatCategories.filter((c) => Boolean(c.isFinalProductType));
   const selectedCategory = flatCategories.find((c) => c.id === selectedCategoryId);
   const suggestedCategory = useMemo(() => {
     const text = `${ocr?.rawText || ""} ${fieldValue(ocr, "productName")} ${fieldValue(ocr, "brandName")}`.toLowerCase();
