@@ -35,6 +35,7 @@ function Scan() {
   const [categories, setCategories] = useState([]);
   const [images, setImages] = useState([]);
   const [ocr, setOcr] = useState(null);
+  const [compliance, setCompliance] = useState(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [form, setForm] = useState(emptyForm);
   const [analyzing, setAnalyzing] = useState(false);
@@ -73,6 +74,7 @@ function Scan() {
     }
     setImages(selected.map((file) => ({ file, url: URL.createObjectURL(file) })));
     setOcr(null);
+    setCompliance(null);
     setMessage(`${selected.length} image${selected.length > 1 ? "s" : ""} ready for analysis.`);
   }
 
@@ -104,6 +106,7 @@ function Scan() {
       if (!response.ok) throw new Error(data.error || "OCR analysis failed");
 
       setOcr(data.ocr);
+      setCompliance(data.compliance || null);
       setForm((current) => ({
         ...current,
         brandName: fieldValue(data.ocr, "brandName") || fieldValue(data.ocr, "manufacturer"),
@@ -144,9 +147,8 @@ function Scan() {
     setMessage("");
     try {
       const imageUrls = await Promise.all(images.map(({ file }) => fileToDataUrl(file)));
-      const complianceStatus = ocr?.needsReview || ocr?.warnings?.length ? "NEEDS_REVIEW" : "OKAY";
-      const rulesStatus = ocr?.compliance?.overallStatus;
-      const status = rulesStatus === "FAIL" ? "VIOLATION" : rulesStatus === "PASS" ? complianceStatus : "NEEDS_REVIEW";
+      const rulesStatus = compliance?.overallStatus;
+      const status = rulesStatus === "FAIL" ? "VIOLATION" : ocr?.needsReview ? "NEEDS_REVIEW" : rulesStatus === "PASS" ? "OKAY" : "NEEDS_REVIEW";
       const reason = rulesStatus === "FAIL" ? "Legal Metrology Rules Engine reported one or more violations." : ocr?.needsReview ? "OCR contains low-confidence or unreadable fields and requires inspector review." : "Automated OCR and rule screening passed; final legal verification remains with the inspector.";
 
       const response = await fetch(`${API_URL}/products`, {
@@ -200,10 +202,11 @@ function Scan() {
         <section className="scan-review">
           <div className="section-heading"><div><h2>OCR extraction & compliance</h2><p>Every extracted value remains editable so an inspector can correct OCR mistakes.</p></div></div>
           <div className="ocr-status-grid">
-            <div><strong>Rules Engine</strong><span>{ocr.compliance?.overallStatus || "Not evaluated"}</span></div>
+            <div><strong>Rules Engine</strong><span>{compliance?.overallStatus || "Not evaluated"}</span></div>
             <div><strong>OCR review</strong><span>{ocr.needsReview ? "Review required" : "Confident"}</span></div>
             <div><strong>Unreadable fields</strong><span>{ocr.unreadableFields?.length || 0}</span></div>
           </div>
+          {compliance?.summary && <div className="ocr-summary">Rules evaluated: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}
           {ocr.warnings?.length > 0 && <div className="status-message">{ocr.warnings.join(" ")}</div>}
           <label>OCR raw text<textarea value={ocr.rawText || ""} onChange={(event) => setOcr((current) => ({ ...current, rawText: event.target.value }))} /></label>
           {suggestedCategory && <div className="scan-suggestion"><span>Suggested final type: <strong>{suggestedCategory.path.map((item) => item.name).join(" → ")}</strong></span><button type="button" className="secondary-button" onClick={applySuggestion}>Use suggestion</button></div>}
@@ -228,7 +231,6 @@ function Scan() {
       )}
 
       {message && <div className="status-message">{message}</div>}
-
       <section className="scan-info"><h2>PARAKH inspection coverage</h2><div className="check-grid"><div className="check-item"><strong>Mandatory declarations</strong><span>Manufacturer/packer/importer, product identity, quantity, MRP, dates and consumer-care evidence.</span></div><div className="check-item"><strong>Visual evidence</strong><span>Up to four package photographs are retained with the product record.</span></div><div className="check-item"><strong>Rule evaluation</strong><span>OCR evidence is forwarded to the standalone Legal Metrology Rules Engine.</span></div><div className="check-item"><strong>Inspection history</strong><span>Saved products appear in the searchable product repository and history.</span></div></div></section>
       <Link className="back-link" to="/history">View inspection history →</Link>
     </div>
