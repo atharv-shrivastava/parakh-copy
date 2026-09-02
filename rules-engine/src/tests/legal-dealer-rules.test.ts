@@ -95,3 +95,32 @@ test('Rule 6(10A) refuses to invent imported status', () => {
   const r = evaluateInspectionComplete(request({ inspectionDate: '2027-07-01', context: 'ecommerce_listing', productMetadata: { commodityCategory: 'electronics', packageType: 'retail' }, evidence: [] }));
   assert.equal(r.findings.find(f => f.ruleCode === 'PCR-R6-10A-COUNTRY-ORIGIN-FILTER')?.status, 'UNABLE_TO_VERIFY');
 });
+
+test('Rule 6(1)(a) passes when manufacturer/packer/importer declaration evidence exists', () => {
+  const r = evaluateInspectionComplete(request({ evidence: [ev('declarations.manufacturerNameAddress', 'ABC Foods, Bhopal, Madhya Pradesh')] }));
+  assert.equal(r.findings.find(f => f.ruleCode === 'PCR-R6-1-A')?.status, 'PASS');
+});
+test('Rule 6(1)(a) flags an explicitly missing manufacturer declaration', () => {
+  const r = evaluateInspectionComplete(request({ declarations: { manufacturerPackerImporter: false } as never }));
+  assert.equal(r.findings.find(f => f.ruleCode === 'PCR-R6-1-A')?.status, 'VIOLATION');
+});
+test('Rule 6(1)(b) does not treat missing product-name evidence as proof of absence', () => {
+  const r = evaluateInspectionComplete(request());
+  assert.equal(r.findings.find(f => f.ruleCode === 'PCR-R6-1-B')?.status, 'UNABLE_TO_VERIFY');
+});
+test('Rule 6(1)(c) passes net quantity evidence', () => {
+  const r = evaluateInspectionComplete(request({ evidence: [ev('declarations.netQuantity', '500 g', 500)] }));
+  assert.equal(r.findings.find(f => f.ruleCode === 'PCR-R6-1-C')?.status, 'PASS');
+});
+test('Rule 6(1)(e) passes retail sale price evidence', () => {
+  const r = evaluateInspectionComplete(request({ evidence: [ev('declarations.retailSalePrice', '₹100', 100)] }));
+  assert.equal(r.findings.find(f => f.ruleCode === 'PCR-R6-1-E')?.status, 'PASS');
+});
+test('Rule 6(1)(f) remains unverifiable when relevance of dimensions is unknown', () => {
+  const r = evaluateInspectionComplete(request());
+  assert.equal(r.findings.find(f => f.ruleCode === 'PCR-R6-1-F')?.status, 'UNABLE_TO_VERIFY');
+});
+test('Rule 6(2) passes consumer complaint contact evidence', () => {
+  const r = evaluateInspectionComplete(request({ evidence: [ev('declarations.consumerCare', 'ABC Foods, 1800-000-000, care@example.test')] }));
+  assert.equal(r.findings.find(f => f.ruleCode === 'PCR-R6-2')?.status, 'PASS');
+});
