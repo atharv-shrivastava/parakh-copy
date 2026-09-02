@@ -1,14 +1,26 @@
 .scan-page { max-width: 1000px; }
 .scan-area { padding: 48px 32px; text-align: center; background: #fff; border: 2px dashed #d1d5db; border-radius: 16px; margin-bottom: 32px; }
-.scan-icon { width: 56px; height: 56px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: #eff6ff; color: #2563eb; font-size: 32px; }
+.scan-icon { width: 56px; height: 56px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: #eff6ff; color: #2563eb; font-size: 30px; }
 .scan-area h2 { margin: 0 0 8px; }
-.scan-area p { max-width: 520px; margin: 0 auto; color: #6b7280; line-height: 1.6; }
-.scan-file-button { display: inline-block; margin-top: 24px; }
-.scan-review { padding: 24px; background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; }
+.scan-area p { max-width: 650px; margin: 0 auto; color: #6b7280; line-height: 1.6; }
+.scan-upload-actions { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+.scan-file-button { display: inline-block; }
+.scan-limit { margin-top: 12px !important; font-size: 13px; }
+.scan-review { padding: 24px; background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; margin-bottom: 20px; }
 .scan-review label { display: grid; gap: 8px; margin-top: 18px; font-size: 13px; font-weight: 600; }
-.scan-review textarea, .scan-review select { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font: inherit; background: #fff; }
+.scan-review input, .scan-review textarea, .scan-review select { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font: inherit; background: #fff; }
 .scan-review textarea { min-height: 140px; resize: vertical; }
-.scan-suggestion { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding: 12px; border-radius: 8px; background: #f8fafc; }
+.scan-suggestion { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; padding: 12px; border-radius: 8px; background: #f8fafc; }
+.scan-image-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 18px 0; }
+.scan-image-card { overflow: hidden; border: 1px solid #e5e7eb; border-radius: 10px; background: #f8fafc; }
+.scan-image-card img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.scan-image-card button { margin: 8px; border: 0; border-radius: 6px; padding: 6px 9px; cursor: pointer; }
+.scan-image-card span { display: block; padding: 0 8px 10px; font-size: 12px; color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ocr-status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 18px 0; }
+.ocr-status-grid div { padding: 14px; border: 1px solid #e5e7eb; border-radius: 9px; background: #f8fafc; }
+.ocr-status-grid strong, .ocr-status-grid span { display: block; }
+.ocr-status-grid span { margin-top: 5px; color: #6b7280; }
+.ocr-summary { margin: 12px 0; color: #4b5563; font-size: 14px; }
 .scan-info { margin-top: 32px; }
 .check-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .check-item { padding: 20px; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; }
@@ -17,5 +29,7 @@
 .primary-button, .secondary-button { padding: 11px 18px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
 .primary-button { border: 1px solid #2563eb; background: #2563eb; color: #fff; }
 .secondary-button { border: 1px solid #d1d5db; background: #fff; color: #374151; }
-@media (max-width: 800px) { .check-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 600px) { .check-grid { grid-template-columns: 1fr; } .scan-suggestion { flex-direction: column; align-items: stretch; } }
+.primary-button:disabled { opacity: .6; cursor: not-allowed; }
+.status-message { margin-top: 18px; padding: 12px 14px; border-radius: 8px; background: #eff6ff; border: 1px solid #bfdbfe; }
+@media (max-width: 800px) { .check-grid { grid-template-columns: repeat(2, 1fr); } .scan-image-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 600px) { .check-grid, .ocr-status-grid { grid-template-columns: 1fr; } .scan-image-grid { grid-template-columns: repeat(2, 1fr); } .scan-suggestion { flex-direction: column; align-items: stretch; } }
