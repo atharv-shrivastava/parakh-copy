@@ -1,102 +1,14 @@
 import express from "express";
 import prisma from "../lib/prisma.js";
 import { authenticate } from "../middleware/auth.js";
-
-const router = express.Router();
-router.use(authenticate);
-
-function parseJson(value, fallback) { try { return value ? JSON.parse(value) : fallback; } catch { return fallback; } }
+const router = express.Router(); router.use(authenticate);
 function toNumber(value) { const n = Number.parseFloat(String(value ?? "").replace(/[^0-9.]/g, "")); return Number.isFinite(n) ? n : null; }
-function verifyProduct({ brandName, productName, netQuantity, unit, mrp }) {
-  const missing = [];
-  if (!brandName?.trim()) missing.push("manufacturer/brand information");
-  if (!productName?.trim()) missing.push("product name");
-  if (!netQuantity?.trim()) missing.push("net quantity");
-  if (!unit?.trim()) missing.push("quantity unit");
-  if (mrp === undefined || mrp === null || mrp === "" || Number.isNaN(Number(mrp))) missing.push("MRP");
-  return missing.length ? { status: "VIOLATION", reason: `Missing declaration(s) requiring inspection: ${missing.join(", ")}.` } : { status: "OKAY", reason: "Automated OCR and inspection assessment completed; final legal verification remains with the inspector." };
-}
-
-function productVisibility(req) {
-  return req.user.role === "ADMIN" ? {} : { ownerId: req.user.id };
-}
-
-async function categoryVisible(categoryId, userId) {
-  return prisma.category.findFirst({ where: { id: categoryId, OR: [{ isGlobal: true }, { ownerId: userId }] }, include: { children: true } });
-}
-
-router.get("/history", async (req, res) => {
-  try {
-    const products = await prisma.product.findMany({
-      where: productVisibility(req),
-      include: { owner: { select: { id: true, name: true } }, category: { include: { parent: { include: { parent: { include: { parent: true } } } } } }, inspections: { include: { shop: true, worker: { select: { name: true } } }, orderBy: { inspectedAt: "desc" } } },
-      orderBy: { createdAt: "desc" },
-    });
-    res.json(products);
-  } catch (error) { console.error(error); res.status(500).json({ error: "Failed to fetch inspection history" }); }
-});
-
-router.get("/", async (req, res) => {
-  try {
-    const { categoryId, status = "ALL", brandName, productName, unit, minQuantity, maxQuantity, shopName, minMrp, maxMrp } = req.query;
-    const visibility = productVisibility(req);
-    const where = {
-      ...visibility,
-      ...(categoryId ? { categoryId } : {}),
-      ...(status !== "ALL" ? { complianceStatus: status } : {}),
-      ...(brandName ? { brandName: { contains: brandName, mode: "insensitive" } } : {}),
-      ...(productName ? { productName: { contains: productName, mode: "insensitive" } } : {}),
-      ...(unit ? { unit: { equals: unit, mode: "insensitive" } } : {}),
-      ...(minMrp || maxMrp ? { mrp: { ...(minMrp ? { gte: Number(minMrp) } : {}), ...(maxMrp ? { lte: Number(maxMrp) } : {}) } } : {}),
-      ...(shopName ? { inspections: { some: { shop: { name: { contains: shopName, mode: "insensitive" } } } } } : {}),
-    };
-    const products = await prisma.product.findMany({ where, include: { owner: { select: { name: true } }, category: true, inspections: { include: { shop: true, worker: { select: { name: true } } }, orderBy: { inspectedAt: "desc" }, take: 1 } }, orderBy: { createdAt: "desc" } });
-    const minQ = minQuantity ? Number(minQuantity) : null;
-    const maxQ = maxQuantity ? Number(maxQuantity) : null;
-    const filtered = products.filter((product) => { const q = toNumber(product.netQuantity); return (minQ === null || (q !== null && q >= minQ)) && (maxQ === null || (q !== null && q <= maxQ)); });
-    res.json(filtered);
-  } catch (error) { console.error(error); res.status(500).json({ error: "Failed to fetch products" }); }
-});
-
-router.get("/:id", async (req, res) => {
-  try {
-    const product = await prisma.product.findFirst({ where: { id: req.params.id, ...productVisibility(req) }, include: { owner: { select: { id: true, name: true, email: true } }, category: { include: { parent: { include: { parent: { include: { parent: true } } } } } }, inspections: { include: { shop: true, worker: { select: { name: true } } }, orderBy: { inspectedAt: "desc" } } } });
-    if (!product) return res.status(404).json({ error: "Product not found" });
-    res.json(product);
-  } catch (error) { console.error(error); res.status(500).json({ error: "Failed to fetch product" }); }
-});
-
-router.post("/", async (req, res) => {
-  try {
-    const { categoryId, brandName, productName, description, netQuantity, unit, mrp, barcode, imageUrl, imageUrls, ocrData, complianceStatus, violationReason, shopName, shopAddress, shopCity, shopState, inspectionDate, notes } = req.body;
-    if (!categoryId || !productName?.trim() || !shopName?.trim()) return res.status(400).json({ error: "Category, product name and shop name are required" });
-    const category = await categoryVisible(categoryId, req.user.id);
-    if (!category) return res.status(404).json({ error: "Category not found" });
-    if (!category.isFinal) return res.status(400).json({ error: "Only a final category can contain registered products" });
-
-    const verification = verifyProduct({ brandName, productName, netQuantity, unit, mrp });
-    const acceptedStatuses = new Set(["OKAY", "VIOLATION", "NEEDS_REVIEW"]);
-    const finalStatus = acceptedStatuses.has(complianceStatus) ? complianceStatus : verification.status;
-    const finalReason = typeof violationReason === "string" && violationReason.trim() ? violationReason.trim() : verification.reason;
-    const normalizedImageUrls = Array.isArray(imageUrls) ? JSON.stringify(imageUrls) : imageUrls || imageUrl || null;
-    const normalizedOcrData = ocrData ? JSON.stringify(ocrData) : null;
-    const inspectedAt = inspectionDate ? new Date(inspectionDate) : new Date();
-    if (Number.isNaN(inspectedAt.getTime())) return res.status(400).json({ error: "Invalid inspection date" });
-
-    const product = await prisma.product.create({ data: { categoryId, ownerId: req.user.id, brandName: brandName?.trim() || null, productName: productName.trim(), description: description?.trim() || null, ocrData: normalizedOcrData, netQuantity: netQuantity?.trim() || null, unit: unit?.trim() || null, mrp: mrp === "" || mrp === undefined ? null : Number(mrp), barcode: barcode?.trim() || null, imageUrl: imageUrl?.trim() || null, imageUrls: normalizedImageUrls, complianceStatus: finalStatus, violationReason: finalReason }, include: { category: true } });
-    const shop = await prisma.shop.create({ data: { name: shopName.trim(), address: shopAddress?.trim() || null, city: shopCity?.trim() || null, state: shopState?.trim() || null } });
-    await prisma.inspection.create({ data: { status: finalStatus, notes: notes?.trim() || finalReason, inspectedAt, workerId: req.user.id, shopId: shop.id, productId: product.id } });
-    res.status(201).json({ ...product, shop });
-  } catch (error) { console.error(error); res.status(500).json({ error: "Failed to register product" }); }
-});
-
-router.delete("/:id", async (req, res) => {
-  try {
-    const product = await prisma.product.findFirst({ where: { id: req.params.id, ...productVisibility(req) }, include: { inspections: true } });
-    if (!product) return res.status(404).json({ error: "Product not found" });
-    await prisma.$transaction(async (tx) => { await tx.inspection.deleteMany({ where: { productId: product.id } }); await tx.product.delete({ where: { id: product.id } }); });
-    res.json({ message: "Product deleted successfully" });
-  } catch (error) { console.error(error); res.status(500).json({ error: "Failed to delete product" }); }
-});
-
+function verifyProduct({ brandName, productName, netQuantity, unit, mrp }) { const missing = []; if (!brandName?.trim()) missing.push("manufacturer/brand information"); if (!productName?.trim()) missing.push("product name"); if (!netQuantity?.trim()) missing.push("net quantity"); if (!unit?.trim()) missing.push("quantity unit"); if (mrp === undefined || mrp === null || mrp === "" || Number.isNaN(Number(mrp))) missing.push("MRP"); return missing.length ? { status: "VIOLATION", reason: `Missing declaration(s) requiring inspection: ${missing.join(", ")}.` } : { status: "OKAY", reason: "Automated OCR and Rules Engine assessment completed; final legal verification remains with the inspector." }; }
+function visibility(req) { return req.user.role === "ADMIN" ? {} : { ownerId: req.user.id }; }
+async function visibleCategory(id, userId) { return prisma.category.findFirst({ where: { id, OR: [{ isSystem: true }, { ownerId: userId }] }, include: { children: true } }); }
+router.get("/history", async (req, res) => { try { const data = await prisma.product.findMany({ where: visibility(req), include: { owner: { select: { id: true, name: true } }, category: { include: { parent: { include: { parent: { include: { parent: true } } } } } }, inspections: { include: { shop: true, worker: { select: { name: true } } }, orderBy: { inspectedAt: "desc" } } }, orderBy: { createdAt: "desc" } }); res.json(data); } catch (e) { console.error(e); res.status(500).json({ error: "Failed to fetch inspection history" }); } });
+router.get("/", async (req, res) => { try { const { categoryId, status = "ALL", brandName, productName, unit, minQuantity, maxQuantity, shopName, minMrp, maxMrp } = req.query; const where = { ...visibility(req), ...(categoryId ? { categoryId } : {}), ...(status !== "ALL" ? { complianceStatus: status } : {}), ...(brandName ? { brandName: { contains: brandName, mode: "insensitive" } } : {}), ...(productName ? { productName: { contains: productName, mode: "insensitive" } } : {}), ...(unit ? { unit: { equals: unit, mode: "insensitive" } } : {}), ...(minMrp || maxMrp ? { mrp: { ...(minMrp ? { gte: Number(minMrp) } : {}), ...(maxMrp ? { lte: Number(maxMrp) } : {}) } } : {}), ...(shopName ? { inspections: { some: { shop: { name: { contains: shopName, mode: "insensitive" } } } } } : {}) }; const data = await prisma.product.findMany({ where, include: { owner: { select: { name: true } }, category: true, inspections: { include: { shop: true, worker: { select: { name: true } } }, orderBy: { inspectedAt: "desc" }, take: 1 } }, orderBy: { createdAt: "desc" } }); const minQ = minQuantity ? Number(minQuantity) : null; const maxQ = maxQuantity ? Number(maxQuantity) : null; res.json(data.filter((p) => { const q = toNumber(p.netQuantity); return (minQ === null || (q !== null && q >= minQ)) && (maxQ === null || (q !== null && q <= maxQ)); })); } catch (e) { console.error(e); res.status(500).json({ error: "Failed to fetch products" }); } });
+router.get("/:id", async (req, res) => { try { const product = await prisma.product.findFirst({ where: { id: req.params.id, ...visibility(req) }, include: { owner: { select: { id: true, name: true, email: true } }, category: { include: { parent: { include: { parent: { include: { parent: true } } } } } }, inspections: { include: { shop: true, worker: { select: { name: true } } }, orderBy: { inspectedAt: "desc" } } } }); if (!product) return res.status(404).json({ error: "Product not found" }); res.json(product); } catch (e) { console.error(e); res.status(500).json({ error: "Failed to fetch product" }); } });
+router.post("/", async (req, res) => { try { const { categoryId, brandName, productName, description, netQuantity, unit, mrp, barcode, imageUrl, imageUrls, ocrData, complianceStatus, violationReason, shopName, shopAddress, shopCity, shopState, inspectionDate, notes } = req.body; if (!categoryId || !productName?.trim() || !shopName?.trim()) return res.status(400).json({ error: "Category, product name and shop name are required" }); const category = await visibleCategory(categoryId, req.user.id); if (!category) return res.status(404).json({ error: "Category not found" }); if (!category.isFinalProductType) return res.status(400).json({ error: "Only final categories can contain registered products" }); const verification = verifyProduct({ brandName, productName, netQuantity, unit, mrp }); const accepted = new Set(["OKAY", "VIOLATION", "NEEDS_REVIEW"]); const finalStatus = accepted.has(complianceStatus) ? complianceStatus : verification.status; const reason = typeof violationReason === "string" && violationReason.trim() ? violationReason.trim() : verification.reason; const inspectedAt = inspectionDate ? new Date(inspectionDate) : new Date(); if (Number.isNaN(inspectedAt.getTime())) return res.status(400).json({ error: "Invalid inspection date" }); const product = await prisma.product.create({ data: { categoryId, ownerId: req.user.id, brandName: brandName?.trim() || null, productName: productName.trim(), description: description?.trim() || null, ocrData: ocrData ? JSON.stringify(ocrData) : null, netQuantity: netQuantity?.trim() || null, unit: unit?.trim() || null, mrp: mrp === "" || mrp === undefined ? null : Number(mrp), barcode: barcode?.trim() || null, imageUrl: imageUrl?.trim() || null, imageUrls: Array.isArray(imageUrls) ? imageUrls : imageUrls ? JSON.parse(imageUrls) : [] , complianceStatus: finalStatus, violationReason: reason } }); const shop = await prisma.shop.create({ data: { name: shopName.trim(), address: shopAddress?.trim() || null, city: shopCity?.trim() || null, state: shopState?.trim() || null, ownerId: req.user.id } }); await prisma.inspection.create({ data: { status: finalStatus, notes: notes?.trim() || reason, inspectedAt, workerId: req.user.id, shopId: shop.id, productId: product.id } }); res.status(201).json({ ...product, shop }); } catch (e) { console.error(e); res.status(500).json({ error: "Failed to register product" }); } });
+router.delete("/:id", async (req, res) => { try { const product = await prisma.product.findFirst({ where: { id: req.params.id, ...visibility(req) } }); if (!product) return res.status(404).json({ error: "Product not found" }); await prisma.$transaction(async (tx) => { await tx.inspection.deleteMany({ where: { productId: product.id } }); await tx.product.delete({ where: { id: product.id } }); }); res.json({ message: "Product deleted successfully" }); } catch (e) { console.error(e); res.status(500).json({ error: "Failed to delete product" }); } });
 export default router;
