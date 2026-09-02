@@ -107,7 +107,6 @@ function Scan() {
     setOcr(null);
     setCompliance(null);
     setComplianceError(null);
-    setComplianceError(null);
     setMessage("Images ready for analysis.");
   }
 
