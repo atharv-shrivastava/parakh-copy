@@ -31,5 +31,12 @@
 .secondary-button { border: 1px solid #d1d5db; background: #fff; color: #374151; }
 .primary-button:disabled { opacity: .6; cursor: not-allowed; }
 .status-message { margin-top: 18px; padding: 12px 14px; border-radius: 8px; background: #eff6ff; border: 1px solid #bfdbfe; }
+.camera-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, .75); box-sizing: border-box; }
+.camera-modal { width: min(900px, 100%); background: #fff; border-radius: 16px; padding: 18px; box-sizing: border-box; }
+.camera-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.camera-header h2 { margin: 0; }
+.camera-header button { border: 0; background: transparent; cursor: pointer; font-weight: 600; }
+.camera-video { display: block; width: 100%; max-height: 68vh; object-fit: contain; border-radius: 12px; background: #000; }
+.camera-actions { display: flex; justify-content: center; gap: 12px; margin-top: 14px; }
 @media (max-width: 800px) { .check-grid { grid-template-columns: repeat(2, 1fr); } .scan-image-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 600px) { .check-grid, .ocr-status-grid { grid-template-columns: 1fr; } .scan-image-grid { grid-template-columns: repeat(2, 1fr); } .scan-suggestion { flex-direction: column; align-items: stretch; } }
+@media (max-width: 600px) { .check-grid, .ocr-status-grid { grid-template-columns: 1fr; } .scan-image-grid { grid-template-columns: repeat(2, 1fr); } .scan-suggestion { flex-direction: column; align-items: stretch; } .camera-actions { flex-direction: column; } }
