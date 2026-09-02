@@ -1,0 +1,6 @@
+.profile-page { width:100%; max-width:760px; }
+.profile-card { display:grid; gap:16px; padding:24px; background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:0 2px 8px rgba(0,0,0,.04); }
+.profile-card > div { padding:14px; border:1px solid #eef2f7; border-radius:10px; }
+.profile-card span { display:block; color:#6b7280; font-size:12px; margin-bottom:5px; }
+.profile-card strong { font-size:16px; overflow-wrap:anywhere; }
+.profile-card button { width:max-content; padding:11px 16px; border:0; border-radius:8px; background:#111827; color:#fff; font-weight:600; cursor:pointer; }
