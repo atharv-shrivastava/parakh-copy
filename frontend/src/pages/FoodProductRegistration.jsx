@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { apiFetch } from "../lib/auth";
 import "../styles/products.css";
 
 const API_URL = "http://localhost:5000/api";
@@ -31,13 +32,15 @@ function FoodProductRegistration() {
     setMessage("");
 
     try {
-      const response = await fetch(`${API_URL}/categories`, {
+      const response = await apiFetch(`${API_URL}/categories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: trimmedName,
           slug: createSlug(trimmedName),
           parentId: null,
+          isFinal: false,
+          global: false,
         }),
       });
 
