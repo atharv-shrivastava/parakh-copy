@@ -6,6 +6,8 @@ import "../styles/scan.css";
 const API_URL = "http://localhost:5000/api";
 const OCR_URL = "http://localhost:8080/api/ocr/analyze-and-evaluate";
 const MAX_IMAGES = 4;
+const MAX_PUTER_IMAGE_SIZE = 10 * 1024 * 1024;
+const OCR_FIELDS = ["productName","brandName","manufacturer","manufacturerAddress","packer","packerAddress","importer","importerAddress","netQuantity","unit","mrp","currency","dateOfManufacture","dateOfPacking","bestBefore","expiryDate","batchNumber","consumerCarePhone","consumerCareEmail","countryOfOrigin","fssaiLicenseNumber","barcode"];
 const emptyForm = { brandName: "", productName: "", description: "", netQuantity: "", unit: "", mrp: "", barcode: "", shopName: "", shopAddress: "", shopCity: "", shopState: "", notes: "" };
 
 function flattenCategories(nodes, path = []) {
