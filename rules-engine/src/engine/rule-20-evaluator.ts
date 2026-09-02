@@ -1,9 +1,17 @@
 import type { EvaluationStatus, Finding, InspectionRequest } from '../../domain/types.js';
 import { SOURCES } from '../legal/sources.js';
 
-/** Rule 20: enforcement action after completion of a manufacturer/packer inspection. */
+type Rule20InspectionResults = {
+  correctedAverageNetQuantity?: number;
+  declaredNetQuantity?: number;
+  packagesAboveMpeBelowTwiceMpe?: number;
+  maxPackagesAboveMpeBelowTwiceMpe?: number;
+  anyPackageAboveTwiceMpe?: boolean;
+  mandatoryDeclarationsComplete?: boolean;
+};
+
 export function rule20Findings(r: InspectionRequest): Finding[] {
-  const i = r.inspectionResults;
+  const i = (r as InspectionRequest & { inspectionResults?: Rule20InspectionResults }).inspectionResults;
   if (!i) return [];
 
   const correctedAverage = i.correctedAverageNetQuantity;
@@ -15,6 +23,7 @@ export function rule20Findings(r: InspectionRequest): Finding[] {
 
   const valuesPresent = [correctedAverage, declared, excessMpeCount, maxAllowed, anyAboveTwiceMpe, declarationsComplete]
     .every(v => v !== undefined);
+
   if (!valuesPresent) {
     return [{
       findingId: 'PCR-R20-UNVERIFIED', ruleId: 'PCR-R20', ruleCode: 'PCR-R20', ruleNumber: '20', ruleVersion: 1,
@@ -26,7 +35,7 @@ export function rule20Findings(r: InspectionRequest): Finding[] {
     }];
   }
 
-  const violation = correctedAverage < declared || excessMpeCount > maxAllowed || anyAboveTwiceMpe === true || declarationsComplete === false;
+  const violation = correctedAverage! < declared! || excessMpeCount! > maxAllowed! || anyAboveTwiceMpe === true || declarationsComplete === false;
   return [{
     findingId: violation ? 'PCR-R20-VIOLATION' : 'PCR-R20-PASS', ruleId: 'PCR-R20', ruleCode: 'PCR-R20', ruleNumber: '20', ruleVersion: 1,
     status: violation ? 'VIOLATION' : 'PASS', field: 'inspectionResults',
