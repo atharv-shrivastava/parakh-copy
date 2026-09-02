@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { EvidenceItem, EvaluationStatus, Finding, InspectionRequest, OverallInspectionResult } from '../../domain/types.js';
 import { evaluateInspection as evaluateBase } from './evaluator.js';
 import { SOURCES } from '../legal/sources.js';
+import { secondScheduleAppliesOn } from '../legal/second-schedule.js';
 
 const SOURCE = SOURCES.PRINCIPAL_2011;
 
@@ -125,16 +126,19 @@ function canonical(v: unknown): string {
 
 export function evaluateInspectionComplete(r: InspectionRequest): OverallInspectionResult {
   const base = evaluateBase(r);
+  const findings = secondScheduleAppliesOn(r.inspectionDate)
+    ? base.findings
+    : base.findings.filter(f => f.ruleCode !== 'PCR-R5-SCHEDULE-II');
   const added = [...rule11(r), ...rule18(r)];
-  const findings = [...base.findings, ...added];
+  const allFindings = [...findings, ...added];
   const summary = {
-    totalRulesEvaluated: findings.length,
-    passed: findings.filter(f => f.status === 'PASS').length,
-    violations: findings.filter(f => f.status === 'VIOLATION').length,
-    unableToVerify: findings.filter(f => f.status === 'UNABLE_TO_VERIFY').length,
-    notApplicable: findings.filter(f => f.status === 'NOT_APPLICABLE').length
+    totalRulesEvaluated: allFindings.length,
+    passed: allFindings.filter(f => f.status === 'PASS').length,
+    violations: allFindings.filter(f => f.status === 'VIOLATION').length,
+    unableToVerify: allFindings.filter(f => f.status === 'UNABLE_TO_VERIFY').length,
+    notApplicable: allFindings.filter(f => f.status === 'NOT_APPLICABLE').length
   };
   const overallStatus: EvaluationStatus = summary.violations > 0 ? 'VIOLATION' : summary.unableToVerify > 0 ? 'UNABLE_TO_VERIFY' : summary.passed > 0 ? 'PASS' : 'NOT_APPLICABLE';
-  const result = { ...base, overallStatus, summary, findings };
+  const result = { ...base, overallStatus, summary, findings: allFindings };
   return { ...result, auditHash: createHash('sha256').update(canonical(result)).digest('hex') };
 }
