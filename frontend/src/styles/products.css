@@ -53,6 +53,17 @@
 .finding-row span { color:#4b5563; font-size:14px; line-height:1.5; }
 .finding-row small { color:#6b7280; }
 .break-anywhere { overflow-wrap:anywhere; word-break:break-word; }
-.products-page .product-actions { display:grid; gap:12px; padding:20px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; }
-.products-page .product-actions button { width:max-content; }
+.products-page .product-actions { display:grid; gap:14px; padding:20px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; }
+.products-page .product-actions > button,
+.products-page .product-actions > a { width:max-content; }
+.private-category-actions { grid-template-columns: 1fr auto auto; align-items:end; }
+.private-category-fields { display:flex; gap:14px; align-items:end; flex-wrap:wrap; }
+.private-category-fields label:first-child { display:grid; gap:7px; min-width:260px; flex:1; }
+.private-category-fields label:first-child span { font-size:13px; font-weight:700; color:#374151; }
+.private-category-fields label:first-child input { box-sizing:border-box; width:100%; padding:11px 12px; border:1px solid #d1d5db; border-radius:8px; background:#fff; font:inherit; outline:none; }
+.private-category-fields label:first-child input:focus { border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.12); }
+.checkbox-field { display:flex; align-items:center; gap:8px; min-height:42px; padding:0 2px; font-size:13px; font-weight:600; color:#374151; white-space:nowrap; }
+.checkbox-field input { width:16px; height:16px; accent-color:#2563eb; }
+.private-category-actions button:disabled { opacity:.55; cursor:not-allowed; }
+@media (max-width: 800px) { .private-category-actions { grid-template-columns:1fr; align-items:stretch; } .private-category-fields { display:grid; grid-template-columns:1fr; } .private-category-fields label:first-child { min-width:0; } .private-category-actions > button, .private-category-actions > a { width:100%; text-align:center; box-sizing:border-box; } }
 @media print { .products-page .product-actions { border:0; padding:0; } .delete-category-button, .secondary-action, .back-link { display:none !important; } }
