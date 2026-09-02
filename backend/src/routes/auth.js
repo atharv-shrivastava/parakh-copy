@@ -17,7 +17,7 @@ router.post("/register", async (req, res) => {
     if (exists) return res.status(409).json({ error: "An account with this email already exists" });
     const user = await prisma.user.create({ data: { name, email, role: "USER", passwordHash: makePasswordHash(password) } });
     res.status(201).json({ id: user.id, name: user.name, email: user.email, role: user.role });
-  } catch (error) { console.error(error); res.status(500).json({ error: "Registration failed" }); }
+  } catch (error) { console.error(error); res.status(500).json({ error: error?.code === "P2002" ? "An account with this email already exists" : (error?.message || "Registration failed") }); }
 });
 
 router.post("/login", async (req, res) => {
@@ -29,7 +29,7 @@ router.post("/login", async (req, res) => {
     const token = crypto.randomBytes(32).toString("hex");
     await prisma.session.create({ data: { token, userId: user.id, expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7) } });
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
-  } catch (error) { console.error(error); res.status(500).json({ error: "Login failed" }); }
+  } catch (error) { console.error(error); res.status(500).json({ error: error?.message || "Login failed" }); }
 });
 
 router.get("/me", authenticate, async (req, res) => {
