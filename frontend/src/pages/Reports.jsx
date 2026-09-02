@@ -70,6 +70,7 @@ function Reports() {
         <div class="box"><b>Compliance</b><br><span class="status ${p.complianceStatus === "VIOLATION" ? "violation" : ""}">${p.complianceStatus || "NEEDS_REVIEW"}</span><br>${p.violationReason || "No compliance note recorded."}</div>
         <div class="box"><b>Barcode</b><br>${p.barcode || "Not recorded"}</div>
       </div>
+      ${compliance?.summary ? `<h2>Rules Engine Assessment</h2><div class="grid"><div class="box"><b>Overall</b><br>${compliance.overallStatus || p.complianceStatus}</div><div class="box"><b>Rules Evaluated</b><br>${compliance.summary.totalRulesEvaluated ?? 0}</div><div class="box"><b>Passed</b><br>${compliance.summary.passed ?? 0}</div><div class="box"><b>Violations</b><br>${compliance.summary.violations ?? 0}</div><div class="box"><b>Unable to Verify</b><br>${compliance.summary.unableToVerify ?? 0}</div></div>` : ""}
       <h2>Evidence Images</h2><div class="images">${images.map((src) => `<img src="${src}" alt="Package evidence">`).join("")}</div>
       <p class="muted">Inspection date: ${new Date(p.inspections?.[0]?.inspectedAt || p.createdAt).toLocaleString()}</p>
       <script>window.onload=()=>window.print()</script>
