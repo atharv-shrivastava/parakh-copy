@@ -1,41 +1,29 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import "../styles/history.css";
 
+const API_URL = "http://localhost:5000/api";
+
 function History() {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch(`${API_URL}/products/history`)
+      .then((response) => { if (!response.ok) throw new Error("Failed to load inspection history"); return response.json(); })
+      .then(setProducts)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
   return (
     <div className="history-page">
-      <div className="page-header">
-        <p className="eyebrow">INSPECTION RECORDS</p>
-        <h1>Inspection History</h1>
-        <p>View and review your previous product inspections.</p>
-      </div>
-
-      <div className="history-list">
-        <div className="history-item">
-          <div>
-            <h3>Packaged Food Product</h3>
-            <p>Inspected today</p>
-          </div>
-          <span className="history-status compliant">Compliant</span>
-        </div>
-
-        <div className="history-item">
-          <div>
-            <h3>Household Commodity</h3>
-            <p>Inspected yesterday</p>
-          </div>
-          <span className="history-status review">Needs Review</span>
-        </div>
-
-        <div className="history-item">
-          <div>
-            <h3>Personal Care Product</h3>
-            <p>Inspected 28 Aug 2026</p>
-          </div>
-          <span className="history-status non-compliant">
-            Non-Compliant
-          </span>
-        </div>
-      </div>
+      <div className="page-header"><p className="eyebrow">INSPECTION RECORDS</p><h1>Inspection History</h1><p>Every saved scan appears here with its product, category, date and compliance status.</p></div>
+      {loading && <p>Loading inspection history...</p>}
+      {error && <div className="status-message">{error}</div>}
+      {!loading && !error && products.length === 0 && <div className="status-message">No inspections have been saved yet.</div>}
+      {!loading && !error && <div className="history-list">{products.map((product) => { const status = product.complianceStatus || "NEEDS_REVIEW"; const label = status === "OKAY" ? "Compliant" : status === "VIOLATION" ? "Non-Compliant" : "Needs Review"; const cls = status === "OKAY" ? "compliant" : status === "VIOLATION" ? "non-compliant" : "review"; return <Link key={product.id} to={`/products/item/${product.id}`} className="history-item"><div><h3>{product.productName}</h3><p>{product.brandName || "Company not recorded"} · {product.category?.name || "Uncategorised"} · {new Date(product.createdAt).toLocaleString()}</p></div><span className={`history-status ${cls}`}>{label}</span></Link>; })}</div>}
     </div>
   );
 }
