@@ -90,7 +90,7 @@ export const RULES: RuleDefinition[] = [
   },
   {
     ruleId: 'PCR-R7', ruleCode: 'PCR-R7-DECLARATION-HEIGHT', ruleNumber: '7', title: 'Principal display panel and declaration dimensions',
-    description: 'Declarations on the principal display panel must meet the prescribed area, numeral-height and letter-height requirements, subject to the rule's package-size and commodity exceptions.',
+    description: 'Declarations on the principal display panel must meet the prescribed area, numeral-height and letter-height requirements, subject to the rule package-size and commodity exceptions.',
     category: 'PRESENTATION', defaultSeverity: 'MEDIUM', enabled: true,
     versions: [{ version: 1, effectiveFrom: '2011-04-01', effectiveUntil: null, status: 'ACTIVE', legalSources: ref('PRINCIPAL_2011'), applicabilityCriteria: always(['physical_package','both']), conditions: [c('r7-visual','visual.declarationLegibility','VISUAL_CHECK','Declaration dimensions and principal-display-panel presentation require visual verification.','Required declaration height/placement/legibility could not be verified.',true)] }]
   },
