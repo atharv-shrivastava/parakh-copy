@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import "../styles/scan.css";
 
 const API_URL = "http://localhost:5000/api";
-const OCR_URL = "http://localhost:8080/api/ocr/analyze";
+const OCR_URL = "http://localhost:8080/api/ocr/analyze-and-evaluate";
 const MAX_IMAGES = 4;
 
 const emptyForm = { brandName: "", productName: "", description: "", netQuantity: "", unit: "", mrp: "", barcode: "" };
@@ -35,6 +35,7 @@ function Scan() {
   const [categories, setCategories] = useState([]);
   const [images, setImages] = useState([]);
   const [ocr, setOcr] = useState(null);
+  const [compliance, setCompliance] = useState(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [form, setForm] = useState(emptyForm);
   const [analyzing, setAnalyzing] = useState(false);
@@ -73,6 +74,7 @@ function Scan() {
     }
     setImages(selected.map((file) => ({ file, url: URL.createObjectURL(file) })));
     setOcr(null);
+    setCompliance(null);
     setMessage(`${selected.length} image${selected.length > 1 ? "s" : ""} ready for analysis.`);
   }
 
@@ -86,30 +88,37 @@ function Scan() {
       return;
     }
     setAnalyzing(true);
-    setMessage("Gemini is analyzing the package images...");
+    setMessage("Gemini is analyzing the package images and preparing the inspection assessment...");
     try {
       const formData = new FormData();
       images.forEach(({ file }) => formData.append("images", file));
+      formData.append("inspectionId", crypto.randomUUID());
+      formData.append("productId", crypto.randomUUID());
+      formData.append("inspectionDate", new Date().toISOString().slice(0, 10));
+      formData.append("context", "physical_package");
+      formData.append("commodityCategory", selectedCategory?.name || "packaged commodity");
+      formData.append("consumerType", "general");
+      formData.append("isImported", "false");
+      formData.append("packageType", "retail");
 
       const response = await fetch(OCR_URL, { method: "POST", body: formData });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || "OCR analysis failed");
+      if (!response.ok) throw new Error(data.error || "Inspection analysis failed");
+      if (!data.ocr) throw new Error("OCR service returned no analysis result");
 
-      const result = data.result ?? data.ocr;
-      if (!result) throw new Error("OCR service returned no analysis result");
-
-      setOcr(result);
+      setOcr(data.ocr);
+      setCompliance(data.compliance || null);
       setForm((current) => ({
         ...current,
-        brandName: fieldValue(result, "brandName") || fieldValue(result, "manufacturer"),
-        productName: fieldValue(result, "productName"),
-        netQuantity: fieldValue(result, "netQuantity"),
-        unit: fieldValue(result, "unit"),
-        mrp: fieldValue(result, "mrp"),
-        barcode: fieldValue(result, "barcode"),
-        description: [result.rawText, ...(result.otherDeclarations || [])].filter(Boolean).join("\n"),
+        brandName: fieldValue(data.ocr, "brandName") || fieldValue(data.ocr, "manufacturer"),
+        productName: fieldValue(data.ocr, "productName"),
+        netQuantity: fieldValue(data.ocr, "netQuantity"),
+        unit: fieldValue(data.ocr, "unit"),
+        mrp: fieldValue(data.ocr, "mrp"),
+        barcode: fieldValue(data.ocr, "barcode"),
+        description: [data.ocr.rawText, ...(data.ocr.otherDeclarations || [])].filter(Boolean).join("\n"),
       }));
-      setMessage("OCR analysis complete. Review the extracted fields before saving.");
+      setMessage("Image analysis complete. Review the extracted fields and assessment before saving.");
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -139,8 +148,9 @@ function Scan() {
     setMessage("");
     try {
       const imageUrls = await Promise.all(images.map(({ file }) => fileToDataUrl(file)));
-      const status = ocr?.needsReview ? "NEEDS_REVIEW" : "OKAY";
-      const reason = ocr?.needsReview ? "OCR contains low-confidence or unreadable fields and requires inspector review." : "Automated OCR screening passed; final legal verification remains with the inspector.";
+      const assessmentStatus = compliance?.overallStatus;
+      const status = assessmentStatus === "VIOLATION" ? "VIOLATION" : ocr?.needsReview ? "NEEDS_REVIEW" : assessmentStatus === "PASS" ? "OKAY" : "NEEDS_REVIEW";
+      const reason = assessmentStatus === "VIOLATION" ? "The inspection assessment reported one or more compliance violations." : ocr?.needsReview ? "OCR contains low-confidence or unreadable fields and requires inspector review." : "Automated OCR and inspection assessment completed; final legal verification remains with the inspector.";
 
       const response = await fetch(`${API_URL}/products`, {
         method: "POST",
@@ -163,7 +173,7 @@ function Scan() {
       <div className="page-header">
         <p className="eyebrow">PRODUCT INSPECTION</p>
         <h1>Scan Product</h1>
-        <p>Capture or upload up to four package images, analyze them with Gemini, verify the extracted declarations, and review the result.</p>
+        <p>Capture or upload up to four package images, analyze them with Gemini, verify the extracted declarations, and review the inspection assessment.</p>
       </div>
 
       <section className="scan-area">
@@ -179,7 +189,7 @@ function Scan() {
 
       {images.length > 0 && (
         <section className="scan-review">
-          <div className="section-heading"><div><h2>Evidence images</h2><p>These are the images sent to Gemini for OCR.</p></div></div>
+          <div className="section-heading"><div><h2>Evidence images</h2><p>These are the images sent to the OCR service for analysis.</p></div></div>
           <div className="scan-image-grid">
             {images.map(({ url, file }, index) => (
               <div className="scan-image-card" key={`${file.name}-${index}`}><img src={url} alt={`Package evidence ${index + 1}`} /><button type="button" onClick={() => removeImage(index)}>Remove</button><span>{file.name}</span></div>
@@ -191,12 +201,13 @@ function Scan() {
 
       {ocr && (
         <section className="scan-review">
-          <div className="section-heading"><div><h2>OCR extraction</h2><p>Every extracted value remains editable so an inspector can correct OCR mistakes.</p></div></div>
+          <div className="section-heading"><div><h2>OCR extraction & assessment</h2><p>Every extracted value remains editable so an inspector can correct OCR mistakes.</p></div></div>
           <div className="ocr-status-grid">
+            <div><strong>Assessment</strong><span>{compliance?.overallStatus || "Not evaluated"}</span></div>
             <div><strong>OCR review</strong><span>{ocr.needsReview ? "Review required" : "Confident"}</span></div>
             <div><strong>Unreadable fields</strong><span>{ocr.unreadableFields?.length || 0}</span></div>
-            <div><strong>Warnings</strong><span>{ocr.warnings?.length || 0}</span></div>
           </div>
+          {compliance?.summary && <div className="ocr-summary">Checks evaluated: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}
           {ocr.warnings?.length > 0 && <div className="status-message">{ocr.warnings.join(" ")}</div>}
           <label>OCR raw text<textarea value={ocr.rawText || ""} onChange={(event) => setOcr((current) => ({ ...current, rawText: event.target.value }))} /></label>
           {suggestedCategory && <div className="scan-suggestion"><span>Suggested final type: <strong>{suggestedCategory.path.map((item) => item.name).join(" → ")}</strong></span><button type="button" className="secondary-button" onClick={applySuggestion}>Use suggestion</button></div>}
@@ -221,7 +232,7 @@ function Scan() {
       )}
 
       {message && <div className="status-message">{message}</div>}
-      <section className="scan-info"><h2>PARAKH inspection coverage</h2><div className="check-grid"><div className="check-item"><strong>Mandatory declarations</strong><span>Manufacturer/packer/importer, product identity, quantity, MRP, dates and consumer-care evidence.</span></div><div className="check-item"><strong>Visual evidence</strong><span>Up to four package photographs are retained with the product record.</span></div><div className="check-item"><strong>OCR analysis</strong><span>Package images are analyzed by the standalone OCR service using Gemini vision.</span></div><div className="check-item"><strong>Inspection history</strong><span>Saved products appear in the searchable product repository and history.</span></div></div></section>
+      <section className="scan-info"><h2>PARAKH inspection coverage</h2><div className="check-grid"><div className="check-item"><strong>Mandatory declarations</strong><span>Manufacturer/packer/importer, product identity, quantity, MRP, dates and consumer-care evidence.</span></div><div className="check-item"><strong>Visual evidence</strong><span>Up to four package photographs are retained with the product record.</span></div><div className="check-item"><strong>OCR and assessment</strong><span>Package images are processed by the OCR service, which can obtain a downstream inspection assessment.</span></div><div className="check-item"><strong>Inspection history</strong><span>Saved products appear in the searchable product repository and history.</span></div></div></section>
       <Link className="back-link" to="/history">View inspection history →</Link>
     </div>
   );
