@@ -1,68 +1,63 @@
-
-
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import { apiFetch } from "../lib/auth";
 import "../styles/shop-products.css";
 
+const API_URL = "http://localhost:5000/api";
+
 function ShopProducts() {
-  return (
-    <div className="shop-products-page">
-      <Link to="/shops/1" className="back-link">
-        ← Back to Shop
-      </Link>
+  const { shopId } = useParams();
+  const [shop, setShop] = useState(null);
+  const [products, setProducts] = useState([]);
+  const [query, setQuery] = useState("");
+  const [error, setError] = useState("");
 
-      <div className="page-header">
-        <p className="eyebrow">SHOP PRODUCTS</p>
-        <h1>Sharma General Store</h1>
-        <p>Products inspected and registered for this shop.</p>
-      </div>
+  useEffect(() => {
+    Promise.all([
+      apiFetch(`${API_URL}/shops/${shopId}`),
+      apiFetch(`${API_URL}/shops/${shopId}/products`),
+    ])
+      .then(async ([shopResponse, productsResponse]) => {
+        const shopData = await shopResponse.json();
+        const productData = await productsResponse.json();
+        if (!shopResponse.ok) throw new Error(shopData.error || "Shop not found");
+        if (!productsResponse.ok) throw new Error(productData.error || "Could not load products");
+        setShop(shopData);
+        setProducts(productData);
+      })
+      .catch((e) => setError(e.message));
+  }, [shopId]);
 
-      <div className="shop-products-list">
-        <Link to="/products/1" className="shop-product-item">
-          <div>
-            <h2>Packaged Wheat Flour</h2>
-            <p>Food Commodity</p>
-          </div>
-
-          <span className="product-status compliant">
-            Compliant
-          </span>
-        </Link>
-
-        <Link to="/products/2" className="shop-product-item">
-          <div>
-            <h2>Cooking Oil</h2>
-            <p>Food Commodity</p>
-          </div>
-
-          <span className="product-status compliant">
-            Compliant
-          </span>
-        </Link>
-
-        <Link to="/products/3" className="shop-product-item">
-          <div>
-            <h2>Bathing Soap</h2>
-            <p>Personal Care</p>
-          </div>
-
-          <span className="product-status review">
-            Needs Review
-          </span>
-        </Link>
-
-        <Link to="/products/4" className="shop-product-item">
-          <div>
-            <h2>Detergent Powder</h2>
-            <p>Household Commodity</p>
-          </div>
-
-          <span className="product-status compliant">
-            Compliant
-          </span>
-        </Link>
-      </div>
-    </div>
+  const shown = products.filter((p) =>
+    `${p.productName} ${p.brandName || ""} ${p.category?.name || ""}`.toLowerCase().includes(query.toLowerCase()),
   );
+
+  if (error) return <div className="shop-products-page"><p>{error}</p></div>;
+  if (!shop) return <div className="shop-products-page"><p>Loading shop products...</p></div>;
+
+  return <div className="shop-products-page">
+    <Link to={`/shops/${shop.id}`} className="back-link">← Back to Shop</Link>
+    <div className="page-header">
+      <p className="eyebrow">SHOP PRODUCTS</p>
+      <h1>{shop.name}</h1>
+      <p>{products.length} registered product record(s).</p>
+    </div>
+    <input className="shop-product-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search product or brand..." />
+    <div className="shop-products-list">
+      {shown.map((product) => (
+        <Link key={product.id} to={`/products/item/${product.id}`} className="shop-product-item">
+          <div>
+            <h2>{product.productName}</h2>
+            <p>{product.brandName || "Brand not recorded"} · {product.netQuantity || "-"} {product.unit || ""} · {product.category?.name || "No category"}</p>
+          </div>
+          <span className={`product-status ${product.inspection?.status === "VIOLATION" ? "non-compliant" : product.inspection?.status === "NEEDS_REVIEW" ? "review" : "compliant"}`}>
+            {product.inspection?.status || "NEEDS_REVIEW"}
+          </span>
+        </Link>
+      ))}
+      {!shown.length && <div className="status-message">No products match this search.</div>}
+    </div>
+  </div>;
 }
 
-export default ShopProducts
+export default ShopProducts;
