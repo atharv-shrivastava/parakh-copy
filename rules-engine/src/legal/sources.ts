@@ -16,6 +16,14 @@ export const SOURCES: Record<string, LegalSourceReference> = {
     sourceDocument: 'Department of Consumer Affairs consolidated PCR publication',
     verificationStatus: 'VERIFIED'
   },
+  AMEND_2021_779E: {
+    sourceId: 'DCA-PCR-2021-GSR-779E', notification: 'G.S.R. 779(E)',
+    title: 'Legal Metrology (Packaged Commodities) Amendment Rules, 2021', date: '2021-11-02',
+    effectiveFrom: '2022-12-01', effectiveUntil: null, rule: '4(2), 5, 6(1)(d), 6(1)(e), 6(11), 13(5)(ii)',
+    sourceDocument: 'Department of Consumer Affairs Gazette notification, with subsequent commencement amendment',
+    sourceUrl: 'https://consumeraffairs.gov.in/public/upload/admin/cmsfiles/whatsnews/The_Legal_Metrology_Packaged_Commodities_Amendment_Rule%2C_2021_whatsnews.pdf',
+    verificationStatus: 'VERIFIED'
+  },
   AMEND_2025_881E: {
     sourceId: 'DCA-PCR-2025-GSR-881E', notification: 'G.S.R. 881(E)',
     title: 'Legal Metrology (Packaged Commodities) Second (Amendment) Rules, 2025', date: '2025-12-02',
