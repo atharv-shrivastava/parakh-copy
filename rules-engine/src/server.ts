@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { evaluateInspectionComplete } from './engine/legal-dealer-rules.js';
+import { evaluateInspectionCompleteWithCurrentRules } from './engine/complete-evaluator.js';
 import type { InspectionRequest } from '../domain/types.js';
 
 const PORT = Number(process.env.RULES_ENGINE_PORT ?? 8090);
@@ -22,7 +22,7 @@ const server = createServer(async (req, res) => {
     if (!request.inspectionId || !request.productId || !request.inspectionDate || !request.productMetadata || !Array.isArray(request.evidence)) {
       return json(res, 400, { error: 'Invalid inspection request.' });
     }
-    return json(res, 200, evaluateInspectionComplete(request));
+    return json(res, 200, evaluateInspectionCompleteWithCurrentRules(request));
   } catch (error) {
     return json(res, 400, { error: 'Invalid JSON or inspection payload.', detail: error instanceof Error ? error.message : 'Unknown error' });
   }
