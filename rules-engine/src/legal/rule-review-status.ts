@@ -1,5 +1,6 @@
 import type { EvaluationStatus, Finding, InspectionRequest } from '../../domain/types.js';
 import { SOURCES } from './sources.js';
+import { rule22Findings } from '../engine/rule-22-evaluator.js';
 
 export const UNVERIFIED_RULES = Object.freeze([
   '23',
@@ -36,5 +37,8 @@ export function legalReviewFinding(
 }
 
 export function unverifiedRuleFindings(inspection: InspectionRequest): Finding[] {
-  return UNVERIFIED_RULES.map(ruleNumber => legalReviewFinding(inspection, ruleNumber));
+  return [
+    ...rule22Findings(inspection),
+    ...UNVERIFIED_RULES.map(ruleNumber => legalReviewFinding(inspection, ruleNumber)),
+  ];
 }
