@@ -52,12 +52,21 @@ function finding(code: string, number: string, status: EvaluationStatus, field: 
 const REQUIREMENTS: Requirement[] = [
   {
     code: 'PCR-R6-1-A', number: '6(1)(a)', field: 'declarations.manufacturerPackerImporter',
-    aliases: ['declarations.manufacturerNameAddress', 'declarations.packerNameAddress', 'declarations.importerNameAddress'],
+    aliases: [
+      'declarations.manufacturerOrPacker',
+      'declarations.manufacturerNameAddress',
+      'declarations.packerNameAddress',
+      'declarations.importerNameAddress'
+    ],
     label: 'manufacturer/packer/importer name and complete address'
   },
   {
     code: 'PCR-R6-1-B', number: '6(1)(b)', field: 'declarations.commonGenericName',
-    aliases: ['declarations.productName', 'productMetadata.commonGenericName'],
+    aliases: [
+      'declarations.commonOrGenericName',
+      'declarations.productName',
+      'productMetadata.commonGenericName'
+    ],
     label: 'common or generic name of the commodity'
   },
   {
@@ -67,7 +76,12 @@ const REQUIREMENTS: Requirement[] = [
   },
   {
     code: 'PCR-R6-1-D', number: '6(1)(d)', field: 'declarations.dateOfManufacturePackingImport',
-    aliases: ['declarations.manufactureDate', 'declarations.packingDate', 'declarations.importDate'],
+    aliases: [
+      'declarations.manufactureOrImportDate',
+      'declarations.manufactureDate',
+      'declarations.packingDate',
+      'declarations.importDate'
+    ],
     label: 'month and year of manufacture, pre-packing or import'
   },
   {
@@ -78,7 +92,8 @@ const REQUIREMENTS: Requirement[] = [
   {
     code: 'PCR-R6-1-F', number: '6(1)(f)', field: 'declarations.dimensions',
     aliases: ['productMetadata.dimensions'],
-    label: 'dimensions where the dimensions of the commodity are relevant'
+    label: 'dimensions where the dimensions of the commodity are relevant',
+    conditional: r => r.productMetadata.dimensionsRelevant !== false
   },
   {
     code: 'PCR-R6-1-G', number: '6(1)(g)', field: 'declarations.otherRequiredParticulars',
