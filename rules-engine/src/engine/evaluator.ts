@@ -1,21 +1,596 @@
 import { createHash } from 'node:crypto';
-import type { EvidenceConflict, EvidenceItem, EvaluationStatus, Finding, InspectionRequest, OverallInspectionResult, RuleCondition, RuleDefinition, RuleVersion } from '../../domain/types.js';
+import type {
+  EvidenceConflict,
+  EvidenceItem,
+  EvaluationStatus,
+  Finding,
+  InspectionRequest,
+  OverallInspectionResult,
+  RuleCondition,
+  RuleDefinition,
+  RuleVersion,
+} from '../../domain/types.js';
 import { RULES, RULESET_VERSION } from '../legal/rules.js';
 import { SOURCES } from '../legal/sources.js';
-import { firstScheduleMpe, isSecondScheduleStandard, normalizeQuantity, toBaseQuantity } from '../legal/schedules.js';
+import {
+  firstScheduleMpe,
+  isSecondScheduleStandard,
+  normalizeQuantity,
+  toBaseQuantity,
+} from '../legal/schedules.js';
 
 export const ENGINE_VERSION = '0.2.0';
-function getPath(input:unknown,path:string):unknown{return path.split('.').reduce<unknown>((v,p)=>v==null||typeof v!=='object'?undefined:(v as Record<string,unknown>)[p],input)}
-function evidenceFor(r:InspectionRequest,f:string):EvidenceItem[]{return r.evidence.filter(e=>e.field===f||e.field===f.replace(/^declarations\./,''))}
-function conflictFor(r:InspectionRequest,f:string):EvidenceConflict[]{return(r.evidenceConflicts??[]).filter(c=>c.status==='UNRESOLVED'&&c.field===f)}
-function sourceValue(r:InspectionRequest,f:string):unknown{const d=getPath(r,f);if(d!==undefined)return d;const vf=f.startsWith('visual.')?getPath(r.visualFlags,f.slice(7)):undefined;if(vf!==undefined)return vf;const e=evidenceFor(r,f);return e[0]?.normalizedValue??e[0]?.rawValue}
-function confidenceOk(e:EvidenceItem[],m?:number):boolean{return m===undefined||(e.length>0&&Math.max(...e.map(x=>x.confidence))>=m)}
-function validCurrency(v:unknown):boolean{if(typeof v==='number')return Number.isFinite(v)&&v>=0;return typeof v==='string'&&/^(?:₹|rs\.?\s*)?\d+(?:\.\d{1,2})?$|^\d+(?:\.\d{1,2})?\s*(?:₹|rs\.?)$/i.test(v.trim())}
-function validDate(v:unknown):boolean{if(typeof v!=='string')return false;const s=v.trim();return /^(?:0?[1-9]|1[0-2])[\/-](?:19|20)\d{2}$/.test(s)||/^(?:19|20)\d{2}[\/-](?:0?[1-9]|1[0-2])$/.test(s)||/^\d{4}[\/-]\d{2}[\/-]\d{2}$/.test(s)}
-function applicable(r:InspectionRequest,v:RuleVersion):boolean{const a=v.applicabilityCriteria;if(a.contexts&&!a.contexts.includes(r.context))return false;const commodity=r.productMetadata.commodityCategory.trim().toLowerCase();if(a.includedCommodities&&!a.includedCommodities.some(x=>commodity.includes(x.toLowerCase())))return false;if(a.excludedCommodities&&a.excludedCommodities.some(x=>commodity.includes(x.toLowerCase())))return false;if(a.packageTypes&&r.productMetadata.packageType&&!a.packageTypes.includes(r.productMetadata.packageType))return false;if(a.consumerTypes&&r.productMetadata.consumerType&&!a.consumerTypes.includes(r.productMetadata.consumerType))return false;if(a.excludedConsumerTypes&&r.productMetadata.consumerType&&a.excludedConsumerTypes.includes(r.productMetadata.consumerType))return false;return true}
-function chooseVersion(rule:RuleDefinition,date:string):RuleVersion|undefined{return[...rule.versions].filter(v=>v.effectiveFrom<=date&&(v.effectiveUntil===null||date<=v.effectiveUntil)).sort((a,b)=>b.effectiveFrom.localeCompare(a.effectiveFrom))[0]}
-function conditionResult(r:InspectionRequest,c:RuleCondition):{status:EvaluationStatus;missing:string[];message:string;reason?:string;evidence:EvidenceItem[];conflicts:EvidenceConflict[]}{const items=evidenceFor(r,c.targetField),conflicts=conflictFor(r,c.targetField);if(conflicts.length)return{status:'UNABLE_TO_VERIFY',missing:[],message:c.errorMessage,evidence:items,conflicts};if(!confidenceOk(items,c.minimumConfidence))return{status:'UNABLE_TO_VERIFY',missing:[c.targetField],message:c.errorMessage,evidence:items,conflicts};const value=sourceValue(r,c.targetField),missing=value===undefined||value===null||value==='';const fail=(reason=c.violationReason)=>({status:'VIOLATION' as const,missing:[],message:c.errorMessage,reason,evidence:items,conflicts}),pass=()=>({status:'PASS' as const,missing:[],message:'Requirement satisfied.',evidence:items,conflicts}),unable=()=>({status:'UNABLE_TO_VERIFY' as const,missing:[c.targetField],message:c.errorMessage,evidence:items,conflicts});switch(c.operator){case'EXISTS':return missing?unable():pass();case'NOT_EXISTS':return missing?pass():fail();case'EQUALS':return missing?unable():value===c.expectedValue?pass():fail();case'NOT_EQUALS':return missing?unable():value!==c.expectedValue?pass():fail();case'REGEX_MATCH':return missing||typeof c.expectedValue!=='string'||typeof value!=='string'?unable():new RegExp(c.expectedValue).test(value)?pass():fail();case'GREATER_THAN':return typeof value==='number'&&typeof c.expectedValue==='number'?(value>c.expectedValue?pass():fail()):unable();case'LESS_THAN':return typeof value==='number'&&typeof c.expectedValue==='number'?(value<c.expectedValue?pass():fail()):unable();case'GREATER_THAN_OR_EQUAL':return typeof value==='number'&&typeof c.expectedValue==='number'?(value>=c.expectedValue?pass():fail()):unable();case'LESS_THAN_OR_EQUAL':return typeof value==='number'&&typeof c.expectedValue==='number'?(value<=c.expectedValue?pass():fail()):unable();case'VALID_UNIT':return missing?unable():normalizeQuantity(1,String(value))?pass():fail();case'VALID_CURRENCY':return missing?unable():validCurrency(value)?pass():fail();case'VALID_DATE_FORMAT':return missing?unable():validDate(value)?pass():fail();case'IN_LIST':return missing||!Array.isArray(c.expectedValue)?unable():c.expectedValue.includes(value)?pass():fail();case'IN_NUMERIC_RANGE':return typeof value==='number'&&Array.isArray(c.expectedValue)&&c.expectedValue.length===2?(value>=Number(c.expectedValue[0])&&value<=Number(c.expectedValue[1])?pass():fail()):unable();case'IN_SCHEDULE_II_STANDARD':{const q=getPath(r,'declarations.netQuantity'),u=getPath(r,'declarations.netQuantityUnit');if(typeof q!=='number'||typeof u!=='string')return unable();const n=normalizeQuantity(q,u);if(!n)return unable();const s=isSecondScheduleStandard(r.productMetadata.commodityCategory,n.value,n.unit);if(!s.applicable)return unable();return s.compliant?pass():fail(`${c.violationReason} ${s.description??''}`)}case'WITHIN_FIRST_SCHEDULE_MPE':{const m=r.measurements;if(!m)return unable();const d=normalizeQuantity(m.declaredQuantity,m.declaredUnit),a=normalizeQuantity(m.actualQuantity,m.actualUnit);if(!d||!a)return unable();const db=toBaseQuantity(d.value,d.unit),ab=toBaseQuantity(a.value,a.unit);if((db.unit!=='g'&&db.unit!=='mL')||ab.unit!==db.unit)return unable();const x=firstScheduleMpe(db.value,ab.value,db.unit);return x.applicable?(x.withinTolerance?pass():fail(`${c.violationReason} Deficiency ${x.deficiency} ${db.unit}; MPE ${x.tolerance} ${db.unit}.`)):unable()}case'VISUAL_CHECK':{const flag=sourceValue(r,c.targetField);return typeof flag==='boolean'?(flag?pass():fail()):unable()}case'CONFLICT_EXISTS':return conflicts.length?fail():pass();case'PACKAGE_TYPE':return r.productMetadata.packageType?(r.productMetadata.packageType===c.expectedValue?pass():fail()):unable();case'COMMODITY_TYPE':return r.productMetadata.commodityCategory?(r.productMetadata.commodityCategory.toLowerCase()===String(c.expectedValue).toLowerCase()?pass():fail()):unable();case'CONTEXT_TYPE':return r.context===c.expectedValue?pass():fail();case'DATE_RANGE':return typeof value==='string'&&Array.isArray(c.expectedValue)&&c.expectedValue.length===2?(value>=String(c.expectedValue[0])&&value<=String(c.expectedValue[1])?pass():fail()):unable();case'EVIDENCE_CONFIDENCE':return items.length&&Math.max(...items.map(e=>e.confidence))>=Number(c.expectedValue)?pass():unable();default:return unable()}}
-function findingFor(rule:RuleDefinition,v:RuleVersion,c:RuleCondition,res:ReturnType<typeof conditionResult>,i:number):Finding{return{findingId:`${rule.ruleCode}-${v.version}-${i+1}`,ruleId:rule.ruleId,ruleCode:rule.ruleCode,ruleNumber:rule.ruleNumber,subclause:rule.subclause,ruleVersion:v.version,status:res.status,field:c.targetField,message:res.status==='PASS'?'Requirement satisfied.':res.message,violationReason:res.reason,evidenceUsed:res.evidence,missingEvidence:res.missing,conflicts:res.conflicts,legalReferences:v.legalSources,severity:rule.defaultSeverity,requiresLegalReview:v.legalSources.some(s=>s.verificationStatus!=='VERIFIED')}}
-function quantityFindings(r:InspectionRequest):Finding[]{const out:Finding[]=[];const source=SOURCES.PRINCIPAL_2011;if(r.measurements){const m=r.measurements,d=normalizeQuantity(m.declaredQuantity,m.declaredUnit),a=normalizeQuantity(m.actualQuantity,m.actualUnit);if(!d||!a){out.push({findingId:'PCR-SCHED-I-MPE-UNVERIFIED',ruleId:'PCR-SCHED-I-MPE',ruleCode:'PCR-SCHED-I-MPE',ruleNumber:'First Schedule',ruleVersion:1,status:'UNABLE_TO_VERIFY',field:'measurements',message:'Measurement units could not be normalized for First Schedule MPE evaluation.',missingEvidence:['measurements.declaredQuantity','measurements.actualQuantity'],legalReferences:[source],severity:'HIGH',requiresLegalReview:false})}else{const db=toBaseQuantity(d.value,d.unit),ab=toBaseQuantity(a.value,a.unit);if((db.unit==='g'||db.unit==='mL')&&ab.unit===db.unit){const x=firstScheduleMpe(db.value,ab.value,db.unit);out.push({findingId:'PCR-SCHED-I-MPE',ruleId:'PCR-SCHED-I-MPE',ruleCode:'PCR-SCHED-I-MPE',ruleNumber:'First Schedule',ruleVersion:1,status:x.applicable?(x.withinTolerance?'PASS':'VIOLATION'):'UNABLE_TO_VERIFY',field:'measurements',message:x.applicable?(x.withinTolerance?`Measured deficiency is within MPE ${x.tolerance} ${db.unit}.`:`Measured deficiency exceeds MPE ${x.tolerance} ${db.unit}.`):(x.reason??'First Schedule MPE could not be evaluated.'),violationReason:x.withinTolerance?undefined:'Net quantity deficiency exceeds the First Schedule maximum permissible error.',legalReferences:[source],severity:'CRITICAL',requiresLegalReview:false})}else out.push({findingId:'PCR-SCHED-I-MPE-NON-WEIGHT',ruleId:'PCR-SCHED-I-MPE',ruleCode:'PCR-SCHED-I-MPE',ruleNumber:'First Schedule Table II',ruleVersion:1,status:'UNABLE_TO_VERIFY',field:'measurements',message:'Length, area and number require separate First Schedule Table II evaluation.',legalReferences:[source],severity:'HIGH',requiresLegalReview:false})}}}const q=getPath(r,'declarations.netQuantity'),u=getPath(r,'declarations.netQuantityUnit');if(typeof q==='number'&&typeof u==='string'){const n=normalizeQuantity(q,u);if(n){const s=isSecondScheduleStandard(r.productMetadata.commodityCategory,n.value,n.unit);if(s.applicable)out.push({findingId:'PCR-R5-SCHEDULE-II',ruleId:'PCR-R5-SCHEDULE-II',ruleCode:'PCR-R5-SCHEDULE-II',ruleNumber:'5',ruleVersion:1,status:s.compliant?'PASS':'VIOLATION',field:'declarations.netQuantity',message:s.compliant?'Declared quantity matches a Second Schedule standard quantity.':`Declared quantity does not match the applicable Second Schedule standard quantities. ${s.description??''}`,violationReason:s.compliant?undefined:'Commodity is covered by the Second Schedule and uses a non-standard package quantity.',legalReferences:[source],severity:'HIGH',requiresLegalReview:false})}}return out}
-function canonical(v:unknown):string{if(v===null||typeof v!=='object')return JSON.stringify(v);if(Array.isArray(v))return`[${v.map(canonical).join(',')}]`;const o=v as Record<string,unknown>;return`{${Object.keys(o).sort().map(k=>`${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`}
-export function evaluateInspection(r:InspectionRequest,rules:RuleDefinition[]=RULES):OverallInspectionResult{const findings:Finding[]=[];for(const rule of rules.filter(x=>x.enabled)){const v=chooseVersion(rule,r.inspectionDate.slice(0,10));if(!v)continue;if(rule.ruleId==='PCR-R3'){const q=getPath(r,'declarations.netQuantity'),u=getPath(r,'declarations.netQuantityUnit'),n=typeof q==='number'&&typeof u==='string'?normalizeQuantity(q,u):undefined;const excluded=r.productMetadata.consumerType==='industrial'||r.productMetadata.consumerType==='institutional'||!!(n&&((n.unit==='kg'&&n.value>25)||(n.unit==='L'&&n.value>25)));findings.push({findingId:`${rule.ruleCode}-${v.version}`,ruleId:rule.ruleId,ruleCode:rule.ruleCode,ruleNumber:rule.ruleNumber,ruleVersion:v.version,status:excluded?'NOT_APPLICABLE':'PASS',message:excluded?'Chapter II is excluded by the identified Rule 3 applicability condition, subject to commodity-specific exceptions.':'Chapter II applicability gate passed.',legalReferences:v.legalSources,severity:rule.defaultSeverity,requiresLegalReview:false});continue}if(!applicable(r,v)){findings.push({findingId:`${rule.ruleCode}-${v.version}-NA`,ruleId:rule.ruleId,ruleCode:rule.ruleCode,ruleNumber:rule.ruleNumber,ruleVersion:v.version,status:'NOT_APPLICABLE',message:'Rule is outside its structured applicability criteria.',legalReferences:v.legalSources,severity:rule.defaultSeverity,requiresLegalReview:false});continue}if(v.status==='REQUIRES_LEGAL_REVIEW'){findings.push({findingId:`${rule.ruleCode}-${v.version}-LEGAL`,ruleId:rule.ruleId,ruleCode:rule.ruleCode,ruleNumber:rule.ruleNumber,ruleVersion:v.version,status:'UNABLE_TO_VERIFY',message:'Rule version is marked for legal review.',legalReferences:v.legalSources,severity:rule.defaultSeverity,requiresLegalReview:true});continue}v.conditions.forEach((c,i)=>findings.push(findingFor(rule,v,c,conditionResult(r,c),i)))}findings.push(...quantityFindings(r));const summary={totalRulesEvaluated:findings.length,passed:findings.filter(f=>f.status==='PASS').length,violations:findings.filter(f=>f.status==='VIOLATION').length,unableToVerify:findings.filter(f=>f.status==='UNABLE_TO_VERIFY').length,notApplicable:findings.filter(f=>f.status==='NOT_APPLICABLE').length};const overallStatus:EvaluationStatus=summary.violations>0?'VIOLATION':summary.unableToVerify>0?'UNABLE_TO_VERIFY':summary.passed>0?'PASS':'NOT_APPLICABLE';const base={inspectionId:r.inspectionId,productId:r.productId,inspectionDate:r.inspectionDate,overallStatus,engineVersion:ENGINE_VERSION,ruleSetVersion:RULESET_VERSION,summary,findings};return{...base,auditHash:createHash('sha256').update(canonical(base)).digest('hex')}}
+
+function getPath(input: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((value, part) => {
+    if (value == null || typeof value !== 'object') return undefined;
+    return (value as Record<string, unknown>)[part];
+  }, input);
+}
+
+function evidenceFor(request: InspectionRequest, field: string): EvidenceItem[] {
+  return request.evidence.filter(
+    (item) => item.field === field || item.field === field.replace(/^declarations\./, ''),
+  );
+}
+
+function conflictsFor(request: InspectionRequest, field: string): EvidenceConflict[] {
+  return (request.evidenceConflicts ?? []).filter(
+    (conflict) => conflict.status === 'UNRESOLVED' && conflict.field === field,
+  );
+}
+
+function sourceValue(request: InspectionRequest, field: string): unknown {
+  const direct = getPath(request, field);
+  if (direct !== undefined) return direct;
+
+  if (field.startsWith('visual.')) {
+    const visual = getPath(request.visualFlags, field.slice('visual.'.length));
+    if (visual !== undefined) return visual;
+  }
+
+  const evidence = evidenceFor(request, field);
+  return evidence[0]?.normalizedValue ?? evidence[0]?.rawValue;
+}
+
+function confidenceOk(items: EvidenceItem[], minimum?: number): boolean {
+  if (minimum === undefined) return true;
+  return items.length > 0 && Math.max(...items.map((item) => item.confidence)) >= minimum;
+}
+
+function validCurrency(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0;
+  if (typeof value !== 'string') return false;
+  return /^(?:₹|rs\.?\s*)?\d+(?:\.\d{1,2})?$|^\d+(?:\.\d{1,2})?\s*(?:₹|rs\.?)$/i.test(
+    value.trim(),
+  );
+}
+
+function validDate(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const text = value.trim();
+  return (
+    /^(?:0?[1-9]|1[0-2])[\/-](?:19|20)\d{2}$/.test(text) ||
+    /^(?:19|20)\d{2}[\/-](?:0?[1-9]|1[0-2])$/.test(text) ||
+    /^\d{4}[\/-]\d{2}[\/-]\d{2}$/.test(text)
+  );
+}
+
+function applicable(request: InspectionRequest, version: RuleVersion): boolean {
+  const criteria = version.applicabilityCriteria;
+  if (criteria.contexts && !criteria.contexts.includes(request.context)) return false;
+
+  const commodity = request.productMetadata.commodityCategory.trim().toLowerCase();
+  if (
+    criteria.includedCommodities &&
+    !criteria.includedCommodities.some((item) => commodity.includes(item.toLowerCase()))
+  ) {
+    return false;
+  }
+  if (
+    criteria.excludedCommodities &&
+    criteria.excludedCommodities.some((item) => commodity.includes(item.toLowerCase()))
+  ) {
+    return false;
+  }
+  if (
+    criteria.packageTypes &&
+    request.productMetadata.packageType &&
+    !criteria.packageTypes.includes(request.productMetadata.packageType)
+  ) {
+    return false;
+  }
+  if (
+    criteria.consumerTypes &&
+    request.productMetadata.consumerType &&
+    !criteria.consumerTypes.includes(request.productMetadata.consumerType)
+  ) {
+    return false;
+  }
+  if (
+    criteria.excludedConsumerTypes &&
+    request.productMetadata.consumerType &&
+    criteria.excludedConsumerTypes.includes(request.productMetadata.consumerType)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function chooseVersion(rule: RuleDefinition, date: string): RuleVersion | undefined {
+  return [...rule.versions]
+    .filter(
+      (version) =>
+        version.effectiveFrom <= date &&
+        (version.effectiveUntil === null || date <= version.effectiveUntil),
+    )
+    .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0];
+}
+
+type ConditionResult = {
+  status: EvaluationStatus;
+  missing: string[];
+  message: string;
+  reason?: string;
+  evidence: EvidenceItem[];
+  conflicts: EvidenceConflict[];
+};
+
+function conditionResult(request: InspectionRequest, condition: RuleCondition): ConditionResult {
+  const evidence = evidenceFor(request, condition.targetField);
+  const conflicts = conflictsFor(request, condition.targetField);
+
+  if (conflicts.length > 0) {
+    return {
+      status: 'UNABLE_TO_VERIFY',
+      missing: [],
+      message: condition.errorMessage,
+      evidence,
+      conflicts,
+    };
+  }
+
+  if (!confidenceOk(evidence, condition.minimumConfidence)) {
+    return {
+      status: 'UNABLE_TO_VERIFY',
+      missing: [condition.targetField],
+      message: condition.errorMessage,
+      evidence,
+      conflicts,
+    };
+  }
+
+  const value = sourceValue(request, condition.targetField);
+  const missing = value === undefined || value === null || value === '';
+
+  const pass = (): ConditionResult => ({
+    status: 'PASS',
+    missing: [],
+    message: 'Requirement satisfied.',
+    evidence,
+    conflicts,
+  });
+  const unable = (): ConditionResult => ({
+    status: 'UNABLE_TO_VERIFY',
+    missing: [condition.targetField],
+    message: condition.errorMessage,
+    evidence,
+    conflicts,
+  });
+  const fail = (reason = condition.violationReason): ConditionResult => ({
+    status: 'VIOLATION',
+    missing: [],
+    message: condition.errorMessage,
+    reason,
+    evidence,
+    conflicts,
+  });
+
+  switch (condition.operator) {
+    case 'EXISTS':
+      return missing ? unable() : pass();
+    case 'NOT_EXISTS':
+      return missing ? pass() : fail();
+    case 'EQUALS':
+      return missing ? unable() : value === condition.expectedValue ? pass() : fail();
+    case 'NOT_EQUALS':
+      return missing ? unable() : value !== condition.expectedValue ? pass() : fail();
+    case 'REGEX_MATCH':
+      if (missing || typeof condition.expectedValue !== 'string' || typeof value !== 'string') {
+        return unable();
+      }
+      return new RegExp(condition.expectedValue).test(value) ? pass() : fail();
+    case 'GREATER_THAN':
+      return typeof value === 'number' && typeof condition.expectedValue === 'number'
+        ? value > condition.expectedValue
+          ? pass()
+          : fail()
+        : unable();
+    case 'LESS_THAN':
+      return typeof value === 'number' && typeof condition.expectedValue === 'number'
+        ? value < condition.expectedValue
+          ? pass()
+          : fail()
+        : unable();
+    case 'GREATER_THAN_OR_EQUAL':
+      return typeof value === 'number' && typeof condition.expectedValue === 'number'
+        ? value >= condition.expectedValue
+          ? pass()
+          : fail()
+        : unable();
+    case 'LESS_THAN_OR_EQUAL':
+      return typeof value === 'number' && typeof condition.expectedValue === 'number'
+        ? value <= condition.expectedValue
+          ? pass()
+          : fail()
+        : unable();
+    case 'VALID_UNIT':
+      return missing ? unable() : normalizeQuantity(1, String(value)) ? pass() : fail();
+    case 'VALID_CURRENCY':
+      return missing ? unable() : validCurrency(value) ? pass() : fail();
+    case 'VALID_DATE_FORMAT':
+      return missing ? unable() : validDate(value) ? pass() : fail();
+    case 'IN_LIST':
+      return missing || !Array.isArray(condition.expectedValue)
+        ? unable()
+        : condition.expectedValue.includes(value)
+          ? pass()
+          : fail();
+    case 'IN_NUMERIC_RANGE':
+      return typeof value === 'number' && Array.isArray(condition.expectedValue) && condition.expectedValue.length === 2
+        ? value >= Number(condition.expectedValue[0]) && value <= Number(condition.expectedValue[1])
+          ? pass()
+          : fail()
+        : unable();
+    case 'IN_SCHEDULE_II_STANDARD': {
+      const quantity = getPath(request, 'declarations.netQuantity');
+      const unit = getPath(request, 'declarations.netQuantityUnit');
+      if (typeof quantity !== 'number' || typeof unit !== 'string') return unable();
+      const normalized = normalizeQuantity(quantity, unit);
+      if (!normalized) return unable();
+      const result = isSecondScheduleStandard(
+        request.productMetadata.commodityCategory,
+        normalized.value,
+        normalized.unit,
+      );
+      if (!result.applicable) return unable();
+      return result.compliant
+        ? pass()
+        : fail(`${condition.violationReason} ${result.description ?? ''}`.trim());
+    }
+    case 'WITHIN_FIRST_SCHEDULE_MPE': {
+      const measurement = request.measurements;
+      if (!measurement) return unable();
+      const declared = normalizeQuantity(measurement.declaredQuantity, measurement.declaredUnit);
+      const actual = normalizeQuantity(measurement.actualQuantity, measurement.actualUnit);
+      if (!declared || !actual) return unable();
+      const declaredBase = toBaseQuantity(declared.value, declared.unit);
+      const actualBase = toBaseQuantity(actual.value, actual.unit);
+      if (
+        (declaredBase.unit !== 'g' && declaredBase.unit !== 'mL') ||
+        actualBase.unit !== declaredBase.unit
+      ) {
+        return unable();
+      }
+      const result = firstScheduleMpe(
+        declaredBase.value,
+        actualBase.value,
+        declaredBase.unit,
+      );
+      if (!result.applicable) return unable();
+      return result.withinTolerance
+        ? pass()
+        : fail(
+            `${condition.violationReason} Deficiency ${result.deficiency} ${declaredBase.unit}; MPE ${result.tolerance} ${declaredBase.unit}.`,
+          );
+    }
+    case 'VISUAL_CHECK': {
+      const flag = sourceValue(request, condition.targetField);
+      return typeof flag === 'boolean' ? (flag ? pass() : fail()) : unable();
+    }
+    case 'CONFLICT_EXISTS':
+      return conflicts.length > 0 ? fail() : pass();
+    case 'PACKAGE_TYPE':
+      return request.productMetadata.packageType
+        ? request.productMetadata.packageType === condition.expectedValue
+          ? pass()
+          : fail()
+        : unable();
+    case 'COMMODITY_TYPE':
+      return request.productMetadata.commodityCategory
+        ? request.productMetadata.commodityCategory.toLowerCase() ===
+          String(condition.expectedValue).toLowerCase()
+          ? pass()
+          : fail()
+        : unable();
+    case 'CONTEXT_TYPE':
+      return request.context === condition.expectedValue ? pass() : fail();
+    case 'DATE_RANGE':
+      return typeof value === 'string' && Array.isArray(condition.expectedValue) && condition.expectedValue.length === 2
+        ? value >= String(condition.expectedValue[0]) && value <= String(condition.expectedValue[1])
+          ? pass()
+          : fail()
+        : unable();
+    case 'EVIDENCE_CONFIDENCE': {
+      if (itemsForConfidence(evidence).length === 0) return unable();
+      const threshold = Number(condition.expectedValue);
+      return Math.max(...evidence.map((item) => item.confidence)) >= threshold ? pass() : unable();
+    }
+    default:
+      return unable();
+  }
+}
+
+function itemsForConfidence(items: EvidenceItem[]): EvidenceItem[] {
+  return items;
+}
+
+function findingFor(
+  rule: RuleDefinition,
+  version: RuleVersion,
+  condition: RuleCondition,
+  result: ConditionResult,
+  index: number,
+): Finding {
+  return {
+    findingId: `${rule.ruleCode}-${version.version}-${index + 1}`,
+    ruleId: rule.ruleId,
+    ruleCode: rule.ruleCode,
+    ruleNumber: rule.ruleNumber,
+    subclause: rule.subclause,
+    ruleVersion: version.version,
+    status: result.status,
+    field: condition.targetField,
+    message: result.status === 'PASS' ? 'Requirement satisfied.' : result.message,
+    violationReason: result.reason,
+    evidenceUsed: result.evidence,
+    missingEvidence: result.missing,
+    conflicts: result.conflicts,
+    legalReferences: version.legalSources,
+    severity: rule.defaultSeverity,
+    requiresLegalReview: version.legalSources.some(
+      (source) => source.verificationStatus !== 'VERIFIED',
+    ),
+  };
+}
+
+function quantityFindings(request: InspectionRequest): Finding[] {
+  const findings: Finding[] = [];
+  const source = SOURCES.PRINCIPAL_2011;
+
+  if (request.measurements) {
+    const measurement = request.measurements;
+    const declared = normalizeQuantity(measurement.declaredQuantity, measurement.declaredUnit);
+    const actual = normalizeQuantity(measurement.actualQuantity, measurement.actualUnit);
+
+    if (!declared || !actual) {
+      findings.push({
+        findingId: 'PCR-SCHED-I-MPE-UNVERIFIED',
+        ruleId: 'PCR-SCHED-I-MPE',
+        ruleCode: 'PCR-SCHED-I-MPE',
+        ruleNumber: 'First Schedule',
+        ruleVersion: 1,
+        status: 'UNABLE_TO_VERIFY',
+        field: 'measurements',
+        message: 'Measurement units could not be normalized for First Schedule MPE evaluation.',
+        missingEvidence: ['measurements.declaredQuantity', 'measurements.actualQuantity'],
+        legalReferences: [source],
+        severity: 'HIGH',
+        requiresLegalReview: false,
+      });
+    } else {
+      const declaredBase = toBaseQuantity(declared.value, declared.unit);
+      const actualBase = toBaseQuantity(actual.value, actual.unit);
+
+      if (
+        (declaredBase.unit === 'g' || declaredBase.unit === 'mL') &&
+        actualBase.unit === declaredBase.unit
+      ) {
+        const result = firstScheduleMpe(
+          declaredBase.value,
+          actualBase.value,
+          declaredBase.unit,
+        );
+        findings.push({
+          findingId: 'PCR-SCHED-I-MPE',
+          ruleId: 'PCR-SCHED-I-MPE',
+          ruleCode: 'PCR-SCHED-I-MPE',
+          ruleNumber: 'First Schedule',
+          ruleVersion: 1,
+          status: result.applicable
+            ? result.withinTolerance
+              ? 'PASS'
+              : 'VIOLATION'
+            : 'UNABLE_TO_VERIFY',
+          field: 'measurements',
+          message: result.applicable
+            ? result.withinTolerance
+              ? `Measured deficiency is within MPE ${result.tolerance} ${declaredBase.unit}.`
+              : `Measured deficiency exceeds MPE ${result.tolerance} ${declaredBase.unit}.`
+            : result.reason ?? 'First Schedule MPE could not be evaluated.',
+          violationReason: result.withinTolerance
+            ? undefined
+            : 'Net quantity deficiency exceeds the First Schedule maximum permissible error.',
+          legalReferences: [source],
+          severity: 'CRITICAL',
+          requiresLegalReview: false,
+        });
+      } else {
+        findings.push({
+          findingId: 'PCR-SCHED-I-MPE-NON-WEIGHT',
+          ruleId: 'PCR-SCHED-I-MPE',
+          ruleCode: 'PCR-SCHED-I-MPE',
+          ruleNumber: 'First Schedule Table II',
+          ruleVersion: 1,
+          status: 'UNABLE_TO_VERIFY',
+          field: 'measurements',
+          message: 'Length, area and number require separate First Schedule Table II evaluation.',
+          legalReferences: [source],
+          severity: 'HIGH',
+          requiresLegalReview: false,
+        });
+      }
+    }
+  }
+
+  const quantity = getPath(request, 'declarations.netQuantity');
+  const unit = getPath(request, 'declarations.netQuantityUnit');
+  if (typeof quantity === 'number' && typeof unit === 'string') {
+    const normalized = normalizeQuantity(quantity, unit);
+    if (normalized) {
+      const schedule = isSecondScheduleStandard(
+        request.productMetadata.commodityCategory,
+        normalized.value,
+        normalized.unit,
+      );
+      if (schedule.applicable) {
+        findings.push({
+          findingId: 'PCR-R5-SCHEDULE-II',
+          ruleId: 'PCR-R5-SCHEDULE-II',
+          ruleCode: 'PCR-R5-SCHEDULE-II',
+          ruleNumber: '5',
+          ruleVersion: 1,
+          status: schedule.compliant ? 'PASS' : 'VIOLATION',
+          field: 'declarations.netQuantity',
+          message: schedule.compliant
+            ? 'Declared quantity matches a Second Schedule standard quantity.'
+            : `Declared quantity does not match the applicable Second Schedule standard quantities. ${schedule.description ?? ''}`.trim(),
+          violationReason: schedule.compliant
+            ? undefined
+            : 'Commodity is covered by the Second Schedule and uses a non-standard package quantity.',
+          legalReferences: [source],
+          severity: 'HIGH',
+          requiresLegalReview: false,
+        });
+      }
+    }
+  }
+
+  return findings;
+}
+
+function canonical(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonical(object[key])}`)
+    .join(',')}}`;
+}
+
+export function evaluateInspection(
+  request: InspectionRequest,
+  rules: RuleDefinition[] = RULES,
+): OverallInspectionResult {
+  const findings: Finding[] = [];
+
+  for (const rule of rules.filter((item) => item.enabled)) {
+    const version = chooseVersion(rule, request.inspectionDate.slice(0, 10));
+    if (!version) continue;
+
+    if (rule.ruleId === 'PCR-R3') {
+      const quantity = getPath(request, 'declarations.netQuantity');
+      const unit = getPath(request, 'declarations.netQuantityUnit');
+      const normalized =
+        typeof quantity === 'number' && typeof unit === 'string'
+          ? normalizeQuantity(quantity, unit)
+          : undefined;
+      const excluded =
+        request.productMetadata.consumerType === 'industrial' ||
+        request.productMetadata.consumerType === 'institutional' ||
+        !!(
+          normalized &&
+          ((normalized.unit === 'kg' && normalized.value > 25) ||
+            (normalized.unit === 'L' && normalized.value > 25))
+        );
+
+      findings.push({
+        findingId: `${rule.ruleCode}-${version.version}`,
+        ruleId: rule.ruleId,
+        ruleCode: rule.ruleCode,
+        ruleNumber: rule.ruleNumber,
+        ruleVersion: version.version,
+        status: excluded ? 'NOT_APPLICABLE' : 'PASS',
+        message: excluded
+          ? 'Chapter II is excluded by the identified Rule 3 applicability condition, subject to commodity-specific exceptions.'
+          : 'Chapter II applicability gate passed.',
+        legalReferences: version.legalSources,
+        severity: rule.defaultSeverity,
+        requiresLegalReview: false,
+      });
+      continue;
+    }
+
+    if (!applicable(request, version)) {
+      findings.push({
+        findingId: `${rule.ruleCode}-${version.version}-NA`,
+        ruleId: rule.ruleId,
+        ruleCode: rule.ruleCode,
+        ruleNumber: rule.ruleNumber,
+        ruleVersion: version.version,
+        status: 'NOT_APPLICABLE',
+        message: 'Rule is outside its structured applicability criteria.',
+        legalReferences: version.legalSources,
+        severity: rule.defaultSeverity,
+        requiresLegalReview: false,
+      });
+      continue;
+    }
+
+    if (version.status === 'REQUIRES_LEGAL_REVIEW') {
+      findings.push({
+        findingId: `${rule.ruleCode}-${version.version}-LEGAL`,
+        ruleId: rule.ruleId,
+        ruleCode: rule.ruleCode,
+        ruleNumber: rule.ruleNumber,
+        ruleVersion: version.version,
+        status: 'UNABLE_TO_VERIFY',
+        message: 'Rule version is marked for legal review.',
+        legalReferences: version.legalSources,
+        severity: rule.defaultSeverity,
+        requiresLegalReview: true,
+      });
+      continue;
+    }
+
+    version.conditions.forEach((condition, index) => {
+      findings.push(findingFor(rule, version, condition, conditionResult(request, condition), index));
+    });
+  }
+
+  findings.push(...quantityFindings(request));
+
+  const summary = {
+    totalRulesEvaluated: findings.length,
+    passed: findings.filter((finding) => finding.status === 'PASS').length,
+    violations: findings.filter((finding) => finding.status === 'VIOLATION').length,
+    unableToVerify: findings.filter((finding) => finding.status === 'UNABLE_TO_VERIFY').length,
+    notApplicable: findings.filter((finding) => finding.status === 'NOT_APPLICABLE').length,
+  };
+
+  const overallStatus: EvaluationStatus =
+    summary.violations > 0
+      ? 'VIOLATION'
+      : summary.unableToVerify > 0
+        ? 'UNABLE_TO_VERIFY'
+        : summary.passed > 0
+          ? 'PASS'
+          : 'NOT_APPLICABLE';
+
+  const base = {
+    inspectionId: request.inspectionId,
+    productId: request.productId,
+    inspectionDate: request.inspectionDate,
+    overallStatus,
+    engineVersion: ENGINE_VERSION,
+    ruleSetVersion: RULESET_VERSION,
+    summary,
+    findings,
+  };
+
+  return {
+    ...base,
+    auditHash: createHash('sha256').update(canonical(base)).digest('hex'),
+  };
+}
