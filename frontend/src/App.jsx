@@ -9,6 +9,7 @@ import Products from "./pages/Products";
 import ProductDetails from "./pages/ProductDetails";
 import CategoryPage from "./pages/CategoryPage";
 import FoodProductRegistration from "./pages/FoodProductRegistration";
+import ManualProductRegistration from "./pages/ManualProductRegistration";
 import History from "./pages/History";
 import Reports from "./pages/Reports";
 import Profile from "./pages/Profile";
@@ -26,7 +27,7 @@ function App() {
     <Route element={<Protected />}><Route element={<Layout />}>
       <Route path="/" element={<Dashboard />} /><Route path="/scan" element={<Scan />} />
       <Route path="/shops" element={<Shops />} /><Route path="/shops/:shopId" element={<ShopDetails />} /><Route path="/shops/:shopId/products" element={<ShopProducts />} />
-      <Route path="/products" element={<Products />} /><Route path="/products/register" element={<FoodProductRegistration />} /><Route path="/products/category/:categoryId" element={<CategoryPage />} /><Route path="/products/item/:id" element={<ProductDetails />} />
+      <Route path="/products" element={<Products />} /><Route path="/products/register" element={<FoodProductRegistration />} /><Route path="/products/manual-register" element={<ManualProductRegistration />} /><Route path="/products/category/:categoryId" element={<CategoryPage />} /><Route path="/products/item/:id" element={<ProductDetails />} />
       <Route path="/history" element={<History />} /><Route path="/reports" element={<Reports />} /><Route path="/profile" element={<Profile />} />
       <Route element={<AdminOnly />}><Route path="/admin/categories" element={<AdminCategories />} /></Route>
     </Route></Route>
