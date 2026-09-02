@@ -1,4 +1,4 @@
-import type { EvaluationStatus, Finding, InspectionRequest } from '../../domain/types.js';
+import type { EvaluationStatus, Finding, InspectionRequest, LegalSourceReference } from '../../domain/types.js';
 import { SOURCES } from '../legal/sources.js';
 
 function value(r: InspectionRequest, field: string): unknown {
@@ -13,7 +13,7 @@ function bool(r: InspectionRequest, field: string): boolean | undefined {
   if (v === false || String(v).toLowerCase() === 'false') return false;
   return undefined;
 }
-function finding(rule: string, id: string, status: EvaluationStatus, field: string, message: string, reason?: string, missing?: string[], source = SOURCES.PRINCIPAL_2011): Finding {
+function finding(rule: string, id: string, status: EvaluationStatus, field: string, message: string, reason?: string, missing?: string[], source: LegalSourceReference = SOURCES.PRINCIPAL_2011): Finding {
   return { findingId: id, ruleId: `PCR-R${rule}`, ruleCode: `PCR-R${rule}`, ruleNumber: rule, ruleVersion: 1, status, field, message, violationReason: reason, missingEvidence: missing, legalReferences: [source], severity: status === 'VIOLATION' ? 'CRITICAL' : 'HIGH', requiresLegalReview: false };
 }
 
