@@ -1,0 +1,52 @@
+import type { LegalSourceReference } from '../../../domain/types.js';
+
+export const SOURCES: Record<string, LegalSourceReference> = {
+  PRINCIPAL_2011: {
+    sourceId: 'DCA-PCR-2011-GSR-202E', notification: 'G.S.R. 202(E)',
+    title: 'Legal Metrology (Packaged Commodities) Rules, 2011', date: '2011-03-07',
+    effectiveFrom: '2011-04-01', effectiveUntil: null, rule: 'Principal Rules',
+    sourceDocument: 'Department of Consumer Affairs consolidated PCR publication',
+    sourceUrl: 'https://consumeraffairs.gov.in/public/upload/admin/cmsfiles/whatsnews/Book_on_Legal_Metrology_Packaged_Commodities_Rules%2C2011_with_all_amendments_whatsnews.pdf',
+    verificationStatus: 'VERIFIED'
+  },
+  AMEND_2011_784E: {
+    sourceId: 'DCA-PCR-2011-GSR-784E', notification: 'G.S.R. 784(E)',
+    title: 'Legal Metrology (Packaged Commodities) Third Amendment Rules, 2011', date: '2011-10-24',
+    effectiveFrom: '2012-07-01', effectiveUntil: null, rule: 'Rules 5, 6, 12, 19, 26 and Fourth Schedule',
+    sourceDocument: 'Department of Consumer Affairs consolidated PCR publication',
+    verificationStatus: 'VERIFIED'
+  },
+  AMEND_2025_881E: {
+    sourceId: 'DCA-PCR-2025-GSR-881E', notification: 'G.S.R. 881(E)',
+    title: 'Legal Metrology (Packaged Commodities) Second (Amendment) Rules, 2025', date: '2025-12-02',
+    effectiveFrom: '2026-02-01', effectiveUntil: null, rule: '26(a)',
+    sourceDocument: 'Gazette notification',
+    sourceUrl: 'https://consumeraffairs.gov.in/public/upload/files/2nd%20PCR%20Pan%20Masala_1764736734.pdf',
+    verificationStatus: 'VERIFIED'
+  },
+  AMEND_2026_128E: {
+    sourceId: 'DCA-PCR-2026-GSR-128E', notification: 'G.S.R. 128(E)',
+    title: 'Legal Metrology (Packaged Commodities) Amendment Rules, 2026', date: '2026-02-13',
+    effectiveFrom: '2026-07-01', effectiveUntil: '2027-06-30', rule: '6(10A)',
+    sourceDocument: 'Gazette notification',
+    sourceUrl: 'https://consumeraffairs.gov.in/public/upload/files/2026.02.13%20PCR%201st%20COO%20Filter%20on%20e-commerce%20websites_1771231030.pdf',
+    verificationStatus: 'VERIFIED'
+  },
+  AMEND_2026_312E: {
+    sourceId: 'DCA-PCR-2026-SECOND-COO', notification: 'Second Amendment Rules, 2026',
+    title: 'Legal Metrology (Packaged Commodities) Second Amendment Rules, 2026', date: '2026-04-27',
+    effectiveFrom: '2027-07-01', effectiveUntil: null, rule: '6(10A)',
+    sourceDocument: 'Gazette notification',
+    sourceUrl: 'https://consumeraffairs.gov.in/public/upload/files/2026.4.27%20PCR%202nd%20COO%20from%201.7.2027_1777348487.pdf',
+    verificationStatus: 'VERIFIED'
+  },
+  AMEND_2026_418E: {
+    sourceId: 'DCA-PCR-2026-GSR-418E', notification: 'G.S.R. 418(E)',
+    title: 'Legal Metrology (Packaged Commodities) Third Amendment Rules, 2026', date: '2026-05-29',
+    effectiveFrom: '2026-05-29', effectiveUntil: null, rule: '4 Explanation-2 and 27',
+    sourceDocument: 'Gazette notification',
+    verificationStatus: 'VERIFIED'
+  }
+};
+
+export const legalSource = (id: keyof typeof SOURCES): LegalSourceReference => SOURCES[id];
