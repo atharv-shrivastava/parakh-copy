@@ -7,6 +7,7 @@ import { tableIIFinding } from './table-ii-evaluator.js';
 import { unitSalePriceFinding } from './unit-sale-price-evaluator.js';
 import { ecommerceCountryOriginFinding } from './ecommerce-country-origin-evaluator.js';
 import { rule6DeclarationsFindings } from './rule-6-declarations-evaluator.js';
+import { rules14To17Findings } from './rules-14-17-evaluator.js';
 
 const SOURCE = SOURCES.PRINCIPAL_2011;
 function path(input: unknown, key: string): unknown { return key.split('.').reduce<unknown>((v, p) => v != null && typeof v === 'object' ? (v as Record<string, unknown>)[p] : undefined, input); }
@@ -78,7 +79,8 @@ export function evaluateInspectionComplete(r: InspectionRequest): OverallInspect
   const unitSalePrice = unitSalePriceFinding(r);
   const ecommerceCountryOrigin = ecommerceCountryOriginFinding(r);
   const rule6 = rule6DeclarationsFindings(r);
-  const added = [...rule6, ...rule11(r), ...rule12_6(r), ...rule13_5_ii(r), ...rule18(r), ...(tableII ? [tableII] : []), ...(unitSalePrice ? [unitSalePrice] : []), ...(ecommerceCountryOrigin ? [ecommerceCountryOrigin] : [])];
+  const rules14To17 = rules14To17Findings(r);
+  const added = [...rule6, ...rule11(r), ...rule12_6(r), ...rule13_5_ii(r), ...rule18(r), ...rules14To17, ...(tableII ? [tableII] : []), ...(unitSalePrice ? [unitSalePrice] : []), ...(ecommerceCountryOrigin ? [ecommerceCountryOrigin] : [])];
   const findings = [...historicalFindings, ...added];
   const summary = { totalRulesEvaluated: findings.length, passed: findings.filter(f => f.status === 'PASS').length, violations: findings.filter(f => f.status === 'VIOLATION').length, unableToVerify: findings.filter(f => f.status === 'UNABLE_TO_VERIFY').length, notApplicable: findings.filter(f => f.status === 'NOT_APPLICABLE').length };
   const overallStatus: EvaluationStatus = summary.violations > 0 ? 'VIOLATION' : summary.unableToVerify > 0 ? 'UNABLE_TO_VERIFY' : summary.passed > 0 ? 'PASS' : 'NOT_APPLICABLE';
