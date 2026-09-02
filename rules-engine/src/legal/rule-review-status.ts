@@ -1,17 +1,14 @@
 import type { EvaluationStatus, Finding, InspectionRequest } from '../../domain/types.js';
 import { SOURCES } from './sources.js';
+import { rule21Findings } from '../engine/rule-21-evaluator.js';
 
 /**
  * Legal provisions whose current consolidated wording has not yet been
  * verified to enforcement-grade standard by the engine's legal-source pass.
- *
- * These are deliberately represented as data, not executable assumptions.
- * An unverified provision can therefore never silently become a PASS or
- * VIOLATION merely because an inspection happened to contain related fields.
+ * Rule 21 is implemented separately from this fallback list because its
+ * current text has now been verified.
  */
 export const UNVERIFIED_RULES = Object.freeze([
-  '20',
-  '21',
   '22',
   '23',
   '24',
@@ -47,5 +44,6 @@ export function legalReviewFinding(
 }
 
 export function unverifiedRuleFindings(inspection: InspectionRequest): Finding[] {
-  return UNVERIFIED_RULES.map(ruleNumber => legalReviewFinding(inspection, ruleNumber));
+  const verifiedRule21 = rule21Findings(inspection);
+  return [...verifiedRule21, ...UNVERIFIED_RULES.map(ruleNumber => legalReviewFinding(inspection, ruleNumber))];
 }
