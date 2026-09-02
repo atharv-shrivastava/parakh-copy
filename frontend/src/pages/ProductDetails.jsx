@@ -2,8 +2,133 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiFetch, getUser } from "../lib/auth";
 import "../styles/products.css";
+
 const API_URL = "http://localhost:5000/api";
-function parseJson(v, fallback) { if (v == null) return fallback; if (typeof v !== "string") return v; try { return JSON.parse(v); } catch { return fallback; } }
-function ProductDetails() { const { id } = useParams(); const navigate = useNavigate(); const [product, setProduct] = useState(null), [error, setError] = useState(""); useEffect(() => { apiFetch(`${API_URL}/products/${id}`).then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || "Product not found"); setProduct(d); }).catch((e) => setError(e.message)); }, [id]); const images = useMemo(() => { if (!product) return []; const x = parseJson(product.imageUrls, []); return Array.isArray(x) && x.length ? x : product.imageUrl ? [product.imageUrl] : []; }, [product]); const ocr = useMemo(() => parseJson(product?.ocrData, null), [product]); if (error) return <div className="products-page"><p>{error}</p></div>; if (!product) return <div className="products-page"><p>Loading product...</p></div>; const status = product.complianceStatus || "NEEDS_REVIEW"; const shop = product.inspections?.[0]?.shop; const inspector = product.inspections?.[0]?.worker?.name || product.owner?.name || getUser()?.name || "Unknown"; const path = [product.category?.parent?.parent?.parent, product.category?.parent?.parent, product.category?.parent, product.category].filter(Boolean).map((x) => x.name).join(" → "); async function remove() { if (!window.confirm(`Delete ${product.productName}?`)) return; const r = await apiFetch(`${API_URL}/products/${id}`, { method: "DELETE" }); const d = await r.json(); if (!r.ok) return setError(d.error || "Delete failed"); navigate(`/products/category/${product.categoryId}`); } function downloadPdf() { window.print(); }
- return <div className="products-page"><Link to={`/products/category/${product.categoryId}`} className="back-link">← Back to {product.category?.name}</Link><div className="page-header"><p className="eyebrow">REGISTERED PRODUCT</p><h1>{product.productName}</h1><p>{product.brandName || "Company not recorded"}</p><p>{path}</p></div>{images.length > 0 && <section className="product-categories"><div className="section-heading"><div><h2>Uploaded package images</h2><p>{images.length} retained evidence image(s).</p></div></div><div className="product-image-gallery">{images.map((src, i) => <img key={i} src={src} alt={`Package evidence ${i + 1}`} />)}</div></section>}<section className="product-actions"><div className={`compliance-badge ${status.toLowerCase()}`}>{status}</div><h2>Inspection</h2><p>{product.violationReason || "No inspection note recorded."}</p><p><strong>Shop:</strong> {shop?.name || "Not recorded"}</p><p><strong>Inspector:</strong> {inspector}</p><p><strong>Date:</strong> {new Date(product.inspections?.[0]?.inspectedAt || product.createdAt).toLocaleString()}</p><button className="secondary-action" onClick={downloadPdf}>Download / Print PDF</button><button className="delete-category-button" onClick={remove}>Delete product</button></section><section className="product-categories"><div className="section-heading"><div><h2>Product details</h2></div></div><div className="ocr-details-grid"><div><strong>Final category</strong><span>{product.category?.name}</span></div><div><strong>Quantity</strong><span>{product.netQuantity || "Not recorded"} {product.unit || ""}</span></div><div><strong>MRP</strong><span>{product.mrp == null ? "Not recorded" : `₹${product.mrp}`}</span></div><div><strong>Barcode</strong><span>{product.barcode || "Not recorded"}</span></div><div><strong>Shop</strong><span>{shop?.name || "Not recorded"}</span></div><div><strong>User profile</strong><span>{product.owner?.name || inspector}</span></div></div></section>{ocr && <section className="product-categories"><div className="section-heading"><div><h2>OCR declarations</h2><p>Structured OCR evidence retained with this registration.</p></div></div><div className="ocr-details-grid">{Object.entries(ocr).filter(([k, v]) => v && typeof v === "object" && v.status === "found").map(([k, v]) => <div key={k}><strong>{k.replace(/([A-Z])/g, " $1")}</strong><span>{String(v.value)}</span>{typeof v.confidence === "number" && <small>{Math.round(v.confidence * 100)}% confidence</small>}</div>)}</div>{ocr.rawText && <details><summary>Raw OCR text</summary><pre className="ocr-raw-text">{ocr.rawText}</pre></details>}</section>}</div>; }
+
+function parseJson(value, fallback) {
+  if (value == null) return fallback;
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function ProductDetails() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [product, setProduct] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    apiFetch(`${API_URL}/products/${id}`)
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Product not found");
+        setProduct(data);
+      })
+      .catch((e) => setError(e.message));
+  }, [id]);
+
+  const images = useMemo(() => {
+    if (!product) return [];
+    const value = parseJson(product.imageUrls, []);
+    return Array.isArray(value) && value.length ? value : product.imageUrl ? [product.imageUrl] : [];
+  }, [product]);
+
+  const stored = useMemo(() => parseJson(product?.ocrData, null), [product]);
+  const ocr = stored?.ocr && typeof stored.ocr === "object" ? stored.ocr : stored;
+  const compliance = stored?.compliance && typeof stored.compliance === "object" ? stored.compliance : null;
+  const complianceError = stored?.complianceError || null;
+
+  if (error) return <div className="products-page"><p>{error}</p></div>;
+  if (!product) return <div className="products-page"><p>Loading product...</p></div>;
+
+  const status = product.complianceStatus || "NEEDS_REVIEW";
+  const shop = product.inspections?.[0]?.shop;
+  const inspector = product.inspections?.[0]?.worker?.name || product.owner?.name || getUser()?.name || "Unknown";
+  const path = [
+    product.category?.parent?.parent?.parent,
+    product.category?.parent?.parent,
+    product.category?.parent,
+    product.category,
+  ].filter(Boolean).map((x) => x.name).join(" → ");
+
+  async function remove() {
+    if (!window.confirm(`Delete ${product.productName}?`)) return;
+    const r = await apiFetch(`${API_URL}/products/${id}`, { method: "DELETE" });
+    const data = await r.json();
+    if (!r.ok) return setError(data.error || "Delete failed");
+    navigate(`/products/category/${product.categoryId}`);
+  }
+
+  function downloadPdf() { window.print(); }
+
+  return <div className="products-page">
+    <Link to={`/products/category/${product.categoryId}`} className="back-link">← Back to {product.category?.name}</Link>
+    <div className="page-header">
+      <p className="eyebrow">REGISTERED PRODUCT</p>
+      <h1>{product.productName}</h1>
+      <p>{product.brandName || "Company not recorded"}</p>
+      <p>{path}</p>
+    </div>
+
+    {images.length > 0 && <section className="product-categories">
+      <div className="section-heading"><div><h2>Uploaded package images</h2><p>{images.length} retained evidence image(s).</p></div></div>
+      <div className="product-image-gallery">{images.map((src, i) => <img key={i} src={src} alt={`Package evidence ${i + 1}`} />)}</div>
+    </section>}
+
+    <section className="product-actions">
+      <div className={`compliance-badge ${status.toLowerCase()}`}>{status}</div>
+      <h2>Inspection</h2>
+      <p>{product.violationReason || "No inspection note recorded."}</p>
+      <p><strong>Shop:</strong> {shop?.name || "Not recorded"}</p>
+      <p><strong>Inspector/User:</strong> {inspector}</p>
+      <p><strong>Date:</strong> {new Date(product.inspections?.[0]?.inspectedAt || product.createdAt).toLocaleString()}</p>
+      <button className="secondary-action" onClick={downloadPdf}>Download / Print PDF</button>
+      <button className="delete-category-button" onClick={remove}>Delete product</button>
+    </section>
+
+    <section className="product-categories">
+      <div className="section-heading"><div><h2>Product details</h2></div></div>
+      <div className="ocr-details-grid">
+        <div><strong>Final category</strong><span>{path || product.category?.name}</span></div>
+        <div><strong>Quantity</strong><span>{product.netQuantity || "Not recorded"} {product.unit || ""}</span></div>
+        <div><strong>MRP</strong><span>{product.mrp == null ? "Not recorded" : `₹${product.mrp}`}</span></div>
+        <div><strong>Barcode</strong><span>{product.barcode || "Not recorded"}</span></div>
+        <div><strong>Shop</strong><span>{shop?.name || "Not recorded"}</span></div>
+        <div><strong>User profile</strong><span>{product.owner?.name || inspector}</span></div>
+      </div>
+    </section>
+
+    {compliance && <section className="product-categories">
+      <div className="section-heading"><div><h2>Rules Engine assessment</h2><p>{compliance.engineVersion || "Legal Metrology engine"} · {compliance.ruleSetVersion || "Current rule set"}</p></div></div>
+      <div className="ocr-details-grid">
+        <div><strong>Overall status</strong><span>{compliance.overallStatus || status}</span></div>
+        <div><strong>Rules evaluated</strong><span>{compliance.summary?.totalRulesEvaluated ?? compliance.findings?.length ?? 0}</span></div>
+        <div><strong>Passed</strong><span>{compliance.summary?.passed ?? 0}</span></div>
+        <div><strong>Violations</strong><span>{compliance.summary?.violations ?? 0}</span></div>
+        <div><strong>Unable to verify</strong><span>{compliance.summary?.unableToVerify ?? 0}</span></div>
+        <div><strong>Audit hash</strong><span className="break-anywhere">{compliance.auditHash || "Not available"}</span></div>
+      </div>
+      {compliance.findings?.length > 0 && <div className="rules-findings">
+        {compliance.findings.map((finding) => <div className={`finding-row ${finding.status.toLowerCase()}`} key={finding.findingId}>
+          <strong>{finding.ruleNumber} · {finding.status}</strong>
+          <span>{finding.message}</span>
+          {finding.violationReason && <small>{finding.violationReason}</small>}
+        </div>)}
+      </div>}
+    </section>}
+
+    {complianceError && <div className="status-message">Rules Engine could not be reached during this inspection: {complianceError.message}</div>}
+
+    {ocr && <section className="product-categories">
+      <div className="section-heading"><div><h2>OCR declarations</h2><p>Structured OCR evidence retained with this registration.</p></div></div>
+      <div className="ocr-details-grid">
+        {Object.entries(ocr).filter(([key, value]) => key !== "rawText" && value && typeof value === "object" && value.status === "found").map(([key, value]) => (
+          <div key={key}><strong>{key.replace(/([A-Z])/g, " $1")}</strong><span>{String(value.value)}</span>{typeof value.confidence === "number" && <small>{Math.round(value.confidence * 100)}% confidence</small>}</div>
+        ))}
+      </div>
+      {ocr.rawText && <details><summary>Raw OCR text</summary><pre className="ocr-raw-text">{ocr.rawText}</pre></details>}
+    </section>}
+  </div>;
+}
+
 export default ProductDetails;
