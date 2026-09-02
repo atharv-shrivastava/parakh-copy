@@ -36,6 +36,55 @@ async function fileToDataUrl(file) {
   return canvas.toDataURL("image/jpeg", 0.72);
 }
 
+function normalizePuterOcr(candidate, rawText) {
+  const result = {};
+  for (const key of OCR_FIELDS) {
+    const field = candidate?.[key];
+    result[key] = field && typeof field === "object" ? {
+      value: field.value ?? null,
+      raw: field.raw ?? null,
+      confidence: Number.isFinite(Number(field.confidence)) ? Number(field.confidence) : 0,
+      evidence: field.evidence ?? null,
+      status: ["found","absent","unreadable","ambiguous"].includes(field.status) ? field.status : "absent",
+    } : { value: null, raw: null, confidence: 0, evidence: null, status: "absent" };
+  }
+  result.otherDeclarations = Array.isArray(candidate?.otherDeclarations) ? candidate.otherDeclarations : [];
+  result.rawText = typeof candidate?.rawText === "string" && candidate.rawText.trim() ? candidate.rawText : rawText;
+  result.warnings = Array.isArray(candidate?.warnings) ? candidate.warnings : [];
+  result.unreadableFields = Array.isArray(candidate?.unreadableFields) ? candidate.unreadableFields : [];
+  result.needsReview = Boolean(candidate?.needsReview) || OCR_FIELDS.some((key) => {
+    const f = result[key];
+    return f.status === "unreadable" || f.status === "ambiguous" || (f.status === "found" && f.confidence < 0.6);
+  });
+  return result;
+}
+
+function parsePuterJson(text) {
+  const cleaned = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  try { return JSON.parse(cleaned); } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
+    throw new Error("Puter returned invalid structured OCR data.");
+  }
+}
+
+async function runPuterOcr(files) {
+  const puter = window.puter;
+  if (!puter?.ai?.img2txt) throw new Error("Puter.js OCR is not loaded. Refresh the page and try again.");
+  const chunks = [];
+  for (let i = 0; i < files.length; i += 1) {
+    if (files[i].size > MAX_PUTER_IMAGE_SIZE) throw new Error(`Image ${i + 1} exceeds Puter OCR’s 10 MB limit.`);
+    const text = await puter.ai.img2txt(files[i]);
+    chunks.push(`[IMAGE ${i + 1}]\n${String(text || "").trim()}`);
+  }
+  const rawText = chunks.filter((x) => x.trim()).join("\n\n");
+  if (!rawText.trim()) throw new Error("Puter OCR found no readable text.");
+  if (!puter.ai.chat) return normalizePuterOcr({}, rawText);
+  const prompt = "Convert this OCR text into JSON fields for PARAKH. Never invent data. For every field use {value,raw,confidence,evidence,status}; status is found, absent, unreadable or ambiguous. Return only JSON. Fields: " + OCR_FIELDS.join(", ") + ". Also return otherDeclarations, rawText, warnings, unreadableFields, needsReview. OCR text:\n\n" + rawText;
+  const response = await puter.ai.chat(prompt, { model: "gpt-5.6-luna", temperature: 0, max_tokens: 5000 });
+  return normalizePuterOcr(parsePuterJson(response?.message?.content || response?.content || response?.text || ""), rawText);
+}
 function Scan() {
   const videoRef = useRef(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -173,59 +222,48 @@ function Scan() {
   async function analyzeImages() {
     if (!images.length) return setMessage("Add at least one package image first.");
     setAnalyzing(true);
-    setMessage("OCR service is extracting declarations and running the Rules Engine assessment...");
+    setMessage("Puter.js OCR is extracting text from the selected images...");
     try {
-      const fd = new FormData();
-      images.forEach(({ file }) => fd.append("images", file));
-      fd.append("inspectionId", crypto.randomUUID());
-      fd.append("productId", crypto.randomUUID());
-      fd.append("inspectionDate", new Date().toISOString().slice(0, 10));
-      fd.append("context", "physical_package");
-      fd.append("commodityCategory", selectedCategory?.name || "packaged commodity");
-      fd.append("consumerType", "general");
-      fd.append("isImported", "false");
-      fd.append("packageType", "retail");
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), OCR_CLIENT_TIMEOUT_MS);
-      let response;
-      try {
-        response = await fetch(OCR_URL, { method: "POST", body: fd, signal: controller.signal });
-      } catch (error) {
-        if (error?.name === "AbortError") throw new Error("OCR analysis timed out. Check that Gemini and the Rules Engine are running, then try again.");
-        throw new Error(`Could not reach OCR service: ${error.message}`);
-      } finally {
-        clearTimeout(timeout);
-      }
+      const extracted = await runPuterOcr(images.map(({ file }) => file));
+      setMessage("Puter OCR complete. Running Legal Metrology Rules Engine...");
+      const response = await apiFetch(PUTER_EVALUATE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ocr: extracted,
+          inspectionId: crypto.randomUUID(),
+          productId: crypto.randomUUID(),
+          inspectionDate: new Date().toISOString().slice(0, 10),
+          context: "physical_package",
+          commodityCategory: selectedCategory?.name || "packaged commodity",
+          consumerType: "general",
+          isImported: false,
+          packageType: "retail",
+        }),
+      });
       const data = await response.json().catch(() => ({}));
-if (!response.ok) {
-        const errorMessage =
-          typeof data.error === "string"
-            ? data.error
-            : data.error?.message || data.error?.code || "Inspection analysis failed";
-        throw new Error(errorMessage);
-      }
-      setOcr(data.ocr);
+      if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : data.error?.message || "Rules Engine evaluation failed");
+      setOcr(extracted);
       setCompliance(data.compliance || null);
       setComplianceError(data.complianceError || null);
       setForm((current) => ({
         ...current,
-        brandName: fieldValue(data.ocr, "brandName") || fieldValue(data.ocr, "manufacturer"),
-        productName: fieldValue(data.ocr, "productName"),
-        netQuantity: fieldValue(data.ocr, "netQuantity"),
-        unit: fieldValue(data.ocr, "unit"),
-        mrp: fieldValue(data.ocr, "mrp"),
-        barcode: fieldValue(data.ocr, "barcode"),
-        description: [data.ocr.rawText, ...(data.ocr.otherDeclarations || [])].filter(Boolean).join("\n"),
+        brandName: fieldValue(extracted, "brandName") || fieldValue(extracted, "manufacturer"),
+        productName: fieldValue(extracted, "productName"),
+        netQuantity: fieldValue(extracted, "netQuantity"),
+        unit: fieldValue(extracted, "unit"),
+        mrp: fieldValue(extracted, "mrp"),
+        barcode: fieldValue(extracted, "barcode"),
+        description: [extracted.rawText, ...(extracted.otherDeclarations || [])].filter(Boolean).join("\n"),
       }));
       setShowRegistration(true);
-      setMessage(data.complianceError ? `OCR extraction complete. Rules Engine unavailable: ${data.complianceError.message}` : "Analysis complete. OCR extracted and Rules Engine evaluated the inspection.");
+      setMessage(data.complianceError ? `OCR complete. Rules Engine unavailable: ${data.complianceError.message}` : "Puter OCR and Rules Engine analysis complete.");
     } catch (e) {
-      setMessage(e.message);
+      setMessage(e.message || "Puter OCR analysis failed.");
     } finally {
       setAnalyzing(false);
     }
   }
-
   function updateForm(key, value) { setForm((current) => ({ ...current, [key]: value })); }
 
   async function saveProduct(event) {
