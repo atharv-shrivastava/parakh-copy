@@ -11,6 +11,9 @@ function evidenceValue(r: InspectionRequest, field: string): unknown { const dir
 function currencyNumber(v: unknown): number | undefined { if (typeof v === 'number' && Number.isFinite(v)) return v; if (typeof v !== 'string') return undefined; const n = Number(v.replace(/₹|rs\.?/gi, '').trim()); return Number.isFinite(n) ? n : undefined; }
 function finding(id: string, code: string, number: string, status: EvaluationStatus, field: string, message: string, reason?: string, missing?: string[]): Finding { return { findingId: id, ruleId: code, ruleCode: code, ruleNumber: number, ruleVersion: 1, status, field, message, violationReason: reason, missingEvidence: missing, legalReferences: [SOURCE], severity: status === 'VIOLATION' ? 'CRITICAL' : 'HIGH', requiresLegalReview: false }; }
 const THIRD_SCHEDULE = ['soap', 'lotion', 'cream', 'camphor'];
+const QUANTITY_AMBIGUITY_PATTERNS = [/\bapproximately\b/i, /\bapprox\.?\b/i, /\babout\b/i, /\baround\b/i, /\broughly\b/i, /\bnearly\b/i, /\bmore\s+or\s+less\b/i, /\bup\s+to\b/i];
+const COUNT_WORDS = ['number', 'unit', 'piece', 'pieces', 'pair', 'pairs', 'set', 'sets'];
+
 function rule11(r: InspectionRequest): Finding[] {
   const out: Finding[] = []; const p = r.packaging; if (!p) return out;
   if (p.netQuantityExcludesPackaging === false) out.push(finding('PCR-R11-NET', 'PCR-R11-1', '11(1)', 'VIOLATION', 'packaging.netQuantityExcludesPackaging', 'The measured net quantity is not confirmed to exclude wrappers or other packaging material.', 'Rule 11(1) requires net quantity to exclude wrappers/materials other than the commodity.'));
@@ -28,6 +31,28 @@ function rule11(r: InspectionRequest): Finding[] {
   }
   return out;
 }
+
+function rule12_6(r: InspectionRequest): Finding[] {
+  const raw = evidenceValue(r, 'declarations.quantityText') ?? evidenceValue(r, 'quantityDeclarationText') ?? evidenceValue(r, 'declarations.netQuantityText');
+  if (raw === undefined || raw === null || String(raw).trim() === '') return [];
+  const text = String(raw).trim();
+  if (QUANTITY_AMBIGUITY_PATTERNS.some(p => p.test(text))) return [finding('PCR-R12-6-VIOLATION', 'PCR-R12-6', '12(6)', 'VIOLATION', 'declarations.quantityText', `The quantity declaration contains an expression that can create an exaggerated, misleading or inadequate expression as to quantity: “${text}”.`, 'Rule 12(6) prohibits words or expressions of any sort that tend to create or are likely to create an exaggerated, misleading or inadequate expression as to the quantity of the commodity contained in the package.')];
+  return [finding('PCR-R12-6-PASS', 'PCR-R12-6', '12(6)', 'PASS', 'declarations.quantityText', 'No configured misleading quantity-expression pattern was detected in the supplied quantity declaration.')];
+}
+
+function rule13_5_ii(r: InspectionRequest): Finding[] {
+  const soldByNumber = evidenceValue(r, 'productMetadata.soldByNumber') ?? evidenceValue(r, 'soldByNumber') ?? evidenceValue(r, 'declarations.soldByNumber');
+  if (soldByNumber !== true && String(soldByNumber).toLowerCase() !== 'true') return [];
+  const raw = evidenceValue(r, 'declarations.quantityText') ?? evidenceValue(r, 'quantityDeclarationText') ?? evidenceValue(r, 'declarations.netQuantityText');
+  if (raw === undefined || raw === null || String(raw).trim() === '') return [finding('PCR-R13-5-II-UNVERIFIED', 'PCR-R13-5-II', '13(5)(ii)', 'UNABLE_TO_VERIFY', 'declarations.quantityText', 'The package is identified as an item sold by number, but the quantity declaration text was not supplied.', undefined, ['declarations.quantityText'])];
+  const text = String(raw).trim();
+  const hasNumber = /\d/.test(text);
+  const hasCountWord = COUNT_WORDS.some(word => new RegExp(`\\b${word}\\b`, 'i').test(text));
+  if (!hasNumber) return [finding('PCR-R13-5-II-VIOLATION', 'PCR-R13-5-II', '13(5)(ii)', 'VIOLATION', 'declarations.quantityText', `The quantity declaration “${text}” does not state a numerical quantity for an item sold by number.`, 'Rule 13(5)(ii) requires the number, unit, piece, pair, set or another word representing the quantity to be mentioned.')];
+  if (!hasCountWord) return [finding('PCR-R13-5-II-UNVERIFIED', 'PCR-R13-5-II', '13(5)(ii)', 'UNABLE_TO_VERIFY', 'declarations.quantityText', `The numerical declaration “${text}” does not contain a recognised number/unit/piece/pair/set quantity word; another legally valid quantity word may be present and requires verification.`, undefined, ['declarations.quantityUnitWord'])];
+  return [finding('PCR-R13-5-II-PASS', 'PCR-R13-5-II', '13(5)(ii)', 'PASS', 'declarations.quantityText', 'The item is sold by number and the quantity declaration contains a numerical quantity with a recognised number/unit/piece/pair/set word.')];
+}
+
 function rule18(r: InspectionRequest): Finding[] {
   const out: Finding[] = []; if (r.transaction === undefined && evidenceValue(r, 'transaction.salePrice') === undefined) return out;
   const sale = currencyNumber(evidenceValue(r, 'transaction.salePrice')); const mrp = currencyNumber(evidenceValue(r, 'declarations.retailSalePrice') ?? evidenceValue(r, 'transaction.mrp'));
@@ -41,12 +66,13 @@ function rule18(r: InspectionRequest): Finding[] {
   else out.push(finding('PCR-R18-2A-UNVERIFIED', 'PCR-R18-2A', '18(2A)', 'UNABLE_TO_VERIFY', 'transaction.identicalPackagePriceConflict', 'No evidence was supplied to determine whether identical pre-packaged commodities carry different MRPs.', undefined, ['transaction.identicalPackagePriceConflict']));
   return out;
 }
+
 function canonical(v: unknown): string { if (v === null || typeof v !== 'object') return JSON.stringify(v); if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`; const o = v as Record<string, unknown>; return `{${Object.keys(o).sort().map(k => `${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`; }
 export function evaluateInspectionComplete(r: InspectionRequest): OverallInspectionResult {
   const base = evaluateBase(r);
   const historicalFindings = secondScheduleAppliesOn(r.inspectionDate) ? base.findings : base.findings.filter(f => f.ruleCode !== 'PCR-R5-SCHEDULE-II');
   const tableII = tableIIFinding(r);
-  const added = [...rule11(r), ...rule18(r), ...(tableII ? [tableII] : [])];
+  const added = [...rule11(r), ...rule12_6(r), ...rule13_5_ii(r), ...rule18(r), ...(tableII ? [tableII] : [])];
   const findings = [...historicalFindings, ...added];
   const summary = { totalRulesEvaluated: findings.length, passed: findings.filter(f => f.status === 'PASS').length, violations: findings.filter(f => f.status === 'VIOLATION').length, unableToVerify: findings.filter(f => f.status === 'UNABLE_TO_VERIFY').length, notApplicable: findings.filter(f => f.status === 'NOT_APPLICABLE').length };
   const overallStatus: EvaluationStatus = summary.violations > 0 ? 'VIOLATION' : summary.unableToVerify > 0 ? 'UNABLE_TO_VERIFY' : summary.passed > 0 ? 'PASS' : 'NOT_APPLICABLE';
