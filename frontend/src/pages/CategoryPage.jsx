@@ -1,238 +1,38 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { apiFetch } from "../lib/auth";
 import "../styles/products.css";
 
 const API_URL = "http://localhost:5000/api";
-
-function createSlug(name) {
-  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
+function pathOf(category) { return [category?.parent?.parent?.parent, category?.parent?.parent, category?.parent, category].filter(Boolean).map((x) => x.name).join(" → "); }
+function unitLabel(unit) { return ({ g: "Weight (g)", kg: "Weight (kg)", mg: "Weight (mg)", ml: "Volume (ml)", L: "Volume (L)", pcs: "Pieces", dozen: "Dozen", m: "Length (m)" }[unit] || "Quantity"); }
 
 function CategoryPage() {
   const { categoryId } = useParams();
-  const [category, setCategory] = useState(null);
-  const [filters, setFilters] = useState({
-    status: "ALL",
-    brandName: "",
-    shopName: "",
-    productName: "",
-    unit: "",
-    minQuantity: "",
-    maxQuantity: "",
-  });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [childName, setChildName] = useState("");
-  const [showChildForm, setShowChildForm] = useState(false);
-  const [message, setMessage] = useState("");
-
-  async function loadCategory() {
-    setLoading(true);
-    setError("");
-    try {
-      const response = await fetch(`${API_URL}/categories/id/${categoryId}`);
-      if (!response.ok) throw new Error("Category not found");
-      setCategory(await response.json());
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    loadCategory();
-  }, [categoryId]);
-
-  const depth = category
-    ? category.parent
-      ? category.parent.parent
-        ? 3
-        : 2
-      : 1
-    : 0;
-
-  const isProductType = depth === 3;
-  const canAddChild = depth === 1 || depth === 2;
-  const children = category?.children ?? [];
-
-  const filteredProducts = useMemo(() => {
-    return (category?.products ?? []).filter((product) => {
-      const shop = product.inspections?.[0]?.shop?.name ?? "";
-      const quantity = Number.parseFloat(product.netQuantity ?? "");
-      const min = filters.minQuantity === "" ? null : Number(filters.minQuantity);
-      const max = filters.maxQuantity === "" ? null : Number(filters.maxQuantity);
-
-      return (
-        (filters.status === "ALL" || product.complianceStatus === filters.status) &&
-        product.productName.toLowerCase().includes(filters.productName.toLowerCase()) &&
-        (product.brandName ?? "").toLowerCase().includes(filters.brandName.toLowerCase()) &&
-        shop.toLowerCase().includes(filters.shopName.toLowerCase()) &&
-        (!filters.unit || product.unit === filters.unit) &&
-        (min === null || (Number.isFinite(quantity) && quantity >= min)) &&
-        (max === null || (Number.isFinite(quantity) && quantity <= max))
-      );
-    });
-  }, [category, filters]);
-
-  async function addChildCategory() {
-    const name = childName.trim();
-    if (!name || !category || !canAddChild) return;
-
-    try {
-      const response = await fetch(`${API_URL}/categories`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, slug: createSlug(name), parentId: category.id }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not add category");
-      setChildName("");
-      setShowChildForm(false);
-      setMessage(`Added ${data.name}.`);
-      await loadCategory();
-    } catch (err) {
-      setMessage(err.message);
-    }
-  }
-
-  async function deleteCategory() {
-    if (!category) return;
-    const confirmed = window.confirm(
-      `Delete "${category.name}"? Categories containing children or products cannot be deleted.`
-    );
-    if (!confirmed) return;
-
-    try {
-      const response = await fetch(`${API_URL}/categories/${category.id}`, { method: "DELETE" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not delete category");
-      window.location.href = depth === 1 ? "/products" : `/products/category/${category.parent.id}`;
-    } catch (err) {
-      setMessage(err.message);
-    }
-  }
-
-  const setFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
-
+  const [category, setCategory] = useState(null), [filters, setFilters] = useState({ status: "ALL", brandName: "", shopName: "", productName: "", unit: "", minQuantity: "", maxQuantity: "", minMrp: "", maxMrp: "" }), [selected, setSelected] = useState([]), [childName, setChildName] = useState(""), [childFinal, setChildFinal] = useState(false), [showChildForm, setShowChildForm] = useState(false), [message, setMessage] = useState(""), [loading, setLoading] = useState(true);
+  async function load() { setLoading(true); const r = await apiFetch(`${API_URL}/categories/id/${categoryId}`); const d = await r.json(); if (!r.ok) setMessage(d.error || "Category not found"); else setCategory(d); setLoading(false); }
+  useEffect(() => { load(); setSelected([]); }, [categoryId]);
+  const depth = useMemo(() => { let d = 1, p = category?.parent; while (p) { d++; p = p.parent; } return d; }, [category]);
+  const children = category?.children || [];
+  const final = Boolean(category?.isFinal);
+  const canAddChild = !final && depth < 4;
+  const filteredProducts = (category?.products || []).filter((product) => { const shop = product.inspections?.[0]?.shop?.name || ""; const q = Number.parseFloat(String(product.netQuantity || "").replace(/[^0-9.]/g, "")); const min = filters.minQuantity === "" ? null : Number(filters.minQuantity); const max = filters.maxQuantity === "" ? null : Number(filters.maxQuantity); const minMrp = filters.minMrp === "" ? null : Number(filters.minMrp); const maxMrp = filters.maxMrp === "" ? null : Number(filters.maxMrp); return (filters.status === "ALL" || product.complianceStatus === filters.status) && (product.productName || "").toLowerCase().includes(filters.productName.toLowerCase()) && (product.brandName || "").toLowerCase().includes(filters.brandName.toLowerCase()) && shop.toLowerCase().includes(filters.shopName.toLowerCase()) && (!filters.unit || (product.unit || "").toLowerCase() === filters.unit.toLowerCase()) && (min === null || (Number.isFinite(q) && q >= min)) && (max === null || (Number.isFinite(q) && q <= max)) && (minMrp === null || (product.mrp !== null && product.mrp >= minMrp)) && (maxMrp === null || (product.mrp !== null && product.mrp <= maxMrp)); });
+  const allSelected = filteredProducts.length > 0 && filteredProducts.every((p) => selected.includes(p.id));
+  function setFilter(key, value) { setFilters((f) => ({ ...f, [key]: value })); setSelected([]); }
+  function toggleAll() { setSelected(allSelected ? [] : filteredProducts.map((p) => p.id)); }
+  function toggleOne(id) { setSelected((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]); }
+  async function addChild() { if (!childName.trim() || !canAddChild) return; const r = await apiFetch(`${API_URL}/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: childName, isFinal: childFinal, parentId: category.id, global: category.isGlobal }) }); const d = await r.json(); if (!r.ok) return setMessage(d.error || "Could not add category"); setChildName(""); setChildFinal(false); setShowChildForm(false); setMessage("Category added."); load(); }
+  async function deleteCategory(id = category.id) { if (!window.confirm("Delete this category? It must have no children or products.")) return; const r = await apiFetch(`${API_URL}/categories/${id}`, { method: "DELETE" }); const d = await r.json(); if (!r.ok) return setMessage(d.error); window.location.href = depth === 1 ? "/products" : `/products/category/${category.parent.id}`; }
+  async function deleteSelected() { if (!selected.length || !window.confirm(`Delete ${selected.length} selected product(s)?`)) return; for (const id of selected) { const r = await apiFetch(`${API_URL}/products/${id}`, { method: "DELETE" }); if (!r.ok) { const d = await r.json(); setMessage(d.error || "Delete failed"); break; } } setSelected([]); load(); }
   if (loading) return <div className="products-page"><p>Loading category...</p></div>;
-  if (error) return <div className="products-page"><p>Error: {error}</p></div>;
-
-  const parentLink = category.parent ? `/products/category/${category.parent.id}` : "/products";
-  const levelTitle = depth === 1 ? "Subcategories" : depth === 2 ? "Product Types" : "Products";
-  const addLabel = depth === 1 ? "Register New Subcategory" : "Register New Product Type";
-  const path = [category.parent?.parent?.parent, category.parent?.parent, category.parent, category]
-    .filter(Boolean)
-    .map((item) => item.name)
-    .join(" → ");
-
-  return (
-    <div className="products-page">
-      <Link to={parentLink} className="back-link">← Back</Link>
-
-      <div className="page-header">
-        <p className="eyebrow">PRODUCT DATABASE</p>
-        <h1>{category.name}</h1>
-        <p>{path}</p>
-      </div>
-
-      {message && <div className="status-message">{message}</div>}
-
-      <section className="product-actions category-toolbar">
-        {canAddChild && (
-          <button className="secondary-action" type="button" onClick={() => setShowChildForm((value) => !value)}>
-            + {addLabel}
-          </button>
-        )}
-        <button className="delete-category-button" type="button" onClick={deleteCategory}>
-          Delete {depth === 1 ? "Category" : depth === 2 ? "Subcategory" : "Product Type"}
-        </button>
-      </section>
-
-      {showChildForm && canAddChild && (
-        <div className="category-form">
-          <input
-            value={childName}
-            onChange={(event) => setChildName(event.target.value)}
-            placeholder={depth === 1 ? `New subcategory under ${category.name}` : `New product type under ${category.name}`}
-          />
-          <button type="button" onClick={addChildCategory}>Add</button>
-        </div>
-      )}
-
-      {isProductType ? (
-        <section className="product-categories">
-          <div className="section-heading">
-            <div>
-              <h2>Scanned Products</h2>
-              <p>Products are added here automatically when an inspection is saved from Scan.</p>
-            </div>
-          </div>
-
-          <div className="filter-panel">
-            <select value={filters.status} onChange={(e) => setFilter("status", e.target.value)}>
-              <option value="ALL">All compliance results</option>
-              <option value="OKAY">Okay</option>
-              <option value="VIOLATION">Violation</option>
-              <option value="NEEDS_REVIEW">Needs review</option>
-            </select>
-            <input placeholder="Product name" value={filters.productName} onChange={(e) => setFilter("productName", e.target.value)} />
-            <input placeholder="Company / brand" value={filters.brandName} onChange={(e) => setFilter("brandName", e.target.value)} />
-            <input placeholder="Shop name" value={filters.shopName} onChange={(e) => setFilter("shopName", e.target.value)} />
-            <select value={filters.unit} onChange={(e) => setFilter("unit", e.target.value)}>
-              <option value="">Any unit</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="pcs">pcs</option><option value="m">m</option>
-            </select>
-            <input type="number" placeholder="Min quantity" value={filters.minQuantity} onChange={(e) => setFilter("minQuantity", e.target.value)} />
-            <input type="number" placeholder="Max quantity" value={filters.maxQuantity} onChange={(e) => setFilter("maxQuantity", e.target.value)} />
-          </div>
-
-          {filteredProducts.length === 0 ? <p>No products match these filters.</p> : (
-            <div className="product-list">
-              {filteredProducts.map((product) => (
-                <Link key={product.id} to={`/products/item/${product.id}`} className="product-row">
-                  <div><strong>{product.productName}</strong><span>{product.brandName || "Company not recorded"}</span></div>
-                  <div><span>{product.netQuantity || "Quantity not recorded"} {product.unit || ""}</span><span>{product.inspections?.[0]?.shop?.name || "Shop not recorded"}</span></div>
-                  <span className={`compliance-badge ${product.complianceStatus.toLowerCase()}`}>{product.complianceStatus}</span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-      ) : (
-        <section className="product-categories">
-          <div className="section-heading">
-            <div><h2>{levelTitle}</h2><p>Level {depth} of 3. Only the next hierarchy level can be created here.</p></div>
-          </div>
-          {children.length === 0 ? <p>No {depth === 1 ? "subcategories" : "product types"} yet.</p> : (
-            <div className="category-grid">
-              {children.map((child) => (
-                <div key={child.id} className="category-item">
-                  <Link to={`/products/category/${child.id}`} className="category-card">
-                    <h3>{child.name}</h3>
-                    <p>{depth === 1 ? "Open subcategory" : "Open product type"}</p>
-                  </Link>
-                  <button
-                    type="button"
-                    className="delete-category-button"
-                    onClick={async () => {
-                      if (!window.confirm(`Delete "${child.name}"? This cannot be undone.`)) return;
-                      try {
-                        const response = await fetch(`${API_URL}/categories/${child.id}`, { method: "DELETE" });
-                        const data = await response.json();
-                        if (!response.ok) throw new Error(data.error || "Could not delete category");
-                        setMessage(`"${child.name}" deleted successfully.`);
-                        await loadCategory();
-                      } catch (err) { setMessage(err.message); }
-                    }}
-                  >Delete</button>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-    </div>
-  );
+  if (!category) return <div className="products-page"><p>{message || "Category not found"}</p></div>;
+  return <div className="products-page"><Link to={category.parent ? `/products/category/${category.parent.id}` : "/products"} className="back-link">← Back</Link><div className="page-header"><p className="eyebrow">PRODUCT DATABASE · LEVEL {depth}</p><h1>{category.name}</h1><p>{pathOf(category)}</p><p>{category.isFinal ? "FINAL CATEGORY · products can be registered here" : "CATEGORY · subcategories can be added here"}</p></div>{message && <div className="status-message">{message}</div>}
+    <section className="product-actions category-toolbar">{canAddChild && <button className="secondary-action" onClick={() => setShowChildForm((v) => !v)}>+ Add subcategory</button>}{!category.isGlobal && <button className="delete-category-button" onClick={() => deleteCategory()}>Delete Category</button>}</section>
+    {showChildForm && <div className="category-form"><input value={childName} onChange={(e) => setChildName(e.target.value)} placeholder="Subcategory name" /><label><input type="checkbox" checked={childFinal} onChange={(e) => setChildFinal(e.target.checked)} /> Set as final category</label><button type="button" onClick={addChild}>Add</button></div>}
+    {!final && <section className="product-categories"><div className="section-heading"><div><h2>Subcategories</h2><p>{depth < 4 ? "Continue to the next level or mark a leaf as final." : "Maximum hierarchy depth reached."}</p></div></div><div className="category-grid">{children.map((child) => <div className="category-item" key={child.id}><Link to={`/products/category/${child.id}`} className="category-card"><h3>{child.name}</h3><p>{child.isFinal ? "Final category" : `Level ${depth + 1} category`}</p></Link>{!child.isGlobal && <button className="delete-category-button" onClick={() => deleteCategory(child.id)}>Delete</button>}</div>)}</div>{!children.length && <p>No subcategories yet.</p>}</section>}
+    {final && <section className="product-categories"><div className="section-heading"><div><h2>{category.name} products</h2><p>{filteredProducts.length} matching registration(s).</p></div></div><div className="filter-panel"><input placeholder="Product name" value={filters.productName} onChange={(e) => setFilter("productName", e.target.value)} /><input placeholder="Brand / company" value={filters.brandName} onChange={(e) => setFilter("brandName", e.target.value)} /><input placeholder="Shop" value={filters.shopName} onChange={(e) => setFilter("shopName", e.target.value)} /><select value={filters.status} onChange={(e) => setFilter("status", e.target.value)}><option value="ALL">All compliance</option><option value="OKAY">Okay</option><option value="VIOLATION">Violation</option><option value="NEEDS_REVIEW">Needs review</option></select><select value={filters.unit} onChange={(e) => setFilter("unit", e.target.value)}><option value="">Any unit</option><option value="mg">mg</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="pcs">pcs</option><option value="dozen">dozen</option><option value="m">m</option></select><input type="number" placeholder="Min quantity" value={filters.minQuantity} onChange={(e) => setFilter("minQuantity", e.target.value)} /><input type="number" placeholder="Max quantity" value={filters.maxQuantity} onChange={(e) => setFilter("maxQuantity", e.target.value)} /><input type="number" placeholder="Min MRP" value={filters.minMrp} onChange={(e) => setFilter("minMrp", e.target.value)} /><input type="number" placeholder="Max MRP" value={filters.maxMrp} onChange={(e) => setFilter("maxMrp", e.target.value)} /></div><p>Quantity filter uses the stored unit. {filters.unit ? unitLabel(filters.unit) : "Choose a unit for weight, volume or piece-based products."}</p>
+      <div className="bulk-toolbar"><label><input type="checkbox" checked={allSelected} onChange={toggleAll} /> Select all matching</label>{selected.length > 0 && <button className="delete-category-button" onClick={deleteSelected}>Delete selected ({selected.length})</button>}</div>
+      {filteredProducts.length ? <div className="product-list">{filteredProducts.map((product) => <div className="product-row" key={product.id}><input type="checkbox" checked={selected.includes(product.id)} onChange={() => toggleOne(product.id)} /><Link to={`/products/item/${product.id}`}><div><strong>{product.productName}</strong><span>{product.brandName || "Brand not recorded"}</span></div><div><span>{product.netQuantity || "-"} {product.unit || ""}</span><span>₹{product.mrp ?? "-"} · {product.inspections?.[0]?.shop?.name || "Shop not recorded"}</span></div><span className={`compliance-badge ${product.complianceStatus.toLowerCase()}`}>{product.complianceStatus}</span></Link></div>)}</div> : <p>No products match these filters.</p>}</section>}
+  </div>;
 }
-
 export default CategoryPage;
