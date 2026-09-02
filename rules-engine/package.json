@@ -1,0 +1,14 @@
+{
+  "name": "@parakh/legal-metrology-rules-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic, evidence-aware Legal Metrology (Packaged Commodities) Rules engine for PARAKH.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test dist/tests/*.test.js",
+    "check": "npm run build && npm test"
+  },
+  "engines": { "node": ">=20" },
+  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.6.0" }
+}
