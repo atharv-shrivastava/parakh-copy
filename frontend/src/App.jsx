@@ -14,33 +14,22 @@ import Reports from "./pages/Reports";
 import Profile from "./pages/Profile";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
-import { getToken } from "./lib/auth";
+import AdminCategories from "./pages/AdminCategories";
+import { getToken, getUser } from "./lib/auth";
 
-function Protected() {
-  const location = useLocation();
-  return getToken() ? <Outlet /> : <Navigate to="/login" replace state={{ from: location.pathname }} />;
-}
+function Protected() { const location = useLocation(); return getToken() ? <Outlet /> : <Navigate to="/login" replace state={{ from: location.pathname }} />; }
+function AdminOnly() { return getUser()?.role === "ADMIN" ? <Outlet /> : <Navigate to="/" replace />; }
 
 function App() {
   return <BrowserRouter><Routes>
-    <Route path="/login" element={<Login />} />
-    <Route path="/register" element={<Register />} />
-    <Route element={<Protected />}>
-      <Route element={<Layout />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/scan" element={<Scan />} />
-        <Route path="/shops" element={<Shops />} />
-        <Route path="/shops/:shopId" element={<ShopDetails />} />
-        <Route path="/shops/:shopId/products" element={<ShopProducts />} />
-        <Route path="/products" element={<Products />} />
-        <Route path="/products/register" element={<FoodProductRegistration />} />
-        <Route path="/products/category/:categoryId" element={<CategoryPage />} />
-        <Route path="/products/item/:id" element={<ProductDetails />} />
-        <Route path="/history" element={<History />} />
-        <Route path="/reports" element={<Reports />} />
-        <Route path="/profile" element={<Profile />} />
-      </Route>
-    </Route>
+    <Route path="/login" element={<Login />} /><Route path="/register" element={<Register />} />
+    <Route element={<Protected />}><Route element={<Layout />}>
+      <Route path="/" element={<Dashboard />} /><Route path="/scan" element={<Scan />} />
+      <Route path="/shops" element={<Shops />} /><Route path="/shops/:shopId" element={<ShopDetails />} /><Route path="/shops/:shopId/products" element={<ShopProducts />} />
+      <Route path="/products" element={<Products />} /><Route path="/products/register" element={<FoodProductRegistration />} /><Route path="/products/category/:categoryId" element={<CategoryPage />} /><Route path="/products/item/:id" element={<ProductDetails />} />
+      <Route path="/history" element={<History />} /><Route path="/reports" element={<Reports />} /><Route path="/profile" element={<Profile />} />
+      <Route element={<AdminOnly />}><Route path="/admin/categories" element={<AdminCategories />} /></Route>
+    </Route></Route>
   </Routes></BrowserRouter>;
 }
 export default App;
