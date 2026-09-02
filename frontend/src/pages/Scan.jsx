@@ -240,7 +240,7 @@ if (!response.ok) {
       const response = await apiFetch(`${API_URL}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, categoryId: selectedCategoryId, imageUrls, ocrData: ocr, complianceStatus: status, violationReason: reason, inspectionDate: new Date().toISOString() }),
+        body: JSON.stringify({ ...form, categoryId: selectedCategoryId, imageUrls, ocrData: { ocr, compliance: compliance || null, complianceError: complianceError || null }, complianceStatus: status, violationReason: reason, inspectionDate: new Date().toISOString() }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not save product");
