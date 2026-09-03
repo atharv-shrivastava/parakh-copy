@@ -75,6 +75,14 @@ export function calculatePenalty(findings, activeRules = [], occurrence = "SECON
   return { rows, applicable, minTotal, maxTotal, hasUnknown, occurrence, referenceOnly: true };
 }
 
+export function getResponsibilityReference(finding) {
+  const rule = String(finding?.ruleNumber || "").trim().toLowerCase();
+  if (["6(1)(a)", "6(1)(b)", "6(1)(c)", "6(1)(d)", "6(1)(e)", "6(1)(f)", "10"].includes(rule)) {
+    return "Manufacturer / packer / importer: potentially relevant; retailer/dealer responsibility requires separate assessment.";
+  }
+  return "Responsible party not determined by PARAKH; assess manufacturer, packer, importer, retailer/dealer or other responsible person under applicable law.";
+}
+
 export function formatINR(value) {
   return `₹${Number(value || 0).toLocaleString("en-IN")}`;
 }
