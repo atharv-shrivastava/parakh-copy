@@ -34,7 +34,9 @@ async function createCategory(req,res,{global}){
     const slugBase=slugify(req.body.slug||name);
     const slug=global?`${slugBase}-${sourceType.toLowerCase()}`:`${slugBase}-${req.user.id.slice(-8).toLowerCase()}`;
     const finalAtDepth=depth===4||isFinal;
-    const c=await prisma.category.create({data:{name,slug,parentId,sourceType,isFinalProductType:finalAtDepth,isSystem:global,ownerId:global?null:req.user.id}});
+    const data={name,slug,sourceType,isFinalProductType:finalAtDepth,isSystem:global,ownerId:global?null:req.user.id};
+    if(parentId)data.parent={connect:{id:parentId}};
+    const c=await prisma.category.create({data});
     res.status(201).json(c);
   }catch(e){console.error(e);if(e.code==="P2002")return res.status(409).json({error:"A category with this name already exists for this account at this level"});res.status(500).json({error:e?.message||"Failed to create category"})}
 }
