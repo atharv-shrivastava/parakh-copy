@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { evaluateInspectionCompleteWithCurrentRules } from './engine/complete-evaluator.js';
 import type { InspectionRequest } from '../domain/types.js';
+import { loadActiveRules } from './store/rules-store.js';
 
 const PORT = Number(process.env.RULES_ENGINE_PORT ?? 8090);
 
@@ -22,7 +23,13 @@ const server = createServer(async (req, res) => {
     if (!request.inspectionId || !request.productId || !request.inspectionDate || !request.productMetadata || !Array.isArray(request.evidence)) {
       return json(res, 400, { error: 'Invalid inspection request.' });
     }
-    return json(res, 200, evaluateInspectionCompleteWithCurrentRules(request));
+
+    const rules = await loadActiveRules();
+    return json(res, 200, {
+      ...evaluateInspectionCompleteWithCurrentRules(request, rules),
+      rulesSource: process.env.DATABASE_URL ? 'database' : 'built_in_fallback',
+      activeRuleCount: rules.length,
+    });
   } catch (error) {
     return json(res, 400, { error: 'Invalid JSON or inspection payload.', detail: error instanceof Error ? error.message : 'Unknown error' });
   }
