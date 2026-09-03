@@ -92,7 +92,8 @@ router.post("/", async (req, res) => {
 
     const slugBase = slugify(req.body.slug || name);
     const slug = isSystem ? slugBase : `${slugBase}-${req.user.id.slice(-8).toLowerCase()}`;
-    const c = await prisma.category.create({ data: { name, slug, parentId, isFinalProductType: isFinal, isSystem, ownerId: isSystem ? null : req.user.id } });
+    const finalAtDepth = depth === 4 ? true : isFinal;
+    const c = await prisma.category.create({ data: { name, slug, parentId, isFinalProductType: finalAtDepth, isSystem, ownerId: isSystem ? null : req.user.id } });
     res.status(201).json(c);
   } catch (e) {
     console.error(e);
