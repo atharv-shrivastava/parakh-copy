@@ -189,10 +189,13 @@ function conditionResult(request: InspectionRequest, condition: RuleCondition): 
     evidence,
     conflicts,
   });
+  const missingRequiredDeclaration = (): ConditionResult => fail(
+    `${condition.violationReason} The declaration was not established in the submitted evidence; the inspector must verify the complete package before finalizing the finding.`,
+  );
 
   switch (condition.operator) {
     case 'EXISTS':
-      return missing ? unable() : pass();
+      return missing ? missingRequiredDeclaration() : pass();
     case 'NOT_EXISTS':
       return missing ? pass() : fail();
     case 'EQUALS':
@@ -219,11 +222,11 @@ function conditionResult(request: InspectionRequest, condition: RuleCondition): 
         ? value <= condition.expectedValue ? pass() : fail()
         : unable();
     case 'VALID_UNIT':
-      return missing ? unable() : normalizeQuantity(1, String(value)) ? pass() : fail();
+      return missing ? missingRequiredDeclaration() : normalizeQuantity(1, String(value)) ? pass() : fail();
     case 'VALID_CURRENCY':
-      return missing ? unable() : validCurrency(value) ? pass() : fail();
+      return missing ? missingRequiredDeclaration() : validCurrency(value) ? pass() : fail();
     case 'VALID_DATE_FORMAT':
-      return missing ? unable() : validDate(value) ? pass() : fail();
+      return missing ? missingRequiredDeclaration() : validDate(value) ? pass() : fail();
     case 'IN_LIST':
       return missing || !Array.isArray(condition.expectedValue)
         ? unable()
