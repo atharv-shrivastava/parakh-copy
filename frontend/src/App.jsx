@@ -22,7 +22,6 @@ import AdminGlobalCategoryType from "./pages/AdminGlobalCategoryType";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminRules from "./pages/AdminRules";
 import EcommerceInspection from "./pages/EcommerceInspection";
-import VisualVerification from "./pages/VisualVerification";
 import { getToken, getUser } from "./lib/auth";
 
 function Protected() { const location = useLocation(); return getToken() ? <Outlet /> : <Navigate to="/login" replace state={{ from: location.pathname }} />; }
@@ -33,7 +32,6 @@ function App() {
     <Route path="/login" element={<Login />} /><Route path="/register" element={<Register />} />
     <Route element={<Protected />}><Route element={<Layout />}>
       <Route path="/" element={<Dashboard />} /><Route path="/scan" element={<Scan />} />
-      <Route path="/visual-verification" element={<VisualVerification />} />
       <Route path="/ecommerce-inspection" element={<EcommerceInspection />} />
       <Route path="/shops" element={<Shops />} /><Route path="/shops/:shopId" element={<ShopDetails />} /><Route path="/shops/:shopId/products" element={<ShopProducts />} />
       <Route path="/products" element={<Products />} /><Route path="/products/category/:categoryId" element={<CategoryPage />} /><Route path="/products/item/:id" element={<ProductDetails />} />
