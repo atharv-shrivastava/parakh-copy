@@ -129,6 +129,41 @@ function getScanImages() {
     .filter(Boolean);
 }
 
+function normalizeBoundingBox(box) {
+  if (!box || typeof box !== "object") return null;
+  const left = Number(box.left ?? box.x);
+  const top = Number(box.top ?? box.y);
+  const width = Number(box.width ?? box.w);
+  const height = Number(box.height ?? box.h);
+  if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+
+  // Providers may return normalized 0..1 coordinates or percentage 0..100 coordinates.
+  const scale = [left, top, width, height].some((value) => value > 1) ? 0.01 : 1;
+  const normalized = { left: left * scale, top: top * scale, width: width * scale, height: height * scale };
+  if (normalized.left < 0 || normalized.top < 0 || normalized.width <= 0 || normalized.height <= 0) return null;
+  return {
+    left: Math.min(1, normalized.left),
+    top: Math.min(1, normalized.top),
+    width: Math.min(1 - Math.min(1, normalized.left), normalized.width),
+    height: Math.min(1 - Math.min(1, normalized.top), normalized.height),
+  };
+}
+
+function normalizeDeclaration(item, index) {
+  if (!item || typeof item !== "object") return null;
+  const imageIndex = Number(item.imageIndex ?? item.image ?? 0);
+  const rawConfidence = Number(item.confidence);
+  const confidence = rawConfidence > 1 ? rawConfidence / 100 : Number.isFinite(rawConfidence) ? rawConfidence : 0;
+  return {
+    ...item,
+    imageIndex: Number.isFinite(imageIndex) && imageIndex >= 1 && item.imageIndex != null ? imageIndex - 1 : Math.max(0, imageIndex || 0),
+    type: String(item.type || item.declarationType || "OTHER_DECLARATION").toUpperCase(),
+    text: String(item.text ?? item.extractedText ?? item.value ?? ""),
+    confidence: Math.max(0, Math.min(1, confidence)),
+    boundingBox: normalizeBoundingBox(item.boundingBox || item.bbox || item.box),
+    _index: index,
+  };
+}
 
 export default function ScanVisualCheck() {
   const [results, setResults] = useState([]);
@@ -137,31 +172,60 @@ export default function ScanVisualCheck() {
   const [activeDeclarationImage, setActiveDeclarationImage] = useState(0);
   const [open, setOpen] = useState(true);
   const [referenceWidth, setReferenceWidth] = useState("");
+  const [declarationBusy, setDeclarationBusy] = useState(false);
 
   useEffect(() => {
     const loadDeclarationEvidence = () => {
       try {
         const parsed = JSON.parse(window.sessionStorage.getItem(DECLARATION_KEY) || "[]");
-        setDeclarations(Array.isArray(parsed) ? parsed : []);
+        const normalized = Array.isArray(parsed) ? parsed.map(normalizeDeclaration).filter(Boolean) : [];
+        setDeclarations(normalized);
+        setDeclarationMessage(normalized.length ? `${normalized.length} declaration region${normalized.length === 1 ? "" : "s"} returned by OCR.` : "OCR completed without localized declaration regions.");
       } catch {
         setDeclarations([]);
+        setDeclarationMessage("Declaration evidence could not be read.");
       }
     };
 
     loadDeclarationEvidence();
     const handleEvidence = (event) => {
-      const next = Array.isArray(event.detail) ? event.detail : [];
+      const next = Array.isArray(event.detail) ? event.detail.map(normalizeDeclaration).filter(Boolean) : [];
       setDeclarations(next);
+      setDeclarationMessage(next.length ? `${next.length} declaration region${next.length === 1 ? "" : "s"} returned by OCR.` : "OCR completed without localized declaration regions.");
+      setDeclarationBusy(false);
     };
     window.addEventListener("parakh:declaration-evidence", handleEvidence);
 
-    const observer = new MutationObserver(loadDeclarationEvidence);
-    const target = document.querySelector(".ocr-fields-grid") || document.body;
-    observer.observe(target, { childList: true, subtree: true });
+    return () => window.removeEventListener("parakh:declaration-evidence", handleEvidence);
+  }, []);
+
+  // The previous implementation rendered the declaration UI but never populated `results`.
+  // Inspect the actual package images when this component mounts, then keep the results available
+  // for the declaration-map renderer and the visual-inspection summary.
+  useEffect(() => {
+    let cancelled = false;
+    const sources = getScanImages();
+    if (!sources.length) return undefined;
+
+    setDeclarationBusy(true);
+    Promise.all(sources.map((src) => inspectImageSource(src).catch(() => null)))
+      .then((next) => {
+        if (cancelled) return;
+        const valid = next.filter(Boolean);
+        setResults(valid);
+        setDeclarationBusy(false);
+        if (!valid.length) setDeclarationMessage("Package images could not be inspected.");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setResults([]);
+          setDeclarationBusy(false);
+          setDeclarationMessage("Package images could not be inspected.");
+        }
+      });
 
     return () => {
-      window.removeEventListener("parakh:declaration-evidence", handleEvidence);
-      observer.disconnect();
+      cancelled = true;
     };
   }, []);
 
@@ -181,7 +245,7 @@ export default function ScanVisualCheck() {
   }, [referenceWidth, results]);
 
   const placementLabel = results.length === 0 ? "Needs review" : results.some((item) => item.placement === "REVIEW") ? "Review" : results.every((item) => item.placement === "SCREENED") ? "Screened" : "Needs review";
-  const hasOcr = document.querySelectorAll(".ocr-fields-grid > div").length > 0;
+  const hasOcr = typeof document !== "undefined" && document.querySelectorAll(".ocr-fields-grid > div").length > 0;
 
   useEffect(() => {
     if (!results.length) return;
@@ -249,7 +313,7 @@ export default function ScanVisualCheck() {
         </div>
 
         <div className="visual-declaration-header"><div><h3>Declaration map</h3><p>{declarationMessage || "Declaration regions returned with the OCR analysis are shown against their source image."}</p></div></div>
-        {results.length > 0 && <div className="visual-declaration-browser">
+        <div className="visual-declaration-browser">
           <div className="visual-declaration-tabs" role="tablist" aria-label="Package images">
             {results.map((_item, imageIndex) => {
               const imageDeclarations = declarations.filter((item) => item.imageIndex === imageIndex);
@@ -274,14 +338,14 @@ export default function ScanVisualCheck() {
             return <div className="visual-declaration-card is-single">
               <div className="visual-declaration-canvas">
                 <img src={image} alt={`Declaration map for package image ${imageIndex + 1}`} />
-                {imageDeclarations.map((item, index) => item.boundingBox && <div className="visual-declaration-box" key={`${item.type}-${index}`} style={{ left: `${item.boundingBox.left * 100}%`, top: `${item.boundingBox.top * 100}%`, width: `${item.boundingBox.width * 100}%`, height: `${item.boundingBox.height * 100}%` }} title={`${item.type} · ${Math.round(item.confidence * 100)}%`}><span>{item.type.replaceAll("_", " ")}</span></div>)}
+                {imageDeclarations.map((item, index) => item.boundingBox && <div className="visual-declaration-box" key={`${item.type}-${item._index ?? index}`} style={{ left: `${item.boundingBox.left * 100}%`, top: `${item.boundingBox.top * 100}%`, width: `${item.boundingBox.width * 100}%`, height: `${item.boundingBox.height * 100}%` }} title={`${item.type} · ${Math.round(item.confidence * 100)}%`}><span>{item.type.replaceAll("_", " ")}</span></div>)}
               </div>
               <div className="visual-declaration-list">
-                {imageDeclarations.length ? imageDeclarations.map((item, index) => <div key={`${item.type}-${index}`}><strong>{item.type.replaceAll("_", " ")}</strong><span>{item.text || "Localized region"}</span><small>{Math.round(item.confidence * 100)}% confidence{item.boundingBox ? " · localized" : " · location uncertain"}</small></div>) : <div className="visual-declaration-empty"><strong>No declaration regions localized for this image.</strong><span>The image was analyzed, but no declaration box could be returned with sufficient confidence.</span></div>}
+                {imageDeclarations.length ? imageDeclarations.map((item, index) => <div key={`${item.type}-${item._index ?? index}`}><strong>{item.type.replaceAll("_", " ")}</strong><span>{item.text || "Localized region"}</span><small>{Math.round(item.confidence * 100)}% confidence{item.boundingBox ? " · localized" : " · location uncertain"}</small></div>) : <div className="visual-declaration-empty"><strong>No declaration regions localized for this image.</strong><span>The image was analyzed, but no declaration box could be returned with sufficient confidence.</span></div>}
               </div>
             </div>;
           })()}
-        </div>}
+        </div>
 
         <div className="visual-check-note">Declaration localization is AI-assisted evidence. Bounding boxes and confidence support officer review; they do not themselves establish legal compliance. Missing or uncertain regions remain reviewable rather than being treated as automatically absent.</div>
       </>}
