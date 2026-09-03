@@ -6,26 +6,29 @@ const DECLARATION_KEY = "parakhDeclarationEvidence";
 const MAX_IMAGES = 4;
 const MAX_ANALYSIS_SIDE = 1200;
 
-const DECLARATION_TYPES = [
-  "PRODUCT_NAME",
-  "BRAND",
-  "NET_QUANTITY",
-  "MRP",
-  "MANUFACTURER",
-  "PACKER",
-  "IMPORTER",
-  "ADDRESS",
-  "DATE_OF_MANUFACTURE",
-  "DATE_OF_PACKING",
-  "BEST_BEFORE",
-  "EXPIRY_DATE",
-  "BATCH_NUMBER",
-  "CONSUMER_CARE",
-  "COUNTRY_OF_ORIGIN",
-  "FSSAI_LICENSE",
-  "BARCODE",
-  "OTHER_DECLARATION",
-];
+const DECLARATION_FIELD_TYPES = {
+  productName: "PRODUCT_NAME",
+  brandName: "BRAND",
+  netQuantity: "NET_QUANTITY",
+  unit: "NET_QUANTITY",
+  mrp: "MRP",
+  manufacturer: "MANUFACTURER",
+  manufacturerAddress: "ADDRESS",
+  packer: "PACKER",
+  packerAddress: "ADDRESS",
+  importer: "IMPORTER",
+  importerAddress: "ADDRESS",
+  countryOfOrigin: "COUNTRY_OF_ORIGIN",
+  dateOfManufacture: "DATE_OF_MANUFACTURE",
+  dateOfPacking: "DATE_OF_PACKING",
+  bestBefore: "BEST_BEFORE",
+  expiryDate: "EXPIRY_DATE",
+  batchNumber: "BATCH_NUMBER",
+  consumerCarePhone: "CONSUMER_CARE",
+  consumerCareEmail: "CONSUMER_CARE",
+  fssaiLicenseNumber: "FSSAI_LICENSE",
+  barcode: "BARCODE",
+};
 
 function analyzePixels(data, width, height) {
   let sum = 0;
@@ -136,8 +139,6 @@ function normalizeBoundingBox(box) {
   const width = Number(box.width ?? box.w);
   const height = Number(box.height ?? box.h);
   if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
-
-  // Providers may return normalized 0..1 coordinates or percentage 0..100 coordinates.
   const scale = [left, top, width, height].some((value) => value > 1) ? 0.01 : 1;
   const normalized = { left: left * scale, top: top * scale, width: width * scale, height: height * scale };
   if (normalized.left < 0 || normalized.top < 0 || normalized.width <= 0 || normalized.height <= 0) return null;
@@ -151,12 +152,12 @@ function normalizeBoundingBox(box) {
 
 function normalizeDeclaration(item, index) {
   if (!item || typeof item !== "object") return null;
-  const imageIndex = Number(item.imageIndex ?? item.image ?? 0);
+  const rawImageIndex = Number(item.imageIndex ?? item.image ?? 0);
   const rawConfidence = Number(item.confidence);
   const confidence = rawConfidence > 1 ? rawConfidence / 100 : Number.isFinite(rawConfidence) ? rawConfidence : 0;
   return {
     ...item,
-    imageIndex: Number.isFinite(imageIndex) && imageIndex >= 1 && item.imageIndex != null ? imageIndex - 1 : Math.max(0, imageIndex || 0),
+    imageIndex: Number.isFinite(rawImageIndex) && rawImageIndex >= 1 && item.imageIndex != null ? rawImageIndex - 1 : Math.max(0, rawImageIndex || 0),
     type: String(item.type || item.declarationType || "OTHER_DECLARATION").toUpperCase(),
     text: String(item.text ?? item.extractedText ?? item.value ?? ""),
     confidence: Math.max(0, Math.min(1, confidence)),
@@ -165,9 +166,52 @@ function normalizeDeclaration(item, index) {
   };
 }
 
+function labelToFieldKey(label) {
+  return String(label || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9 ]/g, "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part, index) => index === 0 ? part.toLowerCase() : `${part[0].toUpperCase()}${part.slice(1).toLowerCase()}`)
+    .join("");
+}
+
+function readStoredDeclarations() {
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(DECLARATION_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.map(normalizeDeclaration).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function deriveDeclarationsFromOcrFields() {
+  const fields = Array.from(document.querySelectorAll(".ocr-fields-grid > div"));
+  if (!fields.length) return [];
+  return fields.reduce((accumulator, fieldNode, index) => {
+    const label = fieldNode.querySelector("strong")?.textContent || "";
+    const value = fieldNode.querySelector("span")?.textContent?.trim() || "";
+    const confidenceText = fieldNode.querySelector("small")?.textContent || "";
+    if (!value) return accumulator;
+
+    const fieldKey = labelToFieldKey(label);
+    const type = DECLARATION_FIELD_TYPES[fieldKey] || "OTHER_DECLARATION";
+    const parsedConfidence = Number(confidenceText.match(/([0-9]+(?:\.[0-9]+)?)\s*%/)?.[1] || 0);
+    accumulator.push(normalizeDeclaration({
+      imageIndex: 0,
+      type,
+      text: value,
+      confidence: parsedConfidence / 100,
+      boundingBox: null,
+      source: "ocr-fields-fallback",
+    }, index));
+    return accumulator;
+  }, []).filter(Boolean);
+}
+
 export default function ScanVisualCheck() {
   const [results, setResults] = useState([]);
-  const [declarations, setDeclarations] = useState([]);
+  const [declarations, setDeclarations] = useState(readStoredDeclarations);
   const [declarationMessage, setDeclarationMessage] = useState("");
   const [activeDeclarationImage, setActiveDeclarationImage] = useState(0);
   const [open, setOpen] = useState(true);
@@ -175,53 +219,54 @@ export default function ScanVisualCheck() {
   const [declarationBusy, setDeclarationBusy] = useState(false);
 
   useEffect(() => {
-    const loadDeclarationEvidence = () => {
-      try {
-        const parsed = JSON.parse(window.sessionStorage.getItem(DECLARATION_KEY) || "[]");
-        const normalized = Array.isArray(parsed) ? parsed.map(normalizeDeclaration).filter(Boolean) : [];
-        setDeclarations(normalized);
-        setDeclarationMessage(normalized.length ? `${normalized.length} declaration region${normalized.length === 1 ? "" : "s"} returned by OCR.` : "OCR completed without localized declaration regions.");
-      } catch {
-        setDeclarations([]);
-        setDeclarationMessage("Declaration evidence could not be read.");
+    const refreshDeclarations = (incoming = null) => {
+      const providerEvidence = Array.isArray(incoming) ? incoming.map(normalizeDeclaration).filter(Boolean) : readStoredDeclarations();
+      if (providerEvidence.length) {
+        setDeclarations(providerEvidence);
+        setDeclarationMessage(`${providerEvidence.length} declaration entr${providerEvidence.length === 1 ? "y was" : "ies were"} returned by OCR.`);
+        setDeclarationBusy(false);
+        return;
       }
-    };
 
-    loadDeclarationEvidence();
-    const handleEvidence = (event) => {
-      const next = Array.isArray(event.detail) ? event.detail.map(normalizeDeclaration).filter(Boolean) : [];
-      setDeclarations(next);
-      setDeclarationMessage(next.length ? `${next.length} declaration region${next.length === 1 ? "" : "s"} returned by OCR.` : "OCR completed without localized declaration regions.");
+      const derived = deriveDeclarationsFromOcrFields();
+      if (derived.length) {
+        setDeclarations(derived);
+        setDeclarationMessage(`${derived.length} declaration entr${derived.length === 1 ? "y was" : "ies were"} recovered from the OCR fields. Location is shown as uncertain when no box was returned.`);
+      } else {
+        setDeclarations([]);
+        setDeclarationMessage("OCR completed without declaration evidence.");
+      }
       setDeclarationBusy(false);
     };
+
+    refreshDeclarations();
+    const handleEvidence = (event) => refreshDeclarations(event.detail);
     window.addEventListener("parakh:declaration-evidence", handleEvidence);
 
-    return () => window.removeEventListener("parakh:declaration-evidence", handleEvidence);
-  }, []);
+    const observer = new MutationObserver(() => {
+      if (!readStoredDeclarations().length && !declarations.length) refreshDeclarations();
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 
-  // The previous implementation rendered the declaration UI but never populated `results`.
-  // Inspect the actual package images when this component mounts, then keep the results available
-  // for the declaration-map renderer and the visual-inspection summary.
+    return () => {
+      window.removeEventListener("parakh:declaration-evidence", handleEvidence);
+      observer.disconnect();
+    };
+  }, [declarations.length]);
+
   useEffect(() => {
     let cancelled = false;
     const sources = getScanImages();
     if (!sources.length) return undefined;
 
-    setDeclarationBusy(true);
+    setDeclarationBusy((current) => current || false);
     Promise.all(sources.map((src) => inspectImageSource(src).catch(() => null)))
       .then((next) => {
         if (cancelled) return;
-        const valid = next.filter(Boolean);
-        setResults(valid);
-        setDeclarationBusy(false);
-        if (!valid.length) setDeclarationMessage("Package images could not be inspected.");
+        setResults(next.filter(Boolean));
       })
       .catch(() => {
-        if (!cancelled) {
-          setResults([]);
-          setDeclarationBusy(false);
-          setDeclarationMessage("Package images could not be inspected.");
-        }
+        if (!cancelled) setResults([]);
       });
 
     return () => {
@@ -259,7 +304,7 @@ export default function ScanVisualCheck() {
       declarationCoverageScreened: hasOcr,
       imagesChecked: results.length,
       declarationEvidence: declarations,
-      declarationModel: declarations.length ? "ocr-provider-inline-evidence" : null,
+      declarationModel: declarations.length ? (declarations.some((item) => item.source === "ocr-fields-fallback") ? "ocr-fields-fallback" : "ocr-provider-inline-evidence") : null,
     };
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(detail));
     window.dispatchEvent(new CustomEvent("parakh:visual-analysis", { detail }));
@@ -272,7 +317,7 @@ export default function ScanVisualCheck() {
       <div className="section-heading">
         <div>
           <h2>Visual inspection</h2>
-          <p>Automatic screening for readability, text regions, declaration locations and calibrated text-size estimation.</p>
+          <p>Automatic screening for readability, text regions, declaration evidence and calibrated text-size estimation.</p>
         </div>
         <button type="button" className="secondary-button" onClick={() => setOpen((value) => !value)}>{open ? "Hide" : "Show"}</button>
       </div>
@@ -282,7 +327,7 @@ export default function ScanVisualCheck() {
           <div><strong>Readability</strong><span>{label} · {average}/100</span></div>
           <div><strong>Text detection</strong><span>{results.reduce((sum, item) => sum + item.textLines, 0)} text-line regions detected</span></div>
           <div><strong>Placement screening</strong><span>{placementLabel}</span></div>
-          <div><strong>Declaration regions</strong><span>{declarationBusy ? "Analyzing..." : declarations.length || "None localized"}</span></div>
+          <div><strong>Declaration evidence</strong><span>{declarationBusy ? "Analyzing..." : declarations.length || "None returned"}</span></div>
         </div>
 
         <div className="visual-check-calibration">
@@ -312,7 +357,12 @@ export default function ScanVisualCheck() {
           </div>)}
         </div>
 
-        <div className="visual-declaration-header"><div><h3>Declaration map</h3><p>{declarationMessage || "Declaration regions returned with the OCR analysis are shown against their source image."}</p></div></div>
+        <div className="visual-declaration-header">
+          <div>
+            <h3>Declaration map</h3>
+            <p>{declarationMessage || "Every declaration returned by OCR is shown here. Bounding boxes are drawn only when the OCR provider supplied coordinates."}</p>
+          </div>
+        </div>
         <div className="visual-declaration-browser">
           <div className="visual-declaration-tabs" role="tablist" aria-label="Package images">
             {results.map((_item, imageIndex) => {
@@ -327,7 +377,7 @@ export default function ScanVisualCheck() {
                 onClick={() => setActiveDeclarationImage(imageIndex)}
               >
                 Image {imageIndex + 1}
-                <span>{imageDeclarations.length ? `${imageDeclarations.length} found` : "No localized regions"}</span>
+                <span>{imageDeclarations.length ? `${imageDeclarations.length} found` : "No declaration evidence"}</span>
               </button>;
             })}
           </div>
@@ -341,13 +391,13 @@ export default function ScanVisualCheck() {
                 {imageDeclarations.map((item, index) => item.boundingBox && <div className="visual-declaration-box" key={`${item.type}-${item._index ?? index}`} style={{ left: `${item.boundingBox.left * 100}%`, top: `${item.boundingBox.top * 100}%`, width: `${item.boundingBox.width * 100}%`, height: `${item.boundingBox.height * 100}%` }} title={`${item.type} · ${Math.round(item.confidence * 100)}%`}><span>{item.type.replaceAll("_", " ")}</span></div>)}
               </div>
               <div className="visual-declaration-list">
-                {imageDeclarations.length ? imageDeclarations.map((item, index) => <div key={`${item.type}-${item._index ?? index}`}><strong>{item.type.replaceAll("_", " ")}</strong><span>{item.text || "Localized region"}</span><small>{Math.round(item.confidence * 100)}% confidence{item.boundingBox ? " · localized" : " · location uncertain"}</small></div>) : <div className="visual-declaration-empty"><strong>No declaration regions localized for this image.</strong><span>The image was analyzed, but no declaration box could be returned with sufficient confidence.</span></div>}
+                {imageDeclarations.length ? imageDeclarations.map((item, index) => <div key={`${item.type}-${item._index ?? index}`}><strong>{item.type.replaceAll("_", " ")}</strong><span>{item.text || "Declaration detected"}</span><small>{Math.round(item.confidence * 100)}% confidence{item.boundingBox ? " · localized" : " · location uncertain"}</small></div>) : <div className="visual-declaration-empty"><strong>No declaration evidence for this image.</strong><span>The image may have no detected declaration fields, or the OCR provider returned them without an image-level location. This is not treated as an automatic absence.</span></div>}
               </div>
             </div>;
           })()}
         </div>
 
-        <div className="visual-check-note">Declaration localization is AI-assisted evidence. Bounding boxes and confidence support officer review; they do not themselves establish legal compliance. Missing or uncertain regions remain reviewable rather than being treated as automatically absent.</div>
+        <div className="visual-check-note">Declaration evidence is AI-assisted. Confidence is informational only and never filters a detected declaration out of the map. Bounding boxes are shown only when coordinates were actually returned. Missing coordinates are reported as location uncertain, not fabricated.</div>
       </>}
     </section>
   );
