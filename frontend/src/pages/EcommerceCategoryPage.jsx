@@ -73,22 +73,20 @@ export default function EcommerceCategoryPage() {
     const cleanName = childName.trim();
     if (!cleanName || !canAddChild) return;
 
-    const isGlobalParent = Boolean(category.isSystem);
-    const endpoint = isGlobalParent ? `${API_URL}/categories/global` : `${API_URL}/categories`;
-    const response = await apiFetch(endpoint, {
+    const response = await apiFetch(`${API_URL}/categories`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: cleanName,
         parentId: category.id,
         isFinal: advancedFinal && childFinal,
-        sourceType: "ECOMMERCE",
+        sourceType: category.sourceType,
       }),
     });
     const data = await response.json().catch(() => null);
     if (!response.ok) return setMessage(data?.error || "Could not add category");
     setChildName(""); setChildFinal(false); setShowChild(false); setAdvancedFinal(false);
-    setMessage(isGlobalParent ? "Global E-commerce subcategory added for all users." : "Private E-commerce subcategory added to this account.");
+    setMessage("Private E-commerce subcategory added to this account.");
     load();
   }
 
