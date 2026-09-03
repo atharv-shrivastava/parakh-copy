@@ -1,4 +1,5 @@
 import { jsPDF } from "jspdf";
+import { getResponsibilityReference } from "./penalties";
 
 function safe(value) {
   return String(value ?? "Not recorded");
@@ -155,7 +156,10 @@ export async function downloadProductPdf({ product, user, violations = [], penal
       doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(71, 85, 105);
       const detailLines = doc.splitTextToSize(`${detail}${row.detail?.provision ? ` (Legal reference: ${row.detail.provision})` : ""}`, 500);
       doc.text(detailLines, left + 80, y);
-      y += Math.max(18, detailLines.length * 11);
+      const responsibilityLines = doc.splitTextToSize(`Responsibility reference: ${getResponsibilityReference(row.finding)}`, 500);
+      doc.setFont("helvetica", "italic");
+      doc.text(responsibilityLines, left + 80, y + Math.max(12, detailLines.length * 11));
+      y += Math.max(30, detailLines.length * 11 + responsibilityLines.length * 11 + 4);
     });
   }
   doc.setFont("helvetica", "italic");
