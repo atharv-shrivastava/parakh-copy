@@ -5,8 +5,6 @@ const STORAGE_KEY = "parakhVisualInspection";
 const DECLARATION_KEY = "parakhDeclarationEvidence";
 const MAX_IMAGES = 4;
 const MAX_ANALYSIS_SIDE = 1200;
-const DECLARATION_MODEL = "google/gemini-2.5-flash";
-const DECLARATION_TIMEOUT_MS = 30000;
 
 const DECLARATION_TYPES = [
   "PRODUCT_NAME",
@@ -131,188 +129,45 @@ function getScanImages() {
     .filter(Boolean);
 }
 
-function parseVisualJson(text) {
-  const source = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
-  const start = source.indexOf("{");
-  if (start < 0) throw new Error("Visual model did not return JSON.");
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < source.length; i += 1) {
-    const ch = source[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === "{") depth += 1;
-    else if (ch === "}") {
-      depth -= 1;
-      if (depth === 0) return JSON.parse(source.slice(start, i + 1));
-    }
-  }
-  throw new Error("Visual model returned incomplete JSON.");
-}
-
-function normalizeDeclaration(item, imageIndex) {
-  const box = item?.boundingBox || item?.bbox || item?.box || {};
-  const left = Number(box.left ?? box.x);
-  const top = Number(box.top ?? box.y);
-  const width = Number(box.width ?? box.w);
-  const height = Number(box.height ?? box.h);
-  const hasBox = [left, top, width, height].every(Number.isFinite);
-  const type = String(item?.type || item?.declarationType || item?.field || "OTHER_DECLARATION").toUpperCase();
-  return {
-    imageIndex,
-    type: DECLARATION_TYPES.includes(type) ? type : "OTHER_DECLARATION",
-    text: typeof item?.text === "string" ? item.text.trim() : "",
-    confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
-    boundingBox: hasBox ? {
-      left: Math.max(0, Math.min(1, left)),
-      top: Math.max(0, Math.min(1, top)),
-      width: Math.max(0, Math.min(1, width)),
-      height: Math.max(0, Math.min(1, height)),
-    } : null,
-    notes: typeof item?.notes === "string" ? item.notes.trim() : "",
-  };
-}
-
-async function detectDeclarations(src, imageIndex) {
-  const puter = window.puter;
-  if (!puter?.ai?.chat) throw new Error("Multimodal AI is unavailable.");
-
-  const imageResponse = await fetch(src);
-  if (!imageResponse.ok) throw new Error(`Could not load image ${imageIndex + 1} for declaration analysis.`);
-  const blob = await imageResponse.blob();
-  const media = new File([blob], `parakh-declaration-${imageIndex + 1}.jpg`, { type: blob.type || "image/jpeg" });
-
-  const prompt = `Inspect this packaged-commodity photograph for visible declarations. Return ONLY valid JSON in this exact shape: {"declarations":[{"type":"MRP","text":"MRP ₹120","confidence":0.96,"boundingBox":{"left":0.1,"top":0.2,"width":0.3,"height":0.05},"notes":""}]}. Use normalized coordinates from 0 to 1 relative to the full image. Detect only declaration text that is actually visible in this photograph. Do not invent missing declarations or text. Use one of these declaration types: ${DECLARATION_TYPES.join(", ")}. Include important visible declaration regions even when confidence is moderate. Bounding boxes are required whenever the location can be estimated and should tightly surround the relevant declaration text; otherwise use null.`;
-
-  const aiRequest = puter.ai.chat(prompt, media, false, { model: DECLARATION_MODEL });
-  const timeout = new Promise((_, reject) => {
-    window.setTimeout(() => reject(new Error("Declaration localization timed out.")), DECLARATION_TIMEOUT_MS);
-  });
-  const response = await Promise.race([aiRequest, timeout]);
-  const responseText = response?.message?.content || response?.content || response?.text || "";
-  const parsed = parseVisualJson(responseText);
-
-  return Array.isArray(parsed?.declarations)
-    ? parsed.declarations
-        .map((item) => normalizeDeclaration(item, imageIndex))
-        .filter((item) => item.text || item.boundingBox)
-    : [];
-}
 
 export default function ScanVisualCheck() {
   const [results, setResults] = useState([]);
   const [declarations, setDeclarations] = useState([]);
-  const [declarationBusy, setDeclarationBusy] = useState(false);
   const [declarationMessage, setDeclarationMessage] = useState("");
   const [activeDeclarationImage, setActiveDeclarationImage] = useState(0);
   const [open, setOpen] = useState(true);
   const [referenceWidth, setReferenceWidth] = useState("");
 
   useEffect(() => {
-    window.sessionStorage.removeItem(STORAGE_KEY);
-    window.sessionStorage.removeItem(DECLARATION_KEY);
-    setResults([]);
-    setDeclarations([]);
-    setDeclarationMessage("");
-
-    let stopped = false;
-    let observer;
-    let timer;
-    let running = false;
-    let lastSignature = "";
-    let debounceTimer;
-    let declarationSignature = "";
-
-    const run = async () => {
-      if (running || stopped) return;
-      const sources = getScanImages();
-      const signature = sources.join("|");
-      if (signature === lastSignature) return;
-      lastSignature = signature;
-
-      if (!sources.length) {
-        setResults([]);
-        setDeclarations([]);
-        window.sessionStorage.removeItem(STORAGE_KEY);
-        window.sessionStorage.removeItem(DECLARATION_KEY);
-        return;
-      }
-
-      running = true;
+    const loadDeclarationEvidence = () => {
       try {
-        const inspected = await Promise.all(sources.map((src) => inspectImageSource(src).catch(() => null)));
-        if (!stopped) setResults(inspected.filter(Boolean));
-      } finally {
-        running = false;
-      }
-
-      const visualSignature = sources.join("|");
-      if (visualSignature !== declarationSignature && window.puter?.ai?.chat) {
-        declarationSignature = visualSignature;
-        setDeclarationBusy(true);
-        setDeclarationMessage("Detecting declaration regions...");
-        try {
-          const detected = [];
-          const errors = [];
-
-          for (let index = 0; index < sources.length; index += 1) {
-            if (stopped) break;
-            setDeclarationMessage(`Analyzing image ${index + 1} of ${sources.length}...`);
-            try {
-              const imageDeclarations = await detectDeclarations(sources[index], index);
-              detected.push(...imageDeclarations);
-              if (!stopped) {
-                setDeclarations([...detected]);
-                window.sessionStorage.setItem(DECLARATION_KEY, JSON.stringify(detected));
-              }
-            } catch (error) {
-              errors.push(`Image ${index + 1}: ${error?.message || "Declaration localization failed."}`);
-            }
-          }
-
-          if (!stopped) {
-            if (detected.length) {
-              setDeclarationMessage(`${detected.length} declaration regions detected${errors.length ? ". Some images could not be localized." : "."}`);
-            } else {
-              setDeclarationMessage(errors[0] || "No declaration regions could be confidently localized.");
-            }
-          }
-        } finally {
-          if (!stopped) setDeclarationBusy(false);
-        }
+        const parsed = JSON.parse(window.sessionStorage.getItem(DECLARATION_KEY) || "[]");
+        setDeclarations(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        setDeclarations([]);
       }
     };
 
-    const scheduleRun = () => {
-      window.clearTimeout(debounceTimer);
-      debounceTimer = window.setTimeout(run, 120);
+    loadDeclarationEvidence();
+    const handleEvidence = (event) => {
+      const next = Array.isArray(event.detail) ? event.detail : [];
+      setDeclarations(next);
     };
+    window.addEventListener("parakh:declaration-evidence", handleEvidence);
 
-    const attach = () => {
-      const grid = document.querySelector(".scan-image-grid");
-      if (grid && !observer) {
-        observer = new MutationObserver(scheduleRun);
-        observer.observe(grid, { childList: true, subtree: true });
-      }
-      scheduleRun();
-    };
-
-    timer = window.setInterval(attach, 900);
-    attach();
+    const observer = new MutationObserver(loadDeclarationEvidence);
+    const target = document.querySelector(".ocr-fields-grid") || document.body;
+    observer.observe(target, { childList: true, subtree: true });
 
     return () => {
-      stopped = true;
-      window.clearInterval(timer);
-      window.clearTimeout(debounceTimer);
-      observer?.disconnect();
+      window.removeEventListener("parakh:declaration-evidence", handleEvidence);
+      observer.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    setActiveDeclarationImage((current) => Math.max(0, Math.min(current, Math.max(0, results.length - 1))));
+  }, [results.length]);
 
   const average = results.length ? Math.round(results.reduce((sum, item) => sum + item.readability, 0) / results.length) : 0;
   const label = average >= 75 ? "Good" : average >= 50 ? "Fair" : "Poor";
@@ -340,7 +195,7 @@ export default function ScanVisualCheck() {
       declarationCoverageScreened: hasOcr,
       imagesChecked: results.length,
       declarationEvidence: declarations,
-      declarationModel: declarations.length || declarationBusy ? DECLARATION_MODEL : null,
+      declarationModel: declarations.length ? "ocr-provider-inline-evidence" : null,
     };
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(detail));
     window.dispatchEvent(new CustomEvent("parakh:visual-analysis", { detail }));
@@ -393,7 +248,7 @@ export default function ScanVisualCheck() {
           </div>)}
         </div>
 
-        <div className="visual-declaration-header"><div><h3>Declaration map</h3><p>{declarationBusy ? "Multimodal analysis is local to this scan in the background." : declarationMessage || "Select a package image to inspect declaration locations."}</p></div></div>
+        <div className="visual-declaration-header"><div><h3>Declaration map</h3><p>{declarationMessage || "Declaration regions returned with the OCR analysis are shown against their source image."}</p></div></div>
         {results.length > 0 && <div className="visual-declaration-browser">
           <div className="visual-declaration-tabs" role="tablist" aria-label="Package images">
             {results.map((_item, imageIndex) => {
