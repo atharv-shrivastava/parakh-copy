@@ -11,6 +11,7 @@ function Layout() {
       <nav className="navigation">
         <NavLink to="/" end>Dashboard</NavLink>
         <NavLink to="/scan">Scan</NavLink>
+        <NavLink to="/visual-verification">Visual Check</NavLink>
         <NavLink to="/ecommerce-inspection">E-commerce</NavLink>
         <NavLink to="/shops">Shops</NavLink>
         <NavLink to="/products" end>Products</NavLink>
