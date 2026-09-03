@@ -118,7 +118,7 @@ async function runPuter(files) {
 
   const compactPrompt = `Using ONLY this OCR transcript, map the visible package information into JSON. Never invent or infer. Return ALL requested fields, but keep each evidence string short. Also return declarationEvidence as an array with imageIndex, type, text, confidence and normalized boundingBox if the transcript contains location data; otherwise use boundingBox:null. Do not create locations from guesswork. Use this exact top-level shape: { fields: { <field>: {value,raw,confidence,evidence,status} }, otherDeclarations:[], declarationEvidence:[], rawText:"", warnings:[], unreadableFields:[], needsReview:false }. Valid statuses: found, absent, unreadable, ambiguous. Fields: ${OCR_FIELDS.join(", ")}. Transcript:\n${rawText}`;
 
-  const response = await puter.ai.chat(compactPrompt, { model: "gpt-5-nano", max_tokens: 12000, temperature: 0, normalize: true });
+  const response = await puter.ai.chat(compactPrompt, { model: "gpt-5-nano", max_tokens: 12000, normalize: true });
   const responseText = response?.message?.content || response?.content || response?.text || "";
   if (!responseText) throw new Error("Puter returned an empty structured OCR response.");
 
