@@ -16,7 +16,7 @@ function Layout() {
         <NavLink to="/history">History</NavLink>
         <NavLink to="/reports">Reports</NavLink>
         <NavLink to="/profile">Profile</NavLink>
-        {user?.role === "ADMIN" && <NavLink to="/admin/categories">Admin Categories</NavLink>}
+        {user?.role === "ADMIN" && <><NavLink to="/admin">Admin Dashboard</NavLink><NavLink to="/admin/categories">Global Categories</NavLink></>}
       </nav>
       <div className="sidebar-user"><strong>{user?.name || "User"}</strong><span>{user?.role || "USER"}</span><button type="button" onClick={logout}>Sign out</button></div>
     </aside>
