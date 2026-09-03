@@ -43,6 +43,7 @@ model Shop {
   state       String?
   latitude    Float?
   longitude   Float?
+  sourceType  String        @default("OFFLINE")
   ownerId     String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
@@ -51,6 +52,7 @@ model Shop {
 
   @@index([name])
   @@index([ownerId])
+  @@index([sourceType])
 }
 
 model Category {
@@ -76,26 +78,29 @@ model Category {
 }
 
 model Product {
-  id               String        @id @default(cuid())
-  brandName        String?
-  productName      String
-  description      String?
-  ocrData          String?
-  netQuantity      String?
-  unit             String?
-  mrp              Float?
-  barcode          String?
-  imageUrl         String?
-  imageUrls        Json          @default("[]")
-  complianceStatus String        @default("NEEDS_REVIEW")
-  violationReason  String?
-  ownerId          String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  categoryId       String
-  category         Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  owner            User?         @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  inspections      Inspection[]
+  id                String        @id @default(cuid())
+  brandName         String?
+  productName       String
+  description       String?
+  ocrData           String?
+  netQuantity       String?
+  unit              String?
+  mrp               Float?
+  barcode           String?
+  imageUrl          String?
+  imageUrls         Json          @default("[]")
+  complianceStatus  String        @default("NEEDS_REVIEW")
+  violationReason   String?
+  sourceType        String        @default("OFFLINE")
+  sourceUrl         String?
+  sourceWebsiteName String?
+  ownerId           String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  categoryId        String
+  category          Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  owner             User?         @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  inspections       Inspection[]
 
   @@index([categoryId])
   @@index([ownerId])
@@ -103,6 +108,7 @@ model Product {
   @@index([productName])
   @@index([barcode])
   @@index([complianceStatus])
+  @@index([sourceType])
   @@index([createdAt])
 }
 
