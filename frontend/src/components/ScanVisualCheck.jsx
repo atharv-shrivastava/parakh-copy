@@ -210,6 +210,7 @@ export default function ScanVisualCheck() {
   const [declarations, setDeclarations] = useState([]);
   const [declarationBusy, setDeclarationBusy] = useState(false);
   const [declarationMessage, setDeclarationMessage] = useState("");
+  const [activeDeclarationImage, setActiveDeclarationImage] = useState(0);
   const [open, setOpen] = useState(true);
   const [referenceWidth, setReferenceWidth] = useState("");
 
@@ -385,20 +386,39 @@ export default function ScanVisualCheck() {
           </div>)}
         </div>
 
-        <div className="visual-declaration-header"><div><h3>Declaration map</h3><p>{declarationBusy ? "Multimodal analysis is local to this scan and runs in the background." : declarationMessage || "Detected declaration regions are shown against their source image."}</p></div></div>
-        {declarations.length > 0 && <div className="visual-declaration-grid">
-          {results.map((_item, imageIndex) => {
+        <div className="visual-declaration-header"><div><h3>Declaration map</h3><p>{declarationBusy ? "Multimodal analysis is local to this scan in the background." : declarationMessage || "Select a package image to inspect declaration locations."}</p></div></div>
+        {results.length > 0 && <div className="visual-declaration-browser">
+          <div className="visual-declaration-tabs" role="tablist" aria-label="Package images">
+            {results.map((_item, imageIndex) => {
+              const imageDeclarations = declarations.filter((item) => item.imageIndex === imageIndex);
+              const selectedTab = activeDeclarationImage === imageIndex;
+              return <button
+                type="button"
+                role="tab"
+                aria-selected={selectedTab}
+                className={selectedTab ? "visual-declaration-tab is-active" : "visual-declaration-tab"}
+                key={`decl-tab-${imageIndex}`}
+                onClick={() => setActiveDeclarationImage(imageIndex)}
+              >
+                Image {imageIndex + 1}
+                <span>{imageDeclarations.length ? `${imageDeclarations.length} found` : "No localized regions"}</span>
+              </button>;
+            })}
+          </div>
+          {(() => {
+            const imageIndex = Math.min(activeDeclarationImage, results.length - 1);
             const image = getScanImages()[imageIndex];
             const imageDeclarations = declarations.filter((item) => item.imageIndex === imageIndex);
-            if (!imageDeclarations.length) return null;
-            return <div className="visual-declaration-card" key={`decl-image-${imageIndex}`}>
+            return <div className="visual-declaration-card is-single">
               <div className="visual-declaration-canvas">
                 <img src={image} alt={`Declaration map for package image ${imageIndex + 1}`} />
                 {imageDeclarations.map((item, index) => item.boundingBox && <div className="visual-declaration-box" key={`${item.type}-${index}`} style={{ left: `${item.boundingBox.left * 100}%`, top: `${item.boundingBox.top * 100}%`, width: `${item.boundingBox.width * 100}%`, height: `${item.boundingBox.height * 100}%` }} title={`${item.type} · ${Math.round(item.confidence * 100)}%`}><span>{item.type.replaceAll("_", " ")}</span></div>)}
               </div>
-              <div className="visual-declaration-list">{imageDeclarations.map((item, index) => <div key={`${item.type}-${index}`}><strong>{item.type.replaceAll("_", " ")}</strong><span>{item.text || "Localized region"}</span><small>{Math.round(item.confidence * 100)}% confidence{item.boundingBox ? " · localized" : " · location uncertain"}</small></div>)}</div>
+              <div className="visual-declaration-list">
+                {imageDeclarations.length ? imageDeclarations.map((item, index) => <div key={`${item.type}-${index}`}><strong>{item.type.replaceAll("_", " ")}</strong><span>{item.text || "Localized region"}</span><small>{Math.round(item.confidence * 100)}% confidence{item.boundingBox ? " · localized" : " · location uncertain"}</small></div>) : <div className="visual-declaration-empty"><strong>No declaration regions localized for this image.</strong><span>The image was analyzed, but no declaration box could be returned with sufficient confidence.</span></div>}
+              </div>
             </div>;
-          })}
+          })()}
         </div>}
 
         <div className="visual-check-note">Declaration localization is AI-assisted evidence. Bounding boxes and confidence support officer review; they do not themselves establish legal compliance. Missing or uncertain regions remain reviewable rather than being treated as automatically absent.</div>
