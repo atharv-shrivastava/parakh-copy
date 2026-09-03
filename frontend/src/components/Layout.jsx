@@ -1,8 +1,10 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { clearSession, getUser } from "../lib/auth";
+import ScanVisualCheck from "./ScanVisualCheck";
 
 function Layout() {
   const user = getUser();
+  const location = useLocation();
   const navigate = useNavigate();
   function logout() { clearSession(); navigate("/login", { replace: true }); }
   return <div className="app-layout">
@@ -21,7 +23,7 @@ function Layout() {
       </nav>
       <div className="sidebar-user"><strong>{user?.name || "User"}</strong><span>{user?.role || "USER"}</span><button type="button" onClick={logout}>Sign out</button></div>
     </aside>
-    <main className="main-content"><Outlet /></main>
+    <main className="main-content"><Outlet />{location.pathname === "/scan" && <ScanVisualCheck />}</main>
   </div>;
 }
 export default Layout;
