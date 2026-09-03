@@ -199,7 +199,7 @@ export default function ScanVisualCheck() {
     };
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(detail));
     window.dispatchEvent(new CustomEvent("parakh:visual-analysis", { detail }));
-  }, [results, average, estimatedMm, hasOcr, declarations, declarationBusy]);
+  }, [results, average, estimatedMm, hasOcr, declarations]);
 
   if (!results.length) return null;
 
