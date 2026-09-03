@@ -174,6 +174,7 @@ export default function ScanV2() {
     setAcceptedFindingIds([]);
     setProviderInfo(null);
     setSelectedCategoryId("");
+    window.sessionStorage.removeItem("parakhDeclarationEvidence");
     setMessage("Images ready for analysis.");
   }
 
