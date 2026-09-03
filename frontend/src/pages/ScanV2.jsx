@@ -101,17 +101,43 @@ async function runGemini(files) {
 async function runPuter(files) {
   const puter = window.puter;
   if (!puter?.ai?.img2txt) throw new Error("Puter.js OCR fallback is not available.");
-  const chunks = await Promise.all(files.map(async (file, index) => {
+
+  const chunks = [];
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
     if (file.size > MAX_PUTER_IMAGE_SIZE) throw new Error(`Image ${index + 1} exceeds Puter OCR's 10 MB limit.`);
-    return `[IMAGE ${index + 1}]\\n${String(await puter.ai.img2txt(file) || "").trim()}`;
-  }));
-  const rawText = chunks.filter(Boolean).join("\\n\\n");
+    const text = String(await puter.ai.img2txt(file, { provider: "mistral" }) || "").trim();
+    if (text) chunks.push(`[IMAGE ${index}]\\n${text}`);
+  }
+
+  const rawText = chunks.join("\\n\\n");
   if (!rawText.trim()) throw new Error("Puter OCR found no readable text.");
-  if (!puter.ai.chat) return { result: normalizePuter({}, rawText), provider: "puter-js", model: "img2txt fallback" };
-  const prompt = `Convert this OCR text into PARAKH structured OCR JSON. Never invent data. Every field must be {value,raw,confidence,evidence,status}; status is found, absent, unreadable or ambiguous. Return only valid JSON. Fields: ${OCR_FIELDS.join(", ")}. Also return otherDeclarations, declarationEvidence, rawText, warnings, unreadableFields, needsReview. For declarationEvidence, use imageIndex 0-based based on the [IMAGE N] markers and provide visible declaration type, text, confidence, and normalized boundingBox when you can locate it. Use null for boundingBox when location cannot be determined. OCR text:\n\n${rawText}`;
-  const response = await puter.ai.chat(prompt, { model: "gpt-5.6-luna", max_tokens: 5000 });
-  const content = response?.message?.content || response?.content || response?.text || "";
-  return { result: normalizePuter(JSON.parse(extractJson(content)), rawText), provider: "puter-js", model: "fallback" };
+
+  if (!puter.ai.chat) return { result: normalizePuter({}, rawText), provider: "puter-js", model: "mistral img2txt fallback" };
+
+  const compactPrompt = `Using ONLY this OCR transcript, map the visible package information into JSON. Never invent or infer. Return ALL requested fields, but keep each evidence string short. Also return declarationEvidence as an array with imageIndex, type, text, confidence and normalized boundingBox if the transcript contains location data; otherwise use boundingBox:null. Do not create locations from guesswork. Use this exact top-level shape: { fields: { <field>: {value,raw,confidence,evidence,status} }, otherDeclarations:[], declarationEvidence:[], rawText:"", warnings:[], unreadableFields:[], needsReview:false }. Valid statuses: found, absent, unreadable, ambiguous. Fields: ${OCR_FIELDS.join(", ")}. Transcript:\n${rawText}`;
+
+  const response = await puter.ai.chat(compactPrompt, { model: "gpt-5-nano", max_tokens: 12000, temperature: 0, normalize: true });
+  const responseText = response?.message?.content || response?.content || response?.text || "";
+  if (!responseText) throw new Error("Puter returned an empty structured OCR response.");
+
+  let candidate;
+  try {
+    candidate = JSON.parse(extractJson(responseText));
+  } catch (error) {
+    const repairedPrompt = `Return ONLY compact valid JSON for this PARAKH OCR transcript. Preserve any useful fields from the transcript, but never invent. Do not include declarationEvidence unless you have a real location. Transcript:\n${rawText}`;
+    const repaired = await puter.ai.chat(repairedPrompt, { model: "gpt-5-nano", max_tokens: 8000, temperature: 0, normalize: true });
+    const repairedText = repaired?.message?.content || repaired?.content || repaired?.text || "";
+    candidate = JSON.parse(extractJson(repairedText));
+  }
+
+  const result = normalizePuter(candidate.fields || candidate, rawText);
+  result.otherDeclarations = Array.isArray(candidate.otherDeclarations) ? candidate.otherDeclarations : result.otherDeclarations;
+  result.declarationEvidence = Array.isArray(candidate.declarationEvidence) ? candidate.declarationEvidence : [];
+  result.warnings = Array.isArray(candidate.warnings) ? candidate.warnings : result.warnings;
+  result.unreadableFields = Array.isArray(candidate.unreadableFields) ? candidate.unreadableFields : result.unreadableFields;
+  result.needsReview = Boolean(candidate.needsReview) || result.needsReview;
+  return { result, provider: "puter-js", model: "gpt-5-nano + mistral OCR" };
 }
 
 async function runOcr(files) {
