@@ -9,11 +9,19 @@ const FieldSchema = z.object({
   confidence: z.number().min(0).max(1),
   evidence: z.union([z.string(), z.null()]),
   status: z.enum(["found", "absent", "unreadable", "ambiguous"]),
+  imageIndex: z.number().int().min(0).optional(),
 }).nullable();
 
 const ResultSchema = z.object({
   ...Object.fromEntries(FIELD_KEYS.map((key) => [key, FieldSchema])),
   otherDeclarations: z.array(z.string()).default([]),
+  declarationEvidence: z.array(z.object({
+    imageIndex: z.number().int().min(0),
+    type: z.string(),
+    text: z.string(),
+    confidence: z.number().min(0).max(1),
+    boundingBox: z.any().nullable().default(null),
+  })).default([]),
   rawText: z.string().default(""),
   warnings: z.array(z.string()).default([]),
   unreadableFields: z.array(z.string()).default([]),
@@ -34,6 +42,23 @@ function normalize(result, threshold) {
     const match = next.netQuantity.value.trim().match(/^([\d,]+(?:\.\d+)?)\s*([a-zA-Z]+)$/);
     if (match) next.netQuantity = { ...next.netQuantity, value: Number(match[1].replace(/,/g, "")) };
   }
+
+  const declarationEvidence = Array.isArray(next.declarationEvidence) ? [...next.declarationEvidence] : [];
+  const existingKeys = new Set(declarationEvidence.map((item) => `${item.imageIndex}:${item.type}:${item.text}`));
+  for (const key of FIELD_KEYS) {
+    const field = next[key];
+    if (!field || field.status !== "found") continue;
+    const evidence = String(field.evidence ?? field.raw ?? field.value ?? "").trim();
+    if (!evidence) continue;
+    const imageIndex = Number.isInteger(field.imageIndex) ? field.imageIndex : 0;
+    const type = key === "unit" ? "NET_QUANTITY" : key.replace(/([A-Z])/g, "_$1").toUpperCase();
+    const entryKey = `${imageIndex}:${type}:${evidence}`;
+    if (!existingKeys.has(entryKey)) {
+      declarationEvidence.push({ imageIndex, type, text: evidence, confidence: field.confidence, boundingBox: null });
+      existingKeys.add(entryKey);
+    }
+  }
+
   const unreadable = new Set(next.unreadableFields || []);
   let needsReview = false;
   for (const key of FIELD_KEYS) {
@@ -42,16 +67,17 @@ function normalize(result, threshold) {
     if (field.status === "unreadable" || field.status === "ambiguous") { unreadable.add(key); needsReview = true; }
     if (field.status === "found" && field.confidence < threshold) needsReview = true;
   }
-  return { ...next, unreadableFields: [...unreadable], needsReview };
+  return { ...next, declarationEvidence, unreadableFields: [...unreadable], needsReview };
 }
 
 function buildPrompt() {
-  return `You are PARAKH's strict package-information extraction engine. Read ONLY information visibly printed on the supplied product package images. Never guess, infer, complete, or invent values. If a field is not visible, mark absent. If present but illegible, mark unreadable. If conflicting or unclear, mark ambiguous. Preserve exact printed wording in raw and evidence. Normalize only value: MRP to a number and currency separately; net quantity to a number and unit separately. Barcode means only human-readable printed digits, never visual barcode decoding. Do not assess legal compliance. Return ONLY valid JSON with fields ${FIELD_KEYS.map((key) => `${key}: {value,raw,confidence,evidence,status}`).join(", ")}, plus otherDeclarations, rawText, warnings, unreadableFields and needsReview. Field meanings: ${Object.entries(descriptions).map(([key, value]) => `${key}=${value}`).join("; ")}.`;
+  return `You are PARAKH's strict package-information extraction engine. Read ONLY information visibly printed on the supplied product package images. Never guess, infer, complete, or invent values. If a field is not visible, mark absent. If present but illegible, mark unreadable. If conflicting or unclear, mark ambiguous. Preserve exact printed wording in raw and evidence. For every found field, set imageIndex to the zero-based index of the image where that evidence is visible. Normalize only value: MRP to a number and currency separately; net quantity to a number and unit separately. Barcode means only human-readable printed digits, never visual barcode decoding. Do not assess legal compliance. Return ONLY valid JSON with fields ${FIELD_KEYS.map((key) => `${key}: {value,raw,confidence,evidence,status,imageIndex}`).join(", ")}, declarationEvidence, otherDeclarations, rawText, warnings, unreadableFields and needsReview. declarationEvidence must list every visible declaration with zero-based imageIndex, declaration type, short exact printed text, confidence, and boundingBox:null. Do not invent bounding boxes. Field meanings: ${Object.entries(descriptions).map(([key, value]) => `${key}=${value}`).join("; ")}.`;
 }
 
 function buildResponseSchema() {
-  const field = { type: "object", properties: { value: { type: "string" }, raw: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 1 }, evidence: { type: "string" }, status: { type: "string", enum: ["found", "absent", "unreadable", "ambiguous"] } }, required: ["value", "raw", "confidence", "evidence", "status"] };
-  return { type: "object", properties: { ...Object.fromEntries(FIELD_KEYS.map((key) => [key, field])), otherDeclarations: { type: "array", items: { type: "string" } }, rawText: { type: "string" }, warnings: { type: "array", items: { type: "string" } }, unreadableFields: { type: "array", items: { type: "string" } }, needsReview: { type: "boolean" } }, required: [...FIELD_KEYS, "otherDeclarations", "rawText", "warnings", "unreadableFields", "needsReview"] };
+  const field = { type: "object", properties: { value: { type: "string" }, raw: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 1 }, evidence: { type: "string" }, status: { type: "string", enum: ["found", "absent", "unreadable", "ambiguous"] }, imageIndex: { type: "integer", minimum: 0 } }, required: ["value", "raw", "confidence", "evidence", "status"] };
+  const declarationEvidence = { type: "array", items: { type: "object", properties: { imageIndex: { type: "integer", minimum: 0 }, type: { type: "string" }, text: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 1 }, boundingBox: { type: "object", nullable: true } }, required: ["imageIndex", "type", "text", "confidence", "boundingBox"] } };
+  return { type: "object", properties: { ...Object.fromEntries(FIELD_KEYS.map((key) => [key, field])), declarationEvidence, otherDeclarations: { type: "array", items: { type: "string" } }, rawText: { type: "string" }, warnings: { type: "array", items: { type: "string" } }, unreadableFields: { type: "array", items: { type: "string" } }, needsReview: { type: "boolean" } }, required: [...FIELD_KEYS, "declarationEvidence", "otherDeclarations", "rawText", "warnings", "unreadableFields", "needsReview"] };
 }
 
 export async function analyzePackage(images, config) {
