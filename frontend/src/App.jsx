@@ -16,6 +16,7 @@ import Profile from "./pages/Profile";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import AdminCategories from "./pages/AdminCategories";
+import AdminDashboard from "./pages/AdminDashboard";
 import { getToken, getUser } from "./lib/auth";
 
 function Protected() { const location = useLocation(); return getToken() ? <Outlet /> : <Navigate to="/login" replace state={{ from: location.pathname }} />; }
@@ -29,7 +30,7 @@ function App() {
       <Route path="/shops" element={<Shops />} /><Route path="/shops/:shopId" element={<ShopDetails />} /><Route path="/shops/:shopId/products" element={<ShopProducts />} />
       <Route path="/products" element={<Products />} /><Route path="/products/register" element={<FoodProductRegistration />} /><Route path="/products/manual-register" element={<ManualProductRegistration />} /><Route path="/products/category/:categoryId" element={<CategoryPage />} /><Route path="/products/item/:id" element={<ProductDetails />} />
       <Route path="/history" element={<History />} /><Route path="/reports" element={<Reports />} /><Route path="/profile" element={<Profile />} />
-      <Route element={<AdminOnly />}><Route path="/admin/categories" element={<AdminCategories />} /></Route>
+      <Route element={<AdminOnly />}><Route path="/admin" element={<AdminDashboard />} /><Route path="/admin/categories" element={<AdminCategories />} /></Route>
     </Route></Route>
   </Routes></BrowserRouter>;
 }
