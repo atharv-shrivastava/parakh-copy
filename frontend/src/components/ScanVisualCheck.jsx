@@ -258,20 +258,27 @@ export default function ScanVisualCheck() {
         setDeclarationBusy(true);
         setDeclarationMessage("Detecting declaration regions...");
         try {
-          const outcomes = await Promise.all(sources.map(async (src, index) => {
+          const detected = [];
+          const errors = [];
+
+          for (let index = 0; index < sources.length; index += 1) {
+            if (stopped) break;
+            setDeclarationMessage(`Analyzing image ${index + 1} of ${sources.length}...`);
             try {
-              return { declarations: await detectDeclarations(src, index), error: null };
+              const imageDeclarations = await detectDeclarations(sources[index], index);
+              detected.push(...imageDeclarations);
+              if (!stopped) {
+                setDeclarations([...detected]);
+                window.sessionStorage.setItem(DECLARATION_KEY, JSON.stringify(detected));
+              }
             } catch (error) {
-              return { declarations: [], error: error?.message || "Declaration localization failed." };
+              errors.push(`Image ${index + 1}: ${error?.message || "Declaration localization failed."}`);
             }
-          }));
-          const detected = outcomes.flatMap((item) => item.declarations);
-          const errors = outcomes.map((item) => item.error).filter(Boolean);
+          }
+
           if (!stopped) {
-            setDeclarations(detected);
-            window.sessionStorage.setItem(DECLARATION_KEY, JSON.stringify(detected));
             if (detected.length) {
-              setDeclarationMessage(`${detected.length} declaration regions detected.${errors.length ? " Some images could not be localized." : ""}`);
+              setDeclarationMessage(`${detected.length} declaration regions detected${errors.length ? ". Some images could not be localized." : "."}`);
             } else {
               setDeclarationMessage(errors[0] || "No declaration regions could be confidently localized.");
             }
