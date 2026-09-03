@@ -6,13 +6,16 @@ import "../styles/products.css";
 const API_URL = "http://localhost:5000/api";
 
 function TreeNode({ node, onDelete }) {
+  const isGlobal = Boolean(node.isSystem);
   return <div className="category-tree-node">
     <div className="category-item">
       <Link className="category-card" to={`/products/category/${node.id}`}>
         <h3>{node.name}</h3>
-        <p>{node.sourceType === "ECOMMERCE" ? "E-commerce" : "Offline"} · {node.isFinalProductType ? "Final category" : "Can contain subcategories"} · Global</p>
+        <p>{node.sourceType === "ECOMMERCE" ? "E-commerce" : "Offline"} · {node.isFinalProductType ? "Final category" : "Can contain subcategories"} · {isGlobal ? "Global" : "Private to admin"}</p>
       </Link>
-      <button className="delete-category-button" type="button" onClick={() => onDelete(node)}>Delete global category</button>
+      <button className="delete-category-button" type="button" onClick={() => onDelete(node)}>
+        Delete {isGlobal ? "global category" : "private category"}
+      </button>
     </div>
     {node.children?.length ? <div className="category-tree-children">{node.children.map((child) => <TreeNode key={child.id} node={child} onDelete={onDelete} />)}</div> : null}
   </div>;
@@ -84,21 +87,22 @@ export default function AdminCategories() {
   useEffect(() => { load(); }, []);
 
   async function remove(category) {
-    if (!window.confirm(`Delete ${category.name}? Products in this branch will be moved to the appropriate Uncategorized category and descendant categories will also be removed.`)) return;
+    const scope = category.isSystem ? "global" : "private";
+    if (!window.confirm(`Delete this ${scope} category branch? Registered products will be moved to the appropriate Uncategorized category and descendant categories will also be removed.`)) return;
     const r = await apiFetch(`${API_URL}/categories/${category.id}`, { method: "DELETE" });
     const d = await r.json().catch(() => null);
-    setMessage(r.ok ? (d?.message || "Global category deleted") : (d?.error || "Delete failed"));
+    setMessage(r.ok ? (d?.message || `${scope} category deleted`) : (d?.error || "Delete failed"));
     if (r.ok) await load();
   }
 
-  const offline = tree.filter((x) => x.sourceType !== "ECOMMERCE");
-  const ecommerce = tree.filter((x) => x.sourceType === "ECOMMERCE");
+  const offline = tree.filter((x) => x.isSystem && x.sourceType !== "ECOMMERCE");
+  const ecommerce = tree.filter((x) => x.isSystem && x.sourceType === "ECOMMERCE");
 
   return <div className="products-page">
     <div className="page-header">
       <p className="eyebrow">ADMIN · GLOBAL CATEGORIES</p>
       <h1>Global Categories</h1>
-      <p>Admin-created categories are shared with every user. Your own products and private categories remain in your normal Products area and are visible only to your account.</p>
+      <p>This page manages categories created for every user. Your own private categories and products remain in Products. Private subcategories created inside a global branch are shown here and can also be removed by the admin.</p>
     </div>
 
     <GlobalCategoryForm sourceType="OFFLINE" onCreated={load} />
@@ -107,12 +111,12 @@ export default function AdminCategories() {
     {message && <div className="status-message">{message}</div>}
 
     <section className="product-categories">
-      <div className="section-heading"><div><h2>Offline global categories</h2><p>Open a category to add its global or private subcategories from inside that category.</p></div></div>
+      <div className="section-heading"><div><h2>Offline global categories</h2><p>Open any category to create its next global subcategory or a private subcategory for your admin account.</p></div></div>
       {loading ? <p>Loading...</p> : offline.length ? <div className="category-tree">{offline.map((root) => <TreeNode key={root.id} node={root} onDelete={remove} />)}</div> : <p>No offline global categories yet.</p>}
     </section>
 
     <section className="product-categories">
-      <div className="section-heading"><div><h2>E-commerce global categories</h2><p>Open a category to add its global or private subcategories from inside that category.</p></div></div>
+      <div className="section-heading"><div><h2>E-commerce global categories</h2><p>Open any category to create its next global subcategory or a private subcategory for your admin account.</p></div></div>
       {loading ? <p>Loading...</p> : ecommerce.length ? <div className="category-tree">{ecommerce.map((root) => <TreeNode key={root.id} node={root} onDelete={remove} />)}</div> : <p>No e-commerce global categories yet.</p>}
     </section>
   </div>;
