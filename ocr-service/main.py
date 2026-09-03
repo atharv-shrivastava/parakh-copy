@@ -42,12 +42,7 @@ def normalize_box(points: Any, width: int, height: int):
         bottom = min(float(height), max(ys)) / max(1, height)
         if right <= left or bottom <= top:
             return None
-        return {
-            "left": left,
-            "top": top,
-            "width": right - left,
-            "height": bottom - top,
-        }
+        return {"left": left, "top": top, "width": right - left, "height": bottom - top}
     except (TypeError, IndexError, ValueError):
         return None
 
@@ -75,7 +70,7 @@ def extract_result(result: Any, image_index: int, width: int, height: int):
         confidence = max(0.0, min(1.0, to_float(scores[index], 0.0) if index < len(scores) else 0.0))
         box = normalize_box(boxes[index], width, height) if index < len(boxes) else None
         entries.append({
-            "imageIndex": image_index,
+            "imageIndex": image_index + 1,
             "type": "OCR_TEXT",
             "text": text_value,
             "confidence": confidence,
