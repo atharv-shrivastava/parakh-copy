@@ -65,27 +65,20 @@ function extractJsonObject(text) {
   const source = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
   const start = source.indexOf("{");
   if (start < 0) throw new Error("Puter did not return structured OCR JSON.");
-
   let depth = 0;
   let inString = false;
   let escaped = false;
   for (let i = start; i < source.length; i += 1) {
     const ch = source[i];
     if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (ch === "\\") {
-        escaped = true;
-      } else if (ch === '"') {
-        inString = false;
-      }
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
       continue;
     }
-    if (ch === '"') {
-      inString = true;
-    } else if (ch === "{") {
-      depth += 1;
-    } else if (ch === "}") {
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
       depth -= 1;
       if (depth === 0) return source.slice(start, i + 1);
     }
@@ -105,12 +98,8 @@ function repairJsonEscapes(text) {
       continue;
     }
     if (escaped) {
-      if (!["\"", "\\", "/", "b", "f", "n", "r", "t"].includes(ch) && ch !== "u") {
-        output += "\\\\";
-        output += ch;
-      } else {
-        output += "\\" + ch;
-      }
+      if (!["\"", "\\", "/", "b", "f", "n", "r", "t"].includes(ch) && ch !== "u") output += "\\\\";
+      output += ch;
       escaped = false;
       continue;
     }
@@ -123,11 +112,8 @@ function repairJsonEscapes(text) {
       inString = false;
       continue;
     }
-    if (ch.charCodeAt(0) < 0x20) {
-      output += ch === "\n" ? "\\n" : ch === "\r" ? "\\r" : "\\t";
-    } else {
-      output += ch;
-    }
+    if (ch.charCodeAt(0) < 0x20) output += ch === "\n" ? "\\n" : ch === "\r" ? "\\r" : "\\t";
+    else output += ch;
   }
   if (escaped) output += "\\\\";
   return output;
@@ -172,6 +158,7 @@ function Scan() {
   const [ocr, setOcr] = useState(null);
   const [compliance, setCompliance] = useState(null);
   const [complianceError, setComplianceError] = useState(null);
+  const [acceptedFindingIds, setAcceptedFindingIds] = useState([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [form, setForm] = useState(emptyForm);
   const [analyzing, setAnalyzing] = useState(false);
@@ -206,6 +193,10 @@ function Scan() {
   const flatCategories = flattenCategories(categories);
   const finalCategories = flatCategories.filter((c) => Boolean(c.isFinalProductType));
   const selectedCategory = flatCategories.find((c) => c.id === selectedCategoryId);
+  const violationFindings = useMemo(() => {
+    const findings = Array.isArray(compliance?.findings) ? compliance.findings : Array.isArray(compliance?.violations) ? compliance.violations : [];
+    return findings.filter((finding) => finding?.status === "VIOLATION" || !finding?.status);
+  }, [compliance]);
   const suggestedCategory = useMemo(() => {
     const text = `${ocr?.rawText || ""} ${fieldValue(ocr, "productName")} ${fieldValue(ocr, "brandName")}`.toLowerCase();
     if (!text.trim()) return null;
@@ -217,20 +208,16 @@ function Scan() {
   function addFiles(files) {
     const selected = Array.from(files || []).filter((file) => file instanceof File && file.type.startsWith("image/"));
     if (!selected.length) return;
-
     setImages((current) => {
       const remaining = MAX_IMAGES - current.length;
       if (remaining <= 0) return current;
       const accepted = selected.slice(0, remaining).map((file) => ({ file, url: URL.createObjectURL(file) }));
       return [...current, ...accepted];
     });
-
-    if (images.length + selected.length > MAX_IMAGES) {
-      setMessage(`You can retain a maximum of ${MAX_IMAGES} images.`);
-    }
-
+    if (images.length + selected.length > MAX_IMAGES) setMessage(`You can retain a maximum of ${MAX_IMAGES} images.`);
     setOcr(null);
     setCompliance(null);
+    setAcceptedFindingIds([]);
     setComplianceError(null);
     setMessage("Images ready for analysis.");
   }
@@ -293,6 +280,7 @@ function Scan() {
     });
     setOcr(null);
     setCompliance(null);
+    setAcceptedFindingIds([]);
   }
 
   async function analyzeImages() {
@@ -319,6 +307,9 @@ function Scan() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : data.error?.message || "Rules Engine evaluation failed");
+      const findings = Array.isArray(data.compliance?.findings) ? data.compliance.findings : Array.isArray(data.compliance?.violations) ? data.compliance.violations : [];
+      const violations = findings.filter((finding) => finding?.status === "VIOLATION" || !finding?.status);
+      setAcceptedFindingIds(violations.map((finding, index) => String(finding.findingId ?? finding.ruleId ?? `violation-${index}`)));
       setOcr(extracted);
       setCompliance(data.compliance || null);
       setComplianceError(data.complianceError || null);
@@ -341,6 +332,16 @@ function Scan() {
     }
   }
 
+  function toggleFinding(finding, index) {
+    const id = String(finding?.findingId ?? finding?.ruleId ?? `violation-${index}`);
+    setAcceptedFindingIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  }
+
+  function isFindingAccepted(finding, index) {
+    const id = String(finding?.findingId ?? finding?.ruleId ?? `violation-${index}`);
+    return acceptedFindingIds.includes(id);
+  }
+
   function updateForm(key, value) { setForm((current) => ({ ...current, [key]: value })); }
 
   async function saveProduct(event) {
@@ -356,7 +357,7 @@ function Scan() {
       const response = await apiFetch(`${API_URL}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, categoryId: selectedCategoryId, imageUrls, ocrData: { ocr, compliance: compliance || null, complianceError: complianceError || null }, complianceStatus: status, violationReason: reason, inspectionDate: new Date().toISOString() }),
+        body: JSON.stringify({ ...form, categoryId: selectedCategoryId, imageUrls, ocrData: { ocr, compliance: compliance || null, complianceError: complianceError || null }, acceptedFindingIds, complianceStatus: status, violationReason: reason, inspectionDate: new Date().toISOString() }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not save product");
@@ -375,7 +376,7 @@ function Scan() {
     <section className="scan-area"><div className="scan-icon">⌁</div><h2>Capture or upload package images</h2><p>Use the camera or choose up to {MAX_IMAGES} images showing different sides of the package.</p><div className="scan-upload-actions"><button type="button" className="primary-button" onClick={openCamera}>Open Camera</button><label className="secondary-button scan-file-button">Upload Images<input type="file" accept="image/*" multiple onChange={handleImages} hidden /></label></div><p className="scan-limit">{images.length}/{MAX_IMAGES} images selected</p>{cameraError && <div className="status-message">{cameraError}</div>}</section>
     {cameraOpen && <div className="camera-overlay" role="dialog" aria-modal="true"><div className="camera-modal"><div className="camera-header"><h2>Capture package image</h2><button type="button" onClick={closeCamera}>Close</button></div><video ref={videoRef} className="camera-video" autoPlay playsInline muted /><div className="camera-actions"><button type="button" className="primary-button" onClick={capturePhoto}>Capture Photo</button><button type="button" className="secondary-button" onClick={closeCamera}>Cancel</button></div></div></div>}
     {images.length > 0 && <section className="scan-review"><div className="section-heading"><div><h2>Evidence images</h2><p>All selected images will be retained on the registered product.</p></div></div><div className="scan-image-grid">{images.map(({ url, file }, i) => <div className="scan-image-card" key={`${file.name}-${i}`}><img src={url} alt={`Package evidence ${i + 1}`} /><button type="button" onClick={() => removeImage(i)}>Remove</button><span>{file.name}</span></div>)}</div><button type="button" className="primary-button" onClick={analyzeImages} disabled={analyzing}>{analyzing ? "Analyzing..." : "Analyze Images"}</button></section>}
-    {ocr && <section className="scan-review"><div className="section-heading"><div><h2>OCR extraction and Rules Engine result</h2><p>Correct any OCR mistake before registration.</p></div></div><div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && value && typeof value === "object" && value.status === "found").map(([key, value]) => <div key={key}><strong>{key.replace(/([A-Z])/g, " $1")}</strong><span>{String(value.value)}</span>{typeof value.confidence === "number" && <small>{Math.round(value.confidence * 100)}% confidence</small>}</div>)}</div><div className="ocr-status-grid"><div><strong>Rules Engine</strong><span>{compliance?.overallStatus || "Not evaluated"}</span></div><div><strong>OCR confidence</strong><span>{ocr.needsReview ? "Review required" : "Confident"}</span></div><div><strong>Unreadable fields</strong><span>{ocr.unreadableFields?.length || 0}</span></div></div>{complianceError && <div className="status-message">Rules Engine: {complianceError.message}</div>}{compliance?.summary && <div className="ocr-summary">Rules: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}{compliance?.violations?.length > 0 && <div className="status-message">{compliance.violations.map((v, i) => <div key={i}>{v.message || v.reason || JSON.stringify(v)}</div>)}</div>}<label>Raw OCR<textarea value={ocr.rawText || ""} onChange={(e) => setOcr((c) => ({ ...c, rawText: e.target.value }))} /></label>{suggestedCategory && <div className="scan-suggestion"><span>Suggested final category: <strong>{suggestedCategory.path.map((x) => x.name).join(" → ")}</strong></span><button type="button" className="secondary-button" onClick={() => setSelectedCategoryId(suggestedCategory.id)}>Use suggestion</button></div>}</section>}
+    {ocr && <section className="scan-review"><div className="section-heading"><div><h2>OCR extraction and Rules Engine result</h2><p>Correct any OCR mistake before registration.</p></div></div><div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && value && typeof value === "object" && value.status === "found").map(([key, value]) => <div key={key}><strong>{key.replace(/([A-Z])/g, " $1")}</strong><span>{String(value.value)}</span>{typeof value.confidence === "number" && <small>{Math.round(value.confidence * 100)}% confidence</small>}</div>)}</div><div className="ocr-status-grid"><div><strong>Rules Engine</strong><span>{compliance?.overallStatus || "Not evaluated"}</span></div><div><strong>OCR confidence</strong><span>{ocr.needsReview ? "Review required" : "Confident"}</span></div><div><strong>Unreadable fields</strong><span>{ocr.unreadableFields?.length || 0}</span></div></div>{complianceError && <div className="status-message">Rules Engine: {complianceError.message}</div>}{compliance?.summary && <div className="ocr-summary">Rules: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}{violationFindings.length > 0 && <div className="finding-review"><strong>Inspector review of detected violations</strong><p>Checked findings will be accepted into the final inspection. Unchecked findings remain in the audit record as rejected by the inspector.</p>{violationFindings.map((v, i) => <label key={`${v.findingId || v.ruleId || "finding"}-${i}`} className="finding-review-item"><input type="checkbox" checked={isFindingAccepted(v, i)} onChange={() => toggleFinding(v, i)} /><span>{v.message || v.reason || JSON.stringify(v)}</span></label>)}<small>{acceptedFindingIds.length} of {violationFindings.length} detected violations accepted</small></div>}{label="" && null}<label>Raw OCR<textarea value={ocr.rawText || ""} onChange={(e) => setOcr((c) => ({ ...c, rawText: e.target.value }))} /></label>{suggestedCategory && <div className="scan-suggestion"><span>Suggested final category: <strong>{suggestedCategory.path.map((x) => x.name).join(" → ")}</strong></span><button type="button" className="secondary-button" onClick={() => setSelectedCategoryId(suggestedCategory.id)}>Use suggestion</button></div>}</section>}
     {!showRegistration && <section className="scan-review registration-form"><div className="section-heading"><div><h2>Register product</h2><p>Use OCR-extracted details after analysis, or start with a completely manual registration.</p></div></div><div className="scan-upload-actions"><button type="button" className="primary-button" onClick={() => setShowRegistration(true)}> {ocr ? "Continue to Registration" : "Register Manually"}</button></div></section>}
     {showRegistration && <form className="scan-review registration-form" onSubmit={saveProduct}><div className="section-heading"><div><h2>Register product</h2><p>{ocr ? "OCR fills these fields, but manual correction is allowed." : "Manual registration: package images are retained, but OCR is skipped."}</p></div></div><div className="form-grid"><label>Brand / Manufacturer<input value={form.brandName} onChange={(e) => updateForm("brandName", e.target.value)} /></label><label>Product name *<input required value={form.productName} onChange={(e) => updateForm("productName", e.target.value)} /></label><label>Quantity / volume / pieces<input value={form.netQuantity} onChange={(e) => updateForm("netQuantity", e.target.value)} /></label><label>Unit<select value={form.unit} onChange={(e) => updateForm("unit", e.target.value)}><option value="">Select</option><option value="mg">mg</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="pcs">pcs</option><option value="dozen">dozen</option><option value="m">m</option></select></label><label>MRP<input type="number" min="0" step="0.01" value={form.mrp} onChange={(e) => updateForm("mrp", e.target.value)} /></label><label>Barcode<input value={form.barcode} onChange={(e) => updateForm("barcode", e.target.value)} /></label><label className="full-width">Final category *<select required value={selectedCategoryId} onChange={(e) => setSelectedCategoryId(e.target.value)}><option value="">Select a final category</option>{finalCategories.map((c) => <option key={c.id} value={c.id}>{c.path.map((x) => x.name).join(" → ")}</option>)}</select></label><label>Shop name *<input required value={form.shopName} onChange={(e) => updateForm("shopName", e.target.value)} /></label><label>Shop address<input value={form.shopAddress} onChange={(e) => updateForm("shopAddress", e.target.value)} /></label><label>City<input value={form.shopCity} onChange={(e) => updateForm("shopCity", e.target.value)} /></label><label>State<input value={form.shopState} onChange={(e) => updateForm("shopState", e.target.value)} /></label><label className="full-width">Notes<textarea value={form.notes} onChange={(e) => updateForm("notes", e.target.value)} /></label></div><button className="primary-button" disabled={saving}>{saving ? "Registering..." : "Register Product"}</button></form>}
     {message && <div className="status-message">{message}</div>}<Link className="back-link" to="/history">View inspection history →</Link>
