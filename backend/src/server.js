@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import categoriesRouter from "./routes/categories.js";
@@ -6,6 +7,7 @@ import authRouter from "./routes/auth.js";
 import shopsRouter from "./routes/shops.js";
 import adminRouter from "./routes/admin.js";
 import rulesRouter from "./routes/rules.js";
+import ocrRouter from "./ocr/routes.js";
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -19,6 +21,7 @@ app.use("/api/products", productsRouter);
 app.use("/api/shops", shopsRouter);
 app.use("/api/rules", rulesRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/ocr", ocrRouter);
 
 const PORT = Number(process.env.PORT || 5000);
 app.listen(PORT, () => console.log(`PARAKH backend running on http://localhost:${PORT}`));
