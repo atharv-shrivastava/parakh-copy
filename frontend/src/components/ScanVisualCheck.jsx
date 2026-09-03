@@ -180,14 +180,23 @@ function normalizeDeclaration(item, imageIndex) {
 async function detectDeclarations(src, imageIndex) {
   const puter = window.puter;
   if (!puter?.ai?.chat) throw new Error("Multimodal AI is unavailable.");
-  const response = await puter.ai.chat(
-    `Inspect this packaged-commodity photograph for visible declarations. Return ONLY valid JSON in this exact shape: {"declarations":[{"type":"MRP","text":"MRP ₹120","confidence":0.96,"boundingBox":{"left":0.1,"top":0.2,"width":0.3,"height":0.05},"notes":""}]}. Use normalized coordinates from 0 to 1 relative to the full image. Detect only text/declaration regions that are actually visible. Do not invent missing text. Use one of these declaration types: ${DECLARATION_TYPES.join(", ")}. Include important visible declaration regions even when confidence is moderate. Bounding boxes are required whenever the location can be estimated; otherwise use null.`,
-    src,
-    { model: "gpt-5.6-luna" },
-  );
-  const content = response?.message?.content || response?.content || response?.text || "";
-  const parsed = parseVisualJson(content);
-  return Array.isArray(parsed?.declarations) ? parsed.declarations.map((item) => normalizeDeclaration(item, imageIndex)).filter((item) => item.text || item.boundingBox) : [];
+
+  const imageResponse = await fetch(src);
+  if (!imageResponse.ok) throw new Error(`Could not load image ${imageIndex + 1} for declaration analysis.`);
+  const blob = await imageResponse.blob();
+  const media = new File([blob], `parakh-declaration-${imageIndex + 1}.jpg`, { type: blob.type || "image/jpeg" });
+
+  const prompt = `Inspect this packaged-commodity photograph for visible declarations. Return ONLY valid JSON in this exact shape: {"declarations":[{"type":"MRP","text":"MRP ₹120","confidence":0.96,"boundingBox":{"left":0.1,"top":0.2,"width":0.3,"height":0.05},"notes":""}]}. Use normalized coordinates from 0 to 1 relative to the full image. Detect only declaration text that is actually visible in this photograph. Do not invent missing declarations or text. Use one of these declaration types: ${DECLARATION_TYPES.join(", ")}. Include important visible declaration regions even when confidence is moderate. Bounding boxes are required whenever the location can be estimated and should tightly surround the relevant declaration text; otherwise use null.`;
+
+  const response = await puter.ai.chat(prompt, media, false, { model: "gpt-5.6-luna" });
+  const responseText = response?.message?.content || response?.content || response?.text || "";
+  const parsed = parseVisualJson(responseText);
+
+  return Array.isArray(parsed?.declarations)
+    ? parsed.declarations
+        .map((item) => normalizeDeclaration(item, imageIndex))
+        .filter((item) => item.text || item.boundingBox)
+    : [];
 }
 
 export default function ScanVisualCheck() {
