@@ -1,7 +1,7 @@
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
-import Scan from "./pages/Scan";
+import Scan from "./pages/ScanV2";
 import Shops from "./pages/Shops";
 import ShopDetails from "./pages/ShopDetails";
 import ShopProducts from "./pages/ShopProducts";
