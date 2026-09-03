@@ -59,7 +59,7 @@ function addPageFooter(doc) {
   }
 }
 
-export async function downloadProductPdf({ product, user, violations = [] }) {
+export async function downloadProductPdf({ product, user, violations = [], penaltySummary = null }) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = 595;
   const pageHeight = 842;
@@ -116,7 +116,7 @@ export async function downloadProductPdf({ product, user, violations = [] }) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
     doc.setTextColor(51, 65, 85);
-    doc.text("No Rules Engine violations were recorded for this product.", left, y + 8);
+    doc.text("No Rules Engine violations were accepted by the inspector.", left, y + 8);
     y += 30;
   } else {
     violations.forEach((finding, index) => {
@@ -135,6 +135,38 @@ export async function downloadProductPdf({ product, user, violations = [] }) {
       y += boxHeight + 8;
     });
   }
+
+  if (y > 680) { doc.addPage(); y = 55; }
+  y = drawSectionHeader(doc, "Penalty Estimate", y);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(71, 85, 105);
+  doc.text("Inspector-selected occurrence: " + safe(penaltySummary?.occurrence || "Not recorded"), left, y + 8);
+  y += 24;
+  const minText = `Minimum indicated: ${safe(penaltySummary ? `Rs. ${Number(penaltySummary.minTotal || 0).toLocaleString("en-IN")}` : "Not calculated")}`;
+  const maxText = `Maximum indicated: ${safe(penaltySummary ? `Rs. ${Number(penaltySummary.maxTotal || 0).toLocaleString("en-IN")}` : "Not calculated")}`;
+  drawField(doc, "Minimum indicated", penaltySummary ? `₹${Number(penaltySummary.minTotal || 0).toLocaleString("en-IN")}` : "Not calculated", left, y, 250);
+  drawField(doc, "Maximum indicated", penaltySummary ? `₹${Number(penaltySummary.maxTotal || 0).toLocaleString("en-IN")}` : "Not calculated", 305, y, 250);
+  y += 48;
+  if (penaltySummary?.rows?.length) {
+    penaltySummary.rows.forEach((row, index) => {
+      if (y > 775) { doc.addPage(); y = 55; }
+      const title = row.finding?.ruleNumber || row.finding?.ruleCode || `Violation ${index + 1}`;
+      const detail = row.detail?.label || "Penalty schedule not configured";
+      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(30, 41, 59);
+      doc.text(title, left, y);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(71, 85, 105);
+      const detailLines = doc.splitTextToSize(`${detail}${row.detail?.provision ? ` (${row.detail.provision})` : ""}`, 500);
+      doc.text(detailLines, left + 80, y);
+      y += Math.max(18, detailLines.length * 11);
+    });
+  }
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  const caveat = doc.splitTextToSize("This amount is an inspection aid based on the configured statutory schedule. It is not a final court-imposed fine, and actual enforcement may depend on the applicable offence history, improvement notice, compounding provisions and competent authority.", 510);
+  doc.text(caveat, left, y + 10);
+  y += 28 + caveat.length * 10;
 
   if (y > 680) { doc.addPage(); y = 55; }
   y = drawSectionHeader(doc, "Evidence Images", y);
@@ -163,7 +195,7 @@ export async function downloadProductPdf({ product, user, violations = [] }) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.setTextColor(51, 65, 85);
-  doc.text("I have reviewed the product inspection information and the Rules Engine findings recorded above.", left, y + 8);
+  doc.text("I have reviewed the product inspection information, accepted findings and penalty estimate recorded above.", left, y + 8);
   doc.setDrawColor(71, 85, 105);
   doc.line(left, y + 75, 280, y + 75);
   doc.line(330, y + 75, right, y + 75);
