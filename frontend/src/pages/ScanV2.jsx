@@ -30,6 +30,7 @@ function normalizePuter(candidate, rawText) {
       : { value: null, raw: null, confidence: 0, evidence: null, status: "absent" };
   }
   result.otherDeclarations = Array.isArray(candidate?.otherDeclarations) ? candidate.otherDeclarations : [];
+  result.declarationEvidence = Array.isArray(candidate?.declarationEvidence) ? candidate.declarationEvidence : [];
   result.rawText = typeof candidate?.rawText === "string" && candidate.rawText.trim() ? candidate.rawText : rawText;
   result.warnings = Array.isArray(candidate?.warnings) ? candidate.warnings : [];
   result.unreadableFields = Array.isArray(candidate?.unreadableFields) ? candidate.unreadableFields : [];
@@ -107,7 +108,7 @@ async function runPuter(files) {
   const rawText = chunks.filter(Boolean).join("\\n\\n");
   if (!rawText.trim()) throw new Error("Puter OCR found no readable text.");
   if (!puter.ai.chat) return { result: normalizePuter({}, rawText), provider: "puter-js", model: "img2txt fallback" };
-  const prompt = `Convert this OCR text into PARAKH structured OCR JSON. Never invent data. Every field must be {value,raw,confidence,evidence,status}; status is found, absent, unreadable or ambiguous. Return only valid JSON. Fields: ${OCR_FIELDS.join(", ")}. Also return otherDeclarations, rawText, warnings, unreadableFields, needsReview. OCR text:\n\n${rawText}`;
+  const prompt = `Convert this OCR text into PARAKH structured OCR JSON. Never invent data. Every field must be {value,raw,confidence,evidence,status}; status is found, absent, unreadable or ambiguous. Return only valid JSON. Fields: ${OCR_FIELDS.join(", ")}. Also return otherDeclarations, declarationEvidence, rawText, warnings, unreadableFields, needsReview. For declarationEvidence, use imageIndex 0-based based on the [IMAGE N] markers and provide visible declaration type, text, confidence, and normalized boundingBox when you can locate it. Use null for boundingBox when location cannot be determined. OCR text:\n\n${rawText}`;
   const response = await puter.ai.chat(prompt, { model: "gpt-5.6-luna", max_tokens: 5000 });
   const content = response?.message?.content || response?.content || response?.text || "";
   return { result: normalizePuter(JSON.parse(extractJson(content)), rawText), provider: "puter-js", model: "fallback" };
@@ -234,6 +235,8 @@ export default function ScanV2() {
     try {
       const info = await runOcr(images.map((item) => item.file));
       const extracted = info.result;
+      window.sessionStorage.setItem("parakhDeclarationEvidence", JSON.stringify(extracted.declarationEvidence || []));
+      window.dispatchEvent(new CustomEvent("parakh:declaration-evidence", { detail: extracted.declarationEvidence || [] }));
       const visualInspection = readVisualInspection();
       setProviderInfo(info);
       setMessage(info.provider === "gemini" ? `OCR completed with ${info.model}. Running Rules Engine...` : "Gemini was unavailable, so Puter.js fallback completed OCR. Running Rules Engine...");
