@@ -91,7 +91,7 @@ export default function AdminGlobalCategoryType() {
 
     <section className="product-categories">
       <div className="section-heading"><div><h2>{label} global categories</h2><p>Open a category to add its next global subcategory. You can delete any global branch from here.</p></div></div>
-      {loading ? <p>Loading...</p> : categories.length ? <div className="category-grid">{categories.map((c) => <div className="category-item" key={c.id}><Link to={`/admin/categories/${sourceType.toLowerCase()}/${c.id}`} className="category-card"><h3>{c.name}</h3><p>{c.isFinalProductType ? "Final category" : "Can contain global subcategories"} · {label} · Global</p></Link><button className="delete-category-button" type="button" onClick={() => remove(c)}>Delete global category</button></div>)}</div> : <p>No {label.toLowerCase()} global categories yet.</p>}
+      {loading ? <p>Loading...</p> : categories.length ? <div className="category-grid">{categories.map((c) => <div className="category-item" key={c.id}><Link to={`/admin/categories/${sourceType.toLowerCase()}/${c.id}?globalAdmin=1`} className="category-card"><h3>{c.name}</h3><p>{c.isFinalProductType ? "Final category" : "Can contain global subcategories"} · {label} · Global</p></Link><button className="delete-category-button" type="button" onClick={() => remove(c)}>Delete global category</button></div>)}</div> : <p>No {label.toLowerCase()} global categories yet.</p>}
     </section>
   </div>;
 }
