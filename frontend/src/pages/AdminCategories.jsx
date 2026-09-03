@@ -10,7 +10,8 @@ function TreeNode({ node, onDelete }) {
     <div className="category-item">
       <Link className="category-card" to={`/products/category/${node.id}`}>
         <h3>{node.name}</h3>
-        <p>{node.sourceType === "ECOMMERCE" ? "E-commerce" : "Offline"} · {node.isFinalProductType ? "Final category" : "Category"} · Global</p>
+        <p>{node.sourceType === "ECOMMERCE" ? "E-commerce" : "Offline"} · {node.isFinalProductType ? "Final product category" : "Category"} · Global</p>
+        <small>Open this category to add its global subcategories</small>
       </Link>
       <button className="delete-category-button" type="button" onClick={() => onDelete(node)}>Delete</button>
     </div>
@@ -72,7 +73,7 @@ function AdminCategories() {
     <div className="page-header">
       <p className="eyebrow">ADMIN</p>
       <h1>Global categories</h1>
-      <p>Create a global main category here. Open a category to add its global subcategories from inside that category, just like private category management.</p>
+      <p>Create a global main category exactly like a private category. To create a global subcategory, open its parent category and add it there. There is no parent-category dropdown.</p>
     </div>
 
     {message && <div className="status-message">{message}</div>}
@@ -90,12 +91,10 @@ function AdminCategories() {
             <option value="ECOMMERCE">E-commerce</option>
           </select>
         </label>
-        <div className="final-control-lock">
-          <label className="checkbox-field">
-            <input type="checkbox" checked={final} onChange={(e) => setFinal(e.target.checked)} disabled={creating} />
-            <span>Set as final product category</span>
-          </label>
-        </div>
+        <label className="checkbox-field">
+          <input type="checkbox" checked={final} onChange={(e) => setFinal(e.target.checked)} disabled={creating} />
+          <span>Set as final product category</span>
+        </label>
       </div>
       <div className="product-action-buttons">
         <button className="primary-button" type="button" onClick={addRoot} disabled={creating || !name.trim()}>{creating ? "Creating..." : "Add global category"}</button>
@@ -106,7 +105,7 @@ function AdminCategories() {
       <div className="section-heading">
         <div>
           <h2>Global category tree</h2>
-          <p>Click a category to open it and add a global subcategory there. Offline and E-commerce branches stay separate.</p>
+          <p>Open any category to manage its own children. Every category and subcategory created here is shared with all users.</p>
         </div>
       </div>
       {loading ? <p>Loading...</p> : tree.length ? <div className="category-tree">{tree.map((root) => <TreeNode key={root.id} node={root} onDelete={remove} />)}</div> : <p>No global categories yet.</p>}
