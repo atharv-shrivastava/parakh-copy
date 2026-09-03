@@ -47,6 +47,117 @@ router.get("/history", async (req, res) => { try { const { query = "", status = 
 
 router.get("/", async (req, res) => { try { const { categoryId, status = "ALL", brandName, productName, unit, minQuantity, maxQuantity, shopName, minMrp, maxMrp } = req.query; const where = { ...visibility(req), ...(categoryId ? { categoryId } : {}), ...(status !== "ALL" ? { complianceStatus: status } : {}), ...(brandName ? { brandName: { contains: brandName, mode: "insensitive" } } : {}), ...(productName ? { productName: { contains: productName, mode: "insensitive" } } : {}), ...(unit ? { unit: { equals: unit, mode: "insensitive" } } : {}), ...(minMrp || maxMrp ? { mrp: { ...(minMrp ? { gte: Number(minMrp) } : {}), ...(maxMrp ? { lte: Number(maxMrp) } : {}) } } : {}), ...(shopName ? { inspections: { some: { shop: { name: { contains: shopName, mode: "insensitive" } } } } } : {}) }; const data = await prisma.product.findMany({ where, select: { id: true, productName: true, brandName: true, netQuantity: true, unit: true, mrp: true, complianceStatus: true, createdAt: true, owner: { select: { name: true } }, category: { select: { id: true, name: true } }, inspections: { select: { inspectedAt: true, shop: { select: { id: true, name: true } } }, orderBy: { inspectedAt: "desc" }, take: 1 } }, orderBy: { createdAt: "desc" }, take: 500 }); const minQ = minQuantity ? Number(minQuantity) : null; const maxQ = maxQuantity ? Number(maxQuantity) : null; res.json(data.filter((p) => { const q = toNumber(p.netQuantity); return (minQ === null || (q !== null && q >= minQ)) && (maxQ === null || (q !== null && q <= maxQ)); })); } catch (e) { console.error(e); res.status(500).json({ error: "Failed to fetch products" }); } });
 
+router.post("/ecommerce/analyze-url", async (req, res) => {
+  try {
+    const rawUrl = String(req.body?.url || "").trim();
+    if (!/^https?:\\/\\/[^\\s]+$/i.test(rawUrl)) return res.status(400).json({ error: "A valid public HTTP/HTTPS listing URL is required." });
+    const parsedUrl = new URL(rawUrl);
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) return res.status(400).json({ error: "Only HTTP/HTTPS listing URLs are supported." });
+    const blockedHosts = /^(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|::1|10\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2[0-9]|3[0-1])\\.)/i;
+    if (blockedHosts.test(parsedUrl.hostname) || parsedUrl.hostname.endsWith(".local")) return res.status(400).json({ error: "Private or local network URLs are not allowed." });
+
+    const response = await fetch(parsedUrl.href, {
+      headers: { "user-agent": "PARAKH Compliance Inspection/1.0", accept: "text/html,application/xhtml+xml" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!response.ok) return res.status(400).json({ error: `Listing page returned HTTP ${response.status}.` });
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("text/html")) return res.status(400).json({ error: "The supplied URL did not return an HTML listing page." });
+    const html = (await response.text()).slice(0, 5_000_000);
+
+    const decode = (value) => String(value || "").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">");
+    const text = decode(html.replace(/<script[\\s\\S]*?<\\/script>/gi, " ").replace(/<style[\\s\\S]*?<\\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ").trim()).slice(0, 120000);
+    const meta = {};
+    for (const match of html.matchAll(/<meta\\s+[^>]*?(?:property|name)=["']([^"']+)["'][^>]*?content=["']([^"']*)["'][^>]*>/gi)) meta[String(match[1]).toLowerCase()] = decode(match[2]);
+    const titleMatch = html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i);
+    const title = titleMatch ? decode(titleMatch[1]).replace(/\\s+/g, " ").trim() : "";
+    const jsonLd = [];
+    for (const match of html.matchAll(/<script[^>]+type=["']application\\/ld\\+json["'][^>]*>([\\s\\S]*?)<\\/script>/gi)) {
+      try { jsonLd.push(JSON.parse(match[1])); } catch {}
+    }
+    const flatLd = jsonLd.flatMap((item) => Array.isArray(item) ? item : [item]);
+    const productLd = flatLd.find((item) => item && typeof item === "object" && (item["@type"] === "Product" || (Array.isArray(item["@type"]) && item["@type"].includes("Product")))) || {};
+    const offers = productLd.offers && typeof productLd.offers === "object" ? productLd.offers : {};
+    const images = [];
+    const addImage = (value) => { const u = decode(String(value || "")); if (/^https?:\\/\\//i.test(u) && !images.includes(u)) images.push(u); };
+    addImage(productLd.image); addImage(meta["og:image"]); addImage(meta["twitter:image"]);
+    for (const m of html.matchAll(/<(?:img|source)[^>]+(?:src|data-src|srcset)=["']([^"']+)["'][^>]*>/gi)) {
+      const raw = m[1].split(",")[0].trim().split(" ")[0];
+      try { addImage(new URL(raw, response.url).href); } catch {}
+      if (images.length >= 6) break;
+    }
+    const listing = {
+      url: response.url,
+      title,
+      text,
+      productName: decode(productLd.name || meta["og:title"] || title),
+      brand: productLd.brand?.name || productLd.brand || "",
+      description: decode(productLd.description || meta["description"] || ""),
+      sku: productLd.sku || productLd.mpn || "",
+      gtin: productLd.gtin || productLd.gtin13 || productLd.gtin12 || productLd.gtin8 || "",
+      mrp: offers.price || offers.lowPrice || "",
+      currency: offers.priceCurrency || "",
+      imageUrls: images,
+      countryOfOrigin: /country\\s+of\\s+origin/i.test(text) ? (text.match(/country\\s+of\\s+origin\\s*[:\\-]\\s*([A-Za-z][A-Za-z .'-]{2,40})/i)?.[1] || "") : "",
+      filterEvidence: /(?:country\\s+of\\s+origin).{0,160}(?:filter|sort|search|select)/i.test(text) || /(?:filter|sort|search).{0,160}(?:country\\s+of\\s+origin)/i.test(text),
+      sourceTitle: meta["og:title"] || title
+    };
+
+    const ocrForm = new FormData();
+    const downloadable = [];
+    for (const imageUrl of images.slice(0, 6)) {
+      try {
+        const imageResponse = await fetch(imageUrl, { headers: { "user-agent": "PARAKH Compliance Inspection/1.0", accept: "image/*" }, signal: AbortSignal.timeout(10000) });
+        const type = imageResponse.headers.get("content-type") || "";
+        if (!imageResponse.ok || !type.startsWith("image/")) continue;
+        const buffer = Buffer.from(await imageResponse.arrayBuffer());
+        if (buffer.length > 12 * 1024 * 1024) continue;
+        const blob = new Blob([buffer], { type });
+        ocrForm.append("images", blob, `listing-${downloadable.length + 1}.jpg`);
+        downloadable.push(imageUrl);
+      } catch {}
+    }
+
+    let ocr = null;
+    if (downloadable.length) {
+      const ocrResponse = await fetch("http://localhost:8080/api/ocr/analyze", { method: "POST", body: ocrForm, signal: AbortSignal.timeout(30000) });
+      const ocrPayload = await ocrResponse.json().catch(() => ({}));
+      if (ocrResponse.ok && ocrPayload.result) ocr = ocrPayload.result;
+    }
+
+    const productName = listing.productName || ocr?.productName?.value || "";
+    const brandName = listing.brand || ocr?.brandName?.value || "";
+    const countryOfOrigin = listing.countryOfOrigin || ocr?.countryOfOrigin?.value || "";
+    const evidence = [
+      { evidenceId: crypto.randomUUID(), field: "declarations.productName", rawValue: productName, normalizedValue: productName, confidence: productName ? 0.95 : 0, source: listing.productName ? "DATABASE" : "OCR", timestamp: new Date().toISOString() },
+      { evidenceId: crypto.randomUUID(), field: "declarations.brandName", rawValue: brandName, normalizedValue: brandName, confidence: brandName ? 0.9 : 0, source: listing.brand ? "DATABASE" : "OCR", timestamp: new Date().toISOString() },
+      { evidenceId: crypto.randomUUID(), field: "declarations.countryOfOrigin", rawValue: countryOfOrigin || null, normalizedValue: countryOfOrigin || null, confidence: countryOfOrigin ? 0.9 : 0, source: countryOfOrigin ? (listing.countryOfOrigin ? "DATABASE" : "OCR") : "OCR", timestamp: new Date().toISOString() },
+      { evidenceId: crypto.randomUUID(), field: "ecommerce.countryOfOriginFilter", rawValue: listing.filterEvidence, normalizedValue: listing.filterEvidence, confidence: listing.filterEvidence ? 0.75 : 0.35, source: "DATABASE", timestamp: new Date().toISOString(), reliability: listing.filterEvidence ? "MEDIUM" : "LOW" }
+    ];
+    const ruleRequest = {
+      inspectionId: crypto.randomUUID(),
+      productId: crypto.randomUUID(),
+      inspectionDate: new Date().toISOString().slice(0, 10),
+      context: "ecommerce_listing",
+      productMetadata: { brandName: brandName || undefined, genericName: productName || undefined, commodityCategory: productName || "packaged commodity", consumerType: "general", isImported: undefined, countryOfOrigin: countryOfOrigin || undefined, packageType: "retail" },
+      evidence,
+      declarations: { productName, brandName, countryOfOrigin },
+      administrative: { sourceUrl: listing.url, sourceType: "public_ecommerce_listing", listingTitle: listing.sourceTitle }
+    };
+    let compliance = null;
+    try {
+      const engineResponse = await fetch("http://localhost:8090/api/rules-engine/evaluate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(ruleRequest), signal: AbortSignal.timeout(15000) });
+      compliance = await engineResponse.json().catch(() => null);
+    } catch {}
+
+    res.json({ listing, ocr, compliance, source: "public_listing_url" });
+  } catch (e) {
+    console.error(e);
+    res.status(502).json({ error: e?.message || "Could not inspect the listing URL." });
+  }
+});
+
 router.get("/analytics/summary", async (req, res) => {
   try {
     const visibilityWhere = visibility(req);
