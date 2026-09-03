@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/auth";
+import ScanVisualCheck from "../components/ScanVisualCheck";
 import "../styles/scan.css";
 
 const API_URL = "http://localhost:5000/api";
@@ -378,6 +379,8 @@ export default function ScanV2() {
     {cameraOpen && <div className="camera-overlay" role="dialog" aria-modal="true"><div className="camera-modal"><div className="camera-header"><h2>Capture package image</h2><button type="button" onClick={closeCamera}>Close</button></div><video ref={videoRef} className="camera-video" autoPlay playsInline muted /><div className="camera-actions"><button type="button" className="primary-button" onClick={capture}>Capture Photo</button><button type="button" className="secondary-button" onClick={closeCamera}>Cancel</button></div></div></div>}
 
     {images.length > 0 && <section className="scan-review"><div className="section-heading"><div><h2>Evidence images</h2><p>All selected images are retained with the registered product.</p></div></div><div className="scan-image-grid">{images.map(({ url, file }, index) => <div className="scan-image-card" key={`${file.name}-${index}`}><img src={url} alt={`Package evidence ${index + 1}`} /><button type="button" onClick={() => remove(index)}>Remove</button><span>{file.name}</span></div>)}</div><button type="button" className="primary-button" onClick={analyze} disabled={analyzing}>{analyzing ? "Analyzing..." : "Analyze Images"}</button></section>}
+
+    {images.length > 0 && <ScanVisualCheck />}
 
     {providerInfo && <section className="ocr-status-grid"><div><strong>OCR provider</strong><span>{providerInfo.provider === "gemini" ? "Gemini 3 Flash" : "Puter.js fallback"}</span></div><div><strong>Model</strong><span>{providerInfo.model}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}/{violations.length}</span></div></section>}
 
