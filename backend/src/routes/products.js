@@ -47,6 +47,59 @@ router.get("/history", async (req, res) => { try { const { query = "", status = 
 
 router.get("/", async (req, res) => { try { const { categoryId, status = "ALL", brandName, productName, unit, minQuantity, maxQuantity, shopName, minMrp, maxMrp } = req.query; const where = { ...visibility(req), ...(categoryId ? { categoryId } : {}), ...(status !== "ALL" ? { complianceStatus: status } : {}), ...(brandName ? { brandName: { contains: brandName, mode: "insensitive" } } : {}), ...(productName ? { productName: { contains: productName, mode: "insensitive" } } : {}), ...(unit ? { unit: { equals: unit, mode: "insensitive" } } : {}), ...(minMrp || maxMrp ? { mrp: { ...(minMrp ? { gte: Number(minMrp) } : {}), ...(maxMrp ? { lte: Number(maxMrp) } : {}) } } : {}), ...(shopName ? { inspections: { some: { shop: { name: { contains: shopName, mode: "insensitive" } } } } } : {}) }; const data = await prisma.product.findMany({ where, select: { id: true, productName: true, brandName: true, netQuantity: true, unit: true, mrp: true, complianceStatus: true, createdAt: true, owner: { select: { name: true } }, category: { select: { id: true, name: true } }, inspections: { select: { inspectedAt: true, shop: { select: { id: true, name: true } } }, orderBy: { inspectedAt: "desc" }, take: 1 } }, orderBy: { createdAt: "desc" }, take: 500 }); const minQ = minQuantity ? Number(minQuantity) : null; const maxQ = maxQuantity ? Number(maxQuantity) : null; res.json(data.filter((p) => { const q = toNumber(p.netQuantity); return (minQ === null || (q !== null && q >= minQ)) && (maxQ === null || (q !== null && q <= maxQ)); })); } catch (e) { console.error(e); res.status(500).json({ error: "Failed to fetch products" }); } });
 
+router.get("/analytics/summary", async (req, res) => {
+  try {
+    const visibilityWhere = visibility(req);
+    const [products, shops, inspections, statusGroups, categoryGroups, brandGroups] = await Promise.all([
+      prisma.product.count({ where: visibilityWhere }),
+      prisma.shop.count({ where: req.user.role === "ADMIN" ? {} : { ownerId: req.user.id } }),
+      prisma.inspection.count({ where: req.user.role === "ADMIN" ? {} : { workerId: req.user.id } }),
+      prisma.product.groupBy({ by: ["complianceStatus"], where: visibilityWhere, _count: { _all: true } }),
+      prisma.product.groupBy({ by: ["categoryId"], where: visibilityWhere, _count: { _all: true }, orderBy: { _count: { categoryId: "desc" } }, take: 8 }),
+      prisma.product.groupBy({ by: ["brandName"], where: { ...visibilityWhere, brandName: { not: null } }, _count: { _all: true }, orderBy: { _count: { brandName: "desc" } }, take: 8 })
+    ]);
+    const categoryIds = categoryGroups.map((x) => x.categoryId);
+    const categoryRows = categoryIds.length ? await prisma.category.findMany({ where: { id: { in: categoryIds } }, select: { id: true, name: true } }) : [];
+    const categoryNames = new Map(categoryRows.map((x) => [x.id, x.name]));
+    const violationRows = await prisma.product.findMany({
+      where: { ...visibilityWhere, complianceStatus: "VIOLATION" },
+      select: { ocrData: true, createdAt: true, brandName: true, categoryId: true, inspections: { select: { shopId: true, inspectedAt: true, shop: { select: { name: true, city: true, state: true } } } } },
+      take: 1000
+    });
+    const ruleCounts = {}, locationCounts = {}, trend = {}, shopViolations = {};
+    let repeatProducts = 0;
+    for (const product of violationRows) {
+      const inspectionsForProduct = product.inspections || [];
+      if (inspectionsForProduct.length > 1) repeatProducts += 1;
+      for (const inspection of inspectionsForProduct) {
+        const loc = [inspection.shop?.city, inspection.shop?.state].filter(Boolean).join(", ") || "Unknown";
+        locationCounts[loc] = (locationCounts[loc] || 0) + 1;
+        const month = new Date(inspection.inspectedAt).toISOString().slice(0, 7);
+        trend[month] = (trend[month] || 0) + 1;
+        if (inspection.shop?.name) shopViolations[inspection.shop.name] = (shopViolations[inspection.shop.name] || 0) + 1;
+      }
+      try {
+        const stored = product.ocrData ? JSON.parse(product.ocrData) : null;
+        for (const finding of stored?.compliance?.findings || []) if (String(finding?.status).toUpperCase() === "VIOLATION") {
+          const rule = finding.ruleNumber || finding.ruleCode || "Unknown";
+          ruleCounts[rule] = (ruleCounts[rule] || 0) + 1;
+        }
+      } catch {}
+    }
+    res.json({
+      scope: req.user.role === "ADMIN" ? "PLATFORM" : "OWN",
+      counts: { products, shops, inspections, compliant: statusGroups.find((x) => x.complianceStatus === "OKAY")?._count._all || 0, violations: statusGroups.find((x) => x.complianceStatus === "VIOLATION")?._count._all || 0, review: (statusGroups.find((x) => x.complianceStatus === "NEEDS_REVIEW")?._count._all || 0) + (statusGroups.find((x) => x.complianceStatus === "UNABLE_TO_VERIFY")?._count._all || 0) },
+      topCategories: categoryGroups.map((x) => ({ categoryId: x.categoryId, name: categoryNames.get(x.categoryId) || "Unknown", products: x._count._all })),
+      topBrands: brandGroups.map((x) => ({ brand: x.brandName, products: x._count._all })),
+      topRules: Object.entries(ruleCounts).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([rule,count])=>({rule,count})),
+      topLocations: Object.entries(locationCounts).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([location,inspections])=>({location,inspections})),
+      violationTrend: Object.entries(trend).sort((a,b)=>a[0].localeCompare(b[0])).slice(-12).map(([month,violations])=>({month,violations})),
+      topShops: Object.entries(shopViolations).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([shop,violations])=>({shop,violations})),
+      repeatProducts
+    });
+  } catch (e) { console.error(e); res.status(500).json({ error: "Failed to load analytics" }); }
+});
+
 router.get("/:id", async (req, res) => { try { const product = await prisma.product.findFirst({ where: { id: req.params.id, ...visibility(req) }, include: { owner: { select: { id: true, name: true, email: true } }, category: { include: { parent: { include: { parent: { include: { parent: true } } } } } }, inspections: { include: { shop: true, worker: { select: { name: true } } }, orderBy: { inspectedAt: "desc" } } } }); if (!product) return res.status(404).json({ error: "Product not found" }); res.json(product); } catch (e) { console.error(e); res.status(500).json({ error: "Failed to fetch product" }); } });
 
 router.post("/", async (req, res) => {
