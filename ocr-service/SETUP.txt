@@ -1,0 +1,1 @@
+PaddleOCR service added. Start from ocr-service/start-paddle.ps1. Default port is 8081 so it does not collide with the existing OCR service on 8080.
