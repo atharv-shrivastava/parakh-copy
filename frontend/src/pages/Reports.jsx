@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch, getUser } from "../lib/auth";
+import { calculatePenalty } from "../lib/penalties";
 import { downloadProductPdf } from "../lib/productPdf";
+import { downloadProductRtf } from "../lib/productRtf";
 import "../styles/reports.css";
 
 const API_URL = "http://localhost:5000/api";
@@ -15,6 +17,7 @@ function Reports() {
   const [dateTo, setDateTo] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [activeRules, setActiveRules] = useState([]);
   const user = getUser();
 
   useEffect(() => {
@@ -32,6 +35,7 @@ function Reports() {
       }
     }
     load();
+    apiFetch(`${API_URL}/rules/active`).then((r) => r.ok ? r.json() : []).then((data) => alive && setActiveRules(Array.isArray(data) ? data : [])).catch(() => alive && setActiveRules([]));
     return () => { alive = false; };
   }, []);
 
@@ -85,17 +89,14 @@ function Reports() {
         stored = null;
       }
 
-      const violations = Array.isArray(stored?.compliance?.findings)
-        ? stored.compliance.findings.filter(
-            (finding) => String(finding?.status || "").toUpperCase() === "VIOLATION"
-          )
-        : [];
-
-      await downloadProductPdf({
-        product: full,
-        user,
-        violations,
+      const allFindings = Array.isArray(stored?.compliance?.findings) ? stored.compliance.findings : [];
+      const acceptedIds = Array.isArray(stored?.complianceReview?.acceptedFindingIds) ? new Set(stored.complianceReview.acceptedFindingIds.map(String)) : null;
+      const violations = allFindings.filter((finding) => {
+        const isViolation = String(finding?.status || "").toUpperCase() === "VIOLATION";
+        return isViolation && (!acceptedIds || acceptedIds.has(String(finding?.findingId)));
       });
+      const penaltySummary = calculatePenalty(violations, activeRules, "SECOND");
+      await downloadProductPdf({ product: full, user, violations, penaltySummary });
     } catch (err) {
       setError(err.message || "Could not generate the PDF");
     }
@@ -177,9 +178,26 @@ function Reports() {
                 </div>
               </div>
 
-              <button className="report-button" type="button" onClick={() => downloadReport(product)}>
-                Download PDF
-              </button>
+              <div className="report-actions">
+                <button className="report-button" type="button" onClick={() => downloadReport(product)}>Download PDF</button>
+                <button className="report-button" type="button" onClick={async () => {
+                  setError("");
+                  try {
+                    const response = await apiFetch(`${API_URL}/products/${product.id}`);
+                    const full = await response.json();
+                    if (!response.ok) throw new Error(full.error || "Could not load product report");
+                    let stored = null;
+                    try { stored = full.ocrData ? JSON.parse(full.ocrData) : null; } catch {}
+                    const allFindings = Array.isArray(stored?.compliance?.findings) ? stored.compliance.findings : [];
+                    const acceptedIds = Array.isArray(stored?.complianceReview?.acceptedFindingIds) ? new Set(stored.complianceReview.acceptedFindingIds.map(String)) : null;
+                    const violations = allFindings.filter((finding) => String(finding?.status || "").toUpperCase() === "VIOLATION" && (!acceptedIds || acceptedIds.has(String(finding?.findingId))));
+                    const penaltySummary = calculatePenalty(violations, activeRules, "SECOND");
+                    await downloadProductRtf({ product: full, user, violations, penaltySummary });
+                  } catch (err) {
+                    setError(err.message || "Could not generate the editable report");
+                  }
+                }}>Editable</button>
+              </div>
             </article>
           ))}
         </div>
