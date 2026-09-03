@@ -2,5 +2,4 @@ fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 python-multipart>=0.0.9,<1
 paddleocr>=3.2,<4
-paddlepaddle>=3.0,<4
 Pillow>=10,<12
