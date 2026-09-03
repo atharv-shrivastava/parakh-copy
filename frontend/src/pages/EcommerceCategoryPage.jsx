@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { apiFetch } from "../lib/auth";
 import "../styles/products.css";
 import "../styles/ecommerce-products.css";
 
