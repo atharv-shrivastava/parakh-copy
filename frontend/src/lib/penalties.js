@@ -24,6 +24,8 @@ const DEFAULT_PENALTIES = {
   },
 };
 
+const RULE32_DEFAULT_RULE_NUMBERS = new Set(["4", "6(1)(a)", "6(1)(d)", "10"]);
+
 function textBlob(finding) {
   return JSON.stringify({
     ruleId: finding?.ruleId,
@@ -37,6 +39,9 @@ function textBlob(finding) {
 }
 
 export function getDefaultPenalty(finding) {
+  const ruleNumber = String(finding?.ruleNumber || "").trim().toLowerCase();
+  if (RULE32_DEFAULT_RULE_NUMBERS.has(ruleNumber)) return DEFAULT_PENALTIES.RULE32;
+
   const text = textBlob(finding);
   if (text.includes("36(2)") || text.includes("section 36(2)")) return DEFAULT_PENALTIES["36(2)"];
   if (text.includes("36(1)") || text.includes("section 36(1)")) return DEFAULT_PENALTIES["36(1)"];
