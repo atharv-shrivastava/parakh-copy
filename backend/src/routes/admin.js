@@ -25,7 +25,7 @@ router.get("/overview", async (_req, res) => {
   try {
     const [users, admins, products, offlineProducts, ecommerceProducts, shops, inspections, categories, globalCategories, compliant, violations, review, recent, topCategory, inspectionStatuses, shopStats, brandStats, locationStats] = await Promise.all([
       prisma.user.count(), prisma.user.count({ where: { role: "ADMIN" } }), prisma.product.count(),
-      prisma.product.count({ where: { OR: [{ sourceType: "OFFLINE" }, { sourceType: null }] } }),
+      prisma.product.count({ where: { sourceType: "OFFLINE" } }),
       prisma.product.count({ where: { sourceType: "ECOMMERCE" } }),
       prisma.shop.count(), prisma.inspection.count(), prisma.category.count(), prisma.category.count({ where: { isSystem: true } }),
       prisma.product.count({ where: { complianceStatus: "OKAY" } }), prisma.product.count({ where: { complianceStatus: "VIOLATION" } }), prisma.product.count({ where: { complianceStatus: { in: ["NEEDS_REVIEW", "UNABLE_TO_VERIFY"] } } }),
