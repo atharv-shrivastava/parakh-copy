@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import "../styles/scan-visual-check.css";
 
 async function inspectImageSource(src) {
   const response = await fetch(src);
