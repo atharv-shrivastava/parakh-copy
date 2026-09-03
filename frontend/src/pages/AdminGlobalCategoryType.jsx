@@ -39,10 +39,10 @@ export default function AdminGlobalCategoryType() {
     setCreating(true);
     setMessage("");
     try {
-      const r = await apiFetch(`${API_URL}/categories`, {
+      const r = await apiFetch(`${API_URL}/categories/global`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: clean, parentId: null, isFinal: final, sourceType, global: true }),
+        body: JSON.stringify({ name: clean, parentId: null, isFinal: final, sourceType }),
       });
       const d = await r.json().catch(() => null);
       if (!r.ok) throw new Error(d?.error || `Could not create ${label} global category`);
