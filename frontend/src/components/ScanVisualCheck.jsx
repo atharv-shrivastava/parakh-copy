@@ -5,6 +5,8 @@ const STORAGE_KEY = "parakhVisualInspection";
 const DECLARATION_KEY = "parakhDeclarationEvidence";
 const MAX_IMAGES = 4;
 const MAX_ANALYSIS_SIDE = 1200;
+const DECLARATION_MODEL = "google/gemini-2.5-flash";
+const DECLARATION_TIMEOUT_MS = 30000;
 
 const DECLARATION_TYPES = [
   "PRODUCT_NAME",
@@ -188,7 +190,11 @@ async function detectDeclarations(src, imageIndex) {
 
   const prompt = `Inspect this packaged-commodity photograph for visible declarations. Return ONLY valid JSON in this exact shape: {"declarations":[{"type":"MRP","text":"MRP ₹120","confidence":0.96,"boundingBox":{"left":0.1,"top":0.2,"width":0.3,"height":0.05},"notes":""}]}. Use normalized coordinates from 0 to 1 relative to the full image. Detect only declaration text that is actually visible in this photograph. Do not invent missing declarations or text. Use one of these declaration types: ${DECLARATION_TYPES.join(", ")}. Include important visible declaration regions even when confidence is moderate. Bounding boxes are required whenever the location can be estimated and should tightly surround the relevant declaration text; otherwise use null.`;
 
-  const response = await puter.ai.chat(prompt, media, false, { model: "gpt-5.6-luna" });
+  const aiRequest = puter.ai.chat(prompt, media, false, { model: DECLARATION_MODEL });
+  const timeout = new Promise((_, reject) => {
+    window.setTimeout(() => reject(new Error("Declaration localization timed out.")), DECLARATION_TIMEOUT_MS);
+  });
+  const response = await Promise.race([aiRequest, timeout]);
   const responseText = response?.message?.content || response?.content || response?.text || "";
   const parsed = parseVisualJson(responseText);
 
@@ -251,11 +257,23 @@ export default function ScanVisualCheck() {
         setDeclarationBusy(true);
         setDeclarationMessage("Detecting declaration regions...");
         try {
-          const detected = (await Promise.all(sources.map((src, index) => detectDeclarations(src, index).catch(() => [])))).flat();
+          const outcomes = await Promise.all(sources.map(async (src, index) => {
+            try {
+              return { declarations: await detectDeclarations(src, index), error: null };
+            } catch (error) {
+              return { declarations: [], error: error?.message || "Declaration localization failed." };
+            }
+          }));
+          const detected = outcomes.flatMap((item) => item.declarations);
+          const errors = outcomes.map((item) => item.error).filter(Boolean);
           if (!stopped) {
             setDeclarations(detected);
             window.sessionStorage.setItem(DECLARATION_KEY, JSON.stringify(detected));
-            setDeclarationMessage(detected.length ? `${detected.length} declaration regions detected.` : "No declaration regions could be confidently localized.");
+            if (detected.length) {
+              setDeclarationMessage(`${detected.length} declaration regions detected.${errors.length ? " Some images could not be localized." : ""}`);
+            } else {
+              setDeclarationMessage(errors[0] || "No declaration regions could be confidently localized.");
+            }
           }
         } finally {
           if (!stopped) setDeclarationBusy(false);
@@ -314,7 +332,7 @@ export default function ScanVisualCheck() {
       declarationCoverageScreened: hasOcr,
       imagesChecked: results.length,
       declarationEvidence: declarations,
-      declarationModel: declarations.length || declarationBusy ? "gpt-5.6-luna" : null,
+      declarationModel: declarations.length || declarationBusy ? DECLARATION_MODEL : null,
     };
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(detail));
     window.dispatchEvent(new CustomEvent("parakh:visual-analysis", { detail }));
