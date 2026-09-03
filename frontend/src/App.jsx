@@ -18,6 +18,7 @@ import Profile from "./pages/Profile";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import AdminCategories from "./pages/AdminCategories";
+import AdminGlobalCategoryType from "./pages/AdminGlobalCategoryType";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminRules from "./pages/AdminRules";
 import EcommerceInspection from "./pages/EcommerceInspection";
@@ -37,7 +38,13 @@ function App() {
       <Route path="/ecommerce-products" element={<EcommerceProducts />} /><Route path="/ecommerce-products/category/:categoryId" element={<EcommerceCategoryPage />} />
       <Route path="/products/register" element={<FoodProductRegistration />} /><Route path="/products/manual-register" element={<ManualProductRegistration />} />
       <Route path="/history" element={<History />} /><Route path="/reports" element={<Reports />} /><Route path="/profile" element={<Profile />} />
-      <Route element={<AdminOnly />}><Route path="/admin" element={<AdminDashboard />} /><Route path="/admin/categories" element={<AdminCategories />} /><Route path="/admin/rules" element={<AdminRules />} /></Route>
+      <Route element={<AdminOnly />}>
+        <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/admin/categories" element={<AdminCategories />} />
+        <Route path="/admin/categories/:sourceType" element={<AdminGlobalCategoryType />} />
+        <Route path="/admin/categories/:sourceType/:categoryId" element={<CategoryPage />} />
+        <Route path="/admin/rules" element={<AdminRules />} />
+      </Route>
     </Route></Route>
   </Routes></BrowserRouter>;
 }
