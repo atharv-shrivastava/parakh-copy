@@ -83,3 +83,12 @@
 .category-tree-node { padding-left: 0; }
 .category-tree-children { margin: 10px 0 0 22px; padding-left: 16px; border-left: 2px solid #e5e7eb; display: grid; gap: 12px; }
 .admin-global-category-form .private-category-fields label:first-child { min-width: 320px; }
+
+.global-source-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; margin-top:36px; }
+.global-source-card { display:flex; flex-direction:column; gap:12px; min-height:230px; padding:28px; background:#fff; border:1px solid #e5e7eb; border-radius:14px; color:inherit; text-decoration:none; box-sizing:border-box; transition:.2s ease; }
+.global-source-card:hover { border-color:#94a3b8; transform:translateY(-2px); }
+.global-source-kicker { font-size:11px; font-weight:800; letter-spacing:.08em; color:#64748b; }
+.global-source-card h2 { margin:0; font-size:22px; }
+.global-source-card p { margin:0; color:#6b7280; line-height:1.6; flex:1; }
+.global-source-card strong { color:#111827; }
+@media(max-width:700px){.global-source-grid{grid-template-columns:1fr}.global-source-card{min-height:0}}
