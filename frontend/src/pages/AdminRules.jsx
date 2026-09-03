@@ -6,6 +6,22 @@ const API_URL = "http://localhost:5000/api";
 const CATEGORIES = ["APPLICABILITY","GENERAL_DECLARATION","NET_QUANTITY","MRP","DATE","DIMENSIONS","PRESENTATION","MANUFACTURER_PACKER_IMPORTER","E_COMMERCE","REGISTRATION","STANDARD_QUANTITY","MEASUREMENT","COMMODITY_SPECIFIC","PROCEDURAL"];
 const SEVERITIES = ["CRITICAL","HIGH","MEDIUM","LOW","INFO"];
 const CONTEXTS = ["physical_package","ecommerce_listing","both"];
+const VISUAL_FIELDS = [
+  { value: "visual.readability", label: "Readability score (0-100)", kind: "number" },
+  { value: "visual.estimatedTextHeightMm", label: "Estimated text height (mm)", kind: "number" },
+  { value: "visual.textDetected", label: "Text detected", kind: "boolean" },
+  { value: "visual.readable", label: "Readable", kind: "boolean" },
+  { value: "visual.placementReview", label: "Placement requires review", kind: "boolean" },
+  { value: "visual.fontSizeCalibrated", label: "Font size calibrated", kind: "boolean" },
+  { value: "visual.declarationCoverageScreened", label: "Declaration coverage screened", kind: "boolean" },
+];
+const NUMERIC_VISUAL_OPERATORS = [
+  { value: "GREATER_THAN", label: ">" },
+  { value: "GREATER_THAN_OR_EQUAL", label: ">=" },
+  { value: "LESS_THAN", label: "<" },
+  { value: "LESS_THAN_OR_EQUAL", label: "<=" },
+  { value: "IN_NUMERIC_RANGE", label: "In range" },
+];
 
 const emptyPenalty = {
   enabled: false,
@@ -56,15 +72,51 @@ function parseJson(text, label) { try { return JSON.parse(text); } catch { throw
 
 export default function AdminRules() {
   const [rules, setRules] = useState([]); const [selectedId, setSelectedId] = useState(""); const [draft, setDraft] = useState(blankDefinition()); const [search, setSearch] = useState(""); const [showEditor, setShowEditor] = useState(false); const [showAdvanced, setShowAdvanced] = useState(false); const [versionsText, setVersionsText] = useState(pretty(blankDefinition().versions)); const [penaltyText, setPenaltyText] = useState(pretty(blankDefinition().penalty)); const [message, setMessage] = useState(""); const [busy, setBusy] = useState(false);
+  const [visualVersionIndex, setVisualVersionIndex] = useState(0); const [visualField, setVisualField] = useState(VISUAL_FIELDS[0].value); const [visualOperator, setVisualOperator] = useState("GREATER_THAN_OR_EQUAL"); const [visualExpected, setVisualExpected] = useState("50"); const [visualErrorMessage, setVisualErrorMessage] = useState("Visual requirement could not be verified."); const [visualViolationReason, setVisualViolationReason] = useState("Required visual condition is not satisfied.");
 
   async function load() { setMessage(""); const response = await apiFetch(`${API_URL}/admin/rules`); const data = await response.json().catch(() => []); if (!response.ok) throw new Error(data.error || "Unable to load rules"); setRules(data); }
   useEffect(() => { load().catch((e) => setMessage(e.message)); }, []);
   const filtered = useMemo(() => rules.filter((rule) => `${rule.ruleCode} ${rule.ruleNumber} ${rule.title} ${rule.category}`.toLowerCase().includes(search.toLowerCase())), [rules, search]);
+  const selectedVisualField = VISUAL_FIELDS.find((item) => item.value === visualField) || VISUAL_FIELDS[0];
+  const visualOperators = selectedVisualField.kind === "boolean" ? [{ value: "VISUAL_CHECK", label: "must be true" }] : NUMERIC_VISUAL_OPERATORS;
 
-  function startNew() { const value = blankDefinition(); setSelectedId(""); setDraft(value); setVersionsText(pretty(value.versions)); setPenaltyText(pretty(value.penalty)); setShowAdvanced(false); setShowEditor(true); setMessage(""); }
-  function startEdit(rule) { const value = normalizeRule(rule); setSelectedId(rule.id); setDraft(value); setVersionsText(pretty(value.versions)); setPenaltyText(pretty(value.penalty)); setShowAdvanced(false); setShowEditor(true); setMessage(""); }
+  function resetVisualBuilder(value) {
+    const versions = Array.isArray(value?.versions) ? value.versions : [];
+    setVisualVersionIndex(Math.min(visualVersionIndex, Math.max(0, versions.length - 1)));
+    setVisualField("visual.readability"); setVisualOperator("GREATER_THAN_OR_EQUAL"); setVisualExpected("50"); setVisualErrorMessage("Visual requirement could not be verified."); setVisualViolationReason("Required visual condition is not satisfied.");
+  }
+
+  function startNew() { const value = blankDefinition(); setSelectedId(""); setDraft(value); setVersionsText(pretty(value.versions)); setPenaltyText(pretty(value.penalty)); resetVisualBuilder(value); setShowAdvanced(false); setShowEditor(true); setMessage(""); }
+  function startEdit(rule) { const value = normalizeRule(rule); setSelectedId(rule.id); setDraft(value); setVersionsText(pretty(value.versions)); setPenaltyText(pretty(value.penalty)); resetVisualBuilder(value); setShowAdvanced(false); setShowEditor(true); setMessage(""); }
   function update(key, value) { setDraft((current) => ({ ...current, [key]: value })); }
   function loadPenaltyTemplate(template) { setPenaltyText(pretty(template)); setDraft((current) => ({ ...current, penalty: template })); }
+
+  function addVisualCondition() {
+    try {
+      const versions = parseJson(versionsText, "Rule versions");
+      if (!Array.isArray(versions) || !versions.length) throw new Error("Create at least one rule version before adding a visual condition.");
+      const index = Math.min(Number(visualVersionIndex) || 0, versions.length - 1);
+      const currentVersion = versions[index];
+      if (!currentVersion || typeof currentVersion !== "object") throw new Error("Selected rule version is invalid.");
+      const conditionId = `visual-${Date.now()}`;
+      const isBoolean = selectedVisualField.kind === "boolean";
+      let expectedValue = null;
+      if (isBoolean) {
+        expectedValue = true;
+      } else if (visualOperator === "IN_NUMERIC_RANGE") {
+        const parts = visualExpected.split(",").map((value) => Number(value.trim()));
+        if (parts.length !== 2 || parts.some((value) => !Number.isFinite(value))) throw new Error("Numeric range must contain two numbers, for example 1.5, 2.0.");
+        expectedValue = parts;
+      } else {
+        const numberValue = Number(visualExpected);
+        if (!Number.isFinite(numberValue)) throw new Error("Visual numeric threshold must be a valid number.");
+        expectedValue = numberValue;
+      }
+      const condition = { conditionId, targetField: visualField, operator: isBoolean ? "VISUAL_CHECK" : visualOperator, expectedValue, visualCheckRequired: true, errorMessage: visualErrorMessage.trim() || "Visual requirement could not be verified.", violationReason: visualViolationReason.trim() || "Required visual condition is not satisfied." };
+      const nextVersions = versions.map((version, versionIndex) => versionIndex === index ? { ...version, conditions: [...(Array.isArray(version.conditions) ? version.conditions : []), condition] } : version);
+      setVersionsText(pretty(nextVersions)); setDraft((current) => ({ ...current, versions: nextVersions })); setMessage(`Visual condition added to version ${currentVersion.version ?? index + 1}.`);
+    } catch (e) { setMessage(e.message); }
+  }
 
   async function save(event) {
     event.preventDefault(); setBusy(true); setMessage("");
@@ -96,7 +148,7 @@ export default function AdminRules() {
         <section className="rule-editor-section"><div className="section-heading"><div><h3>Penalty reference</h3><p>Optional statutory reference used by the inspector's penalty calculator.</p></div></div><div className="editor-template-actions"><button type="button" className="secondary-button" onClick={() => loadPenaltyTemplate(section36_1)}>Use Section 36(1)</button><button type="button" className="secondary-button" onClick={() => loadPenaltyTemplate(section36_2)}>Use Section 36(2)</button></div></section>
 
         <button type="button" className="advanced-toggle" onClick={() => setShowAdvanced((value) => !value)}>{showAdvanced ? "Hide advanced rule data" : "Show advanced rule data"}</button>
-        {showAdvanced && <section className="rule-editor-section advanced-rule-section"><p className="editor-help">Advanced mode is for administrators maintaining versioned rule data. Normal rule creation does not require editing these structures.</p><label>Penalty / Enforcement data<textarea className="json-editor" value={penaltyText} onChange={(e) => setPenaltyText(e.target.value)} spellCheck="false" /></label><label>Rule versions<textarea className="json-editor" value={versionsText} onChange={(e) => setVersionsText(e.target.value)} spellCheck="false" /></label><div className="rule-json-reference"><strong>Supported applicability</strong><span>Contexts: {CONTEXTS.join(", ")}</span><span>Package types, consumer types, included/excluded commodities and quantity limits are stored per rule version.</span></div><div className="rule-json-reference"><strong>Version requirements</strong><span>Each version requires an effective period, lifecycle status, applicability criteria, legal sources and conditions.</span></div></section>}
+        {showAdvanced && <section className="rule-editor-section advanced-rule-section"><p className="editor-help">Advanced mode is for administrators maintaining versioned rule data. Normal rule creation does not require editing these structures.</p><label>Penalty / Enforcement data<textarea className="json-editor" value={penaltyText} onChange={(e) => setPenaltyText(e.target.value)} spellCheck="false" /></label><label>Rule versions<textarea className="json-editor" value={versionsText} onChange={(e) => setVersionsText(e.target.value)} spellCheck="false" /></label><div className="visual-condition-builder"><div><strong>Visual condition helper</strong><p>Add a condition that consumes measurements produced during scan image inspection. Thresholds are supplied by the legal rule, not by this tool.</p></div><div className="visual-condition-grid"><label>Rule version<select value={visualVersionIndex} onChange={(e) => setVisualVersionIndex(Number(e.target.value))}>{(() => { try { const versions = JSON.parse(versionsText || "[]"); return Array.isArray(versions) ? versions.map((version, index) => <option value={index} key={index}>Version {version.version ?? index + 1}</option>) : []; } catch { return <option value={0}>Version 1</option>; } })()}</select></label><label>Visual field<select value={visualField} onChange={(e) => { const value = e.target.value; setVisualField(value); const field = VISUAL_FIELDS.find((item) => item.value === value); if (field?.kind === "boolean") setVisualOperator("VISUAL_CHECK"); else setVisualOperator("GREATER_THAN_OR_EQUAL"); }}>{VISUAL_FIELDS.map((field) => <option value={field.value} key={field.value}>{field.label}</option>)}</select></label><label>Operator<select value={visualOperator} onChange={(e) => setVisualOperator(e.target.value)}>{visualOperators.map((operator) => <option value={operator.value} key={operator.value}>{operator.label}</option>)}</select></label>{selectedVisualField.kind === "number" && <label>{visualOperator === "IN_NUMERIC_RANGE" ? "Range (min, max)" : "Threshold"}<input value={visualExpected} onChange={(e) => setVisualExpected(e.target.value)} placeholder={visualOperator === "IN_NUMERIC_RANGE" ? "1.5, 2.0" : "50"} /></label>}{selectedVisualField.kind === "boolean" && <div className="visual-condition-static"><strong>Expected</strong><span>true</span></div>}</div><div className="visual-condition-grid"><label className="span-2">Unable-to-verify message<input value={visualErrorMessage} onChange={(e) => setVisualErrorMessage(e.target.value)} /></label><label className="span-2">Violation reason<input value={visualViolationReason} onChange={(e) => setVisualViolationReason(e.target.value)} /></label></div><button type="button" className="secondary-button" onClick={addVisualCondition}>Add visual condition</button><div className="rule-json-reference"><strong>Available scan measurements</strong><span><code>visual.readability</code>, <code>visual.estimatedTextHeightMm</code>, <code>visual.textDetected</code>, <code>visual.readable</code>, <code>visual.placementReview</code>, <code>visual.fontSizeCalibrated</code>, <code>visual.declarationCoverageScreened</code></span></div></div><div className="rule-json-reference"><strong>Supported applicability</strong><span>Contexts: {CONTEXTS.join(", ")}</span><span>Package types, consumer types, included/excluded commodities and quantity limits are stored per rule version.</span></div><div className="rule-json-reference"><strong>Version requirements</strong><span>Each version requires an effective period, lifecycle status, applicability criteria, legal sources and conditions.</span></div></section>}
 
         <div className="editor-actions"><button type="button" className="secondary-button" onClick={() => setShowEditor(false)}>Cancel</button><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving..." : "Save Rule"}</button></div>
       </form>}
