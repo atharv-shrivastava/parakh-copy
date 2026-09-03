@@ -62,6 +62,15 @@ function extractJson(text) {
   throw new Error("Puter returned incomplete structured OCR JSON.");
 }
 
+function readVisualInspection() {
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem("parakhVisualInspection") || "null");
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 async function fileToDataUrl(file) {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));
@@ -225,6 +234,7 @@ export default function ScanV2() {
     try {
       const info = await runOcr(images.map((item) => item.file));
       const extracted = info.result;
+      const visualInspection = readVisualInspection();
       setProviderInfo(info);
       setMessage(info.provider === "gemini" ? `OCR completed with ${info.model}. Running Rules Engine...` : "Gemini was unavailable, so Puter.js fallback completed OCR. Running Rules Engine...");
       const response = await apiFetch(`${OCR_URL}/api/ocr/evaluate-structured`, {
@@ -232,6 +242,15 @@ export default function ScanV2() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ocr: extracted,
+          visualFlags: visualInspection ? {
+            readability: visualInspection.readability,
+            readable: visualInspection.readable,
+            textDetected: visualInspection.textDetected,
+            placementReview: visualInspection.placementReview,
+            fontSizeCalibrated: visualInspection.fontSizeCalibrated,
+            estimatedTextHeightMm: visualInspection.estimatedTextHeightMm,
+            declarationCoverageScreened: visualInspection.declarationCoverageScreened,
+          } : {},
           inspectionId: crypto.randomUUID(),
           productId: crypto.randomUUID(),
           inspectionDate: new Date().toISOString().slice(0, 10),
@@ -279,6 +298,7 @@ export default function ScanV2() {
     setSaving(true);
     try {
       const imageUrls = await Promise.all(images.map((item) => fileToDataUrl(item.file)));
+      const visualInspection = readVisualInspection();
       const response = await apiFetch(`${API_URL}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -288,7 +308,7 @@ export default function ScanV2() {
           sourceType: "OFFLINE",
           imageUrls,
           acceptedFindingIds,
-          ocrData: { ocr, compliance, complianceError, providerInfo },
+          ocrData: { ocr, compliance, complianceError, providerInfo, visualInspection },
           complianceStatus: accepted.length ? "VIOLATION" : "OKAY",
           violationReason: accepted.map((finding) => finding.message || finding.violationReason || finding.ruleCode).join(" | "),
           inspectionDate: new Date().toISOString(),
