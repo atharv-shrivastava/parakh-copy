@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 
-async function inspectImage(file) {
-  const bitmap = await createImageBitmap(file);
+async function inspectImageSource(src) {
+  const response = await fetch(src);
+  const blob = await response.blob();
+  const bitmap = await createImageBitmap(blob);
   const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(bitmap.width * scale));
@@ -39,22 +41,24 @@ export default function ScanVisualCheck() {
   const [open, setOpen] = useState(true);
 
   useEffect(() => {
-    const findInput = () => document.querySelector('.scan-file-button input[type="file"]');
-    let input = findInput();
-    const timer = window.setInterval(() => {
-      const next = findInput();
-      if (next && next !== input) {
-        if (input) input.removeEventListener("change", onChange);
-        input = next; input.addEventListener("change", onChange);
+    let stopped = false;
+    let observer;
+    const run = async () => {
+      const images = Array.from(document.querySelectorAll('.scan-image-grid .scan-image-card img')).slice(0, 4);
+      const next = [];
+      for (let index = 0; index < images.length; index += 1) {
+        try { next.push(await inspectImageSource(images[index].src)); } catch { next.push(null); }
       }
-    }, 500);
-    async function onChange(event) {
-      const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith("image/")).slice(0, 4);
-      if (!files.length) return;
-      try { setResults(await Promise.all(files.map(inspectImage))); } catch { setResults([]); }
-    }
-    if (input) input.addEventListener("change", onChange);
-    return () => { window.clearInterval(timer); if (input) input.removeEventListener("change", onChange); };
+      if (!stopped) setResults(next.filter(Boolean));
+    };
+    const attach = () => {
+      const grid = document.querySelector('.scan-image-grid');
+      if (grid && !observer) { observer = new MutationObserver(() => run()); observer.observe(grid, { childList: true, subtree: true, attributes: true }); }
+      run();
+    };
+    const timer = window.setInterval(attach, 400);
+    attach();
+    return () => { stopped = true; window.clearInterval(timer); observer?.disconnect(); };
   }, []);
 
   if (!results.length) return null;
@@ -62,7 +66,7 @@ export default function ScanVisualCheck() {
   const label = average >= 75 ? "Good" : average >= 50 ? "Fair" : "Poor";
 
   return <section className="scan-visual-check">
-    <div className="section-heading"><div><h2>Visual check</h2><p>Runs locally on the same scan images. It does not make a legal determination.</p></div><button type="button" className="secondary-button" onClick={() => setOpen((value) => !value)}>{open ? "Hide" : "Show"}</button></div>
-    {open && <><div className="visual-check-summary"><div><strong>Overall readability</strong><span>{label} · {average}/100</span></div><div><strong>Images checked</strong><span>{results.length}</span></div><div><strong>Font size</strong><span>Requires calibrated reference</span></div></div><div className="visual-check-grid">{results.map((item, index) => <div className="visual-check-card" key={index}><strong>Image {index + 1}</strong><span>{item.width} × {item.height}px</span><span>Readability {item.readability}/100</span><span>Sharpness {Math.round(item.sharpness)}/100</span><span>Contrast {Math.round(item.contrast)}/100</span></div>)}</div></>}
+    <div className="section-heading"><div><h2>Visual check</h2><p>Runs locally on the same scan images. This is a screening aid, not a legal determination.</p></div><button type="button" className="secondary-button" onClick={() => setOpen((value) => !value)}>{open ? "Hide" : "Show"}</button></div>
+    {open && <><div className="visual-check-summary"><div><strong>Overall readability</strong><span>{label} · {average}/100</span></div><div><strong>Images checked</strong><span>{results.length}</span></div><div><strong>Font size</strong><span>Manual/calibrated check required</span></div></div><div className="visual-check-grid">{results.map((item, index) => <div className="visual-check-card" key={index}><strong>Image {index + 1}</strong><span>{item.width} × {item.height}px</span><span>Readability {item.readability}/100</span><span>Sharpness {Math.round(item.sharpness)}/100</span><span>Contrast {Math.round(item.contrast)}/100</span></div>)}</div></>}
   </section>;
 }
