@@ -63,6 +63,7 @@ model Category {
   updatedAt          DateTime   @updatedAt
   parentId           String?
   isSystem           Boolean    @default(false)
+  sourceType         String     @default("OFFLINE")
   ownerId            String?
   isFinalProductType Boolean    @default(false)
   parent             Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
@@ -75,6 +76,7 @@ model Category {
   @@index([isSystem])
   @@index([parentId])
   @@index([isFinalProductType])
+  @@index([sourceType])
 }
 
 model Product {
@@ -86,7 +88,7 @@ model Product {
   netQuantity       String?
   unit              String?
   mrp               Float?
-  barcode           String?
+  barcode            String?
   imageUrl          String?
   imageUrls         Json          @default("[]")
   complianceStatus  String        @default("NEEDS_REVIEW")
