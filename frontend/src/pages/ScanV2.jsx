@@ -6,7 +6,7 @@ import "../styles/scan.css";
 const API_URL = "http://localhost:5000/api";
 const OCR_URL = "http://localhost:5000";
 const MAX_IMAGES = 4;
-const OCR_FIELDS = ["productName", "brandName", "manufacturer", "manufacturerAddress", "packer", "packerAddress", "importer", "importerAddress", "netQuantity", "unit", "mrp", "currency", "dateOfManufacture", "dateOfPacking", "bestBefore", "expiryDate", "batchNumber", "consumerCarePhone", "consumerCareEmail", "countryOfOrigin", "fssaiLicenseNumber", "barcode"];
+const OCR_FIELDS = ["productName", "brandName", "manufacturer", "manufacturerAddress", "marketer", "packer", "packerAddress", "importer", "importerAddress", "netQuantity", "unit", "mrp", "currency", "dateOfManufacture", "dateOfPacking", "bestBefore", "expiryDate", "batchNumber", "consumerCarePhone", "consumerCareEmail", "countryOfOrigin", "fssaiLicenseNumber", "barcode"];
 const EMPTY_FORM = { brandName: "", productName: "", description: "", netQuantity: "", unit: "", mrp: "", barcode: "", shopName: "", shopAddress: "", shopCity: "", shopState: "", notes: "" };
 
 function flattenCategories(nodes, path = []) {
@@ -284,7 +284,7 @@ export default function ScanV2() {
     <div className="page-header">
       <p className="eyebrow">PRODUCT INSPECTION</p>
       <h1>Scan Product</h1>
-      <p>Capture or upload package images, detect printed text with PaddleOCR and Cloud Vision, map only relevant declarations with the hybrid semantic layer, review Rules Engine findings, then register the inspection.</p>
+      <p>Capture or upload package images, detect printed text with local PaddleOCR and map only relevant declarations with the local semantic layer, review Rules Engine findings, then register the inspection.</p>
     </div>
 
     <section className="scan-area">
