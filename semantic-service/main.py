@@ -88,13 +88,13 @@ def best_prediction(result: dict[str, Any]):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "parakh-gliner2", "model": MODEL_NAME}
+    return {"status": "ok", "service": "parakh-gliner-small", "model": MODEL_NAME}
 
 
 @app.post("/map")
 def map_candidates(request: MapRequest):
     if not request.candidates:
-        return {"mappings": [], "provider": "gliner2-local", "model": MODEL_NAME}
+        return {"mappings": [], "provider": "gliner2.5-small-local", "model": MODEL_NAME}
     try:
         extractor = get_model()
         texts = [candidate.text for candidate in request.candidates]
@@ -122,6 +122,6 @@ def map_candidates(request: MapRequest):
                 "boundingBox": candidate.boundingBox,
                 "source": "GLINER2.5-SMALL",
             })
-        return {"mappings": mappings, "provider": "gliner2-local", "model": MODEL_NAME}
+        return {"mappings": mappings, "provider": "gliner2.5-small-local", "model": MODEL_NAME}
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Local GLiNER2 unavailable: {exc}") from exc
+        raise HTTPException(status_code=503, detail=f"Local GLiNER small unavailable: {exc}") from exc
