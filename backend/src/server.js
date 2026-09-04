@@ -22,9 +22,9 @@ app.use("/api/products", productsRouter);
 app.use("/api/shops", shopsRouter);
 app.use("/api/rules", rulesRouter);
 app.use("/api/admin", adminRouter);
-// Keep the normal scan endpoint fast. The legacy hybrid route remains available
-// inside ocrRouter for diagnostics, but is no longer on the main scan hot path.
+// Production OCR uses only local PaddleOCR + local semantic mapping.
 app.use("/api/ocr", fastOcrRouter);
+// Structured compliance evaluation is kept separate from OCR extraction.
 app.use("/api/ocr", ocrRouter);
 
 const PORT = Number(process.env.PORT || 5000);
