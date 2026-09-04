@@ -1,10 +1,13 @@
 /**
- * Generic deterministic OCR field interpreter.
- * No Gemini, OpenAI, network calls, ML models, or brand hardcoding.
+ * Deterministic PaddleOCR field reconciler.
+ * No Gemini, GLiNER, network calls, external models, or brand hardcoding.
  *
- * Purpose: reconcile noisy OCR detections using labels, spatial proximity,
- * geometry, repetition across images, conservative validation, and explicit
- * uncertainty states. Existing OCR/semantic layers remain untouched.
+ * Pipeline:
+ *   normalize -> classify/anchor -> spatial association -> field validation
+ *   -> identity ranking -> cross-image reconciliation -> explicit uncertainty
+ *
+ * The module intentionally keeps raw OCR evidence attached to every field so
+ * a human can review questionable extraction rather than receiving invented data.
  */
 
 const FIELD_NAMES = [
@@ -17,44 +20,51 @@ const FIELD_NAMES = [
 ];
 
 const LABELS = {
-  manufacturer: /\b(?:mfd\.?\s*by|mfg\.?\s*by|manufactured\s+by|manufacturer)\b/i,
-  packer: /\b(?:packed\s+by|packer)\b/i,
+  manufacturer: /\b(?:manufactured\s+by|mfd\.?\s*by|mfg\.?\s*by|manufacturer)\b/i,
+  packer: /\b(?:packed\s+by|pkd\.?\s*by|packer)\b/i,
   marketer: /\b(?:marketed\s+by|marketer)\b/i,
   importer: /\b(?:imported\s+by|importer)\b/i,
 };
 
 const DATE_LABELS = {
-  dateOfManufacture: /\b(?:mfd|mfg)\.?\s*(?:date|dt)\b|\bdate\s+of\s+(?:manufacture|manufacturing)\b|\bmanufactured\s+(?:on|date)\b/i,
-  dateOfPacking: /\b(?:pkd|packed|packing)\.?\s*(?:date|dt|on)?\b|\bdate\s+of\s+packing\b/i,
-  bestBefore: /\bbest\s*before\b|\buse\s*within\b/i,
-  expiryDate: /\b(?:expiry|expires|exp)\.?\s*(?:date|dt)?\b|\buse\s*by\b/i,
+  dateOfManufacture: /\b(?:date\s+of\s+(?:manufacture|manufacturing)|manufactured\s+(?:on|date)|mfd\.?\s*(?:date|dt)?|mfg\.?\s*(?:date|dt)?)\b/i,
+  dateOfPacking: /\b(?:date\s+of\s+packing|packed\s+(?:on|date)|packing\s+(?:date|dt)|pkd\.?\s*(?:date|dt)?)\b/i,
+  bestBefore: /\b(?:best\s*before|use\s*within|shelf\s*life)\b/i,
+  expiryDate: /\b(?:expiry|expires|exp\.?)\s*(?:date|dt)?\b|\buse\s*by\b/i,
 };
 
-const INNER_PACK_RE = /\b(?:see|refer|check)\b[^\n]{0,120}\b(?:under\s+the\s+seal|individual\s+pack|inner\s+pack|inside)\b|\b(?:under\s+the\s+seal|individual\s+pack(?:et)?|inner\s+pack(?:et)?)\b[^\n]{0,120}\b(?:batch|lot|mfg|manufactur|expiry|exp\.?|mrp|price|date|details)\b/i;
+const MRP_LABEL_RE = /\b(?:m\.?\s*r\.?\s*p\.?|maximum\s+retail\s+price)\b/i;
+const MRP_CURRENCY_RE = /(?:₹|rs\.?|inr)\s*([0-9][0-9,]*(?:[.,][0-9]{1,2})?)/i;
+const MRP_BARE_RE = /\b([0-9]{1,5}(?:[.,][0-9]{1,2})?)\b/;
+const QUANTITY_RE = /\b([0-9]+(?:[.,][0-9]+)?)\s*(mg|mcg|g|gm|gms|gram|grams|kg|kgs|ml|l|ltr|ltrs|cl|oz|lb|pcs|pieces|piece|units?|nos)\b/i;
+const BATCH_LABEL_RE = /\b(?:batch|lot|lot\.?\s*no|batch\.?\s*no|b\.?\s*no)\b/i;
+const FSSAI_LABEL_RE = /\bfssai\b|food\s+safety\s+(?:license|licence|number|no)/i;
+const BARCODE_LABEL_RE = /\b(?:barcode|bar\s*code|ean|upc|gtin)\b/i;
+const PHONE_RE = /(?:\+?91[\s-]?)?[6-9]\d{9}\b|(?:0[1-9]\d{2,4}[\s-]?)\d{6,8}\b/g;
+const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+const DATE_RE = /\b(?:\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{1,2}\s*[A-Za-z]{3,9}\s*\d{2,4}|[A-Za-z]{3,9}\s+\d{2,4}|\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}|\d{1,2}[\/\-.]\d{4})\b/i;
+const ADDRESS_RE = /\b(?:road|rd\.?|street|st\.?|nagar|district|dist\.?|state|pin\s*code|pincode|village|taluka|tehsil|industrial\s+(?:area|estate)|sector|phase|building|floor|plot|lane|avenue|near|opposite|opp\.?|haridwar|uttarakhand|madhya\s+pradesh|delhi|mumbai|kolkata|bengaluru|hyderabad|ahmedabad|pune|jaipur|india)\b/i;
+const ORGANIZATION_RE = /\b(?:limited|ltd\.?|private|pvt\.?|company|corporation|corp\.?|industr(?:y|ies)|foods?|pharma|laborator(?:y|ies)|ayurved|manufactur(?:er|ing))\b/i;
 const PROMO_RE = /^(?:save\s*\d+|save\s+up\s+to|offer|special\s+offer|discount|cashback|buy\s+\d+|buy\s+one|get\s+one|free|flat|limited\s+offer|sale|prize|lucky\s+draw|scratch)\b|\b(?:save|discount|off)\s*\d+/i;
 const CLAIM_RE = /\b(?:tightens?|fights?|protects?|prevents?|removes?|reduces?|controls?|treats?|helps?|improves?|strengthens?|whitens?|freshens?|cleans?|purifies?|restores?|supports?|boosts?|enhances?|nourishes?|repairs?|relieves?|cures?|heals?|soothes?|kills?|gives?|long\s+life|healthy\s+gums?|fresh\s+breath|germ\s+protection)\b/i;
-const ADMIN_RE = /^(?:for|visit|toll|e-?mail|made\s+in|store\s+in|for\s+sale|marketed|manufactured|mfd|mfg|packed|pkd|imported|consumer|customer|country|address|ingredients?|nutrition|net|best|use|mrp|batch|barcode|license|manager|regd|registered|division|office|helpline|complaint)\b/i;
-const DATE_RE = /\b(?:\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{1,2}\s*[A-Za-z]{3,9}\s*\d{2,4}|[A-Za-z]{3,9}\s+\d{4}|\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2})\b/;
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-const PHONE_RE = /(?:\+?\d[\d\s().-]{7,16}\d)/g;
-const QUANTITY_RE = /\b(\d+(?:[.,]\d+)?)\s*(mg|mcg|g|gm|gms|gram|grams|kg|kgs|ml|l|ltr|ltrs|litre|litres|liter|liters|cl|oz|lb|pcs|pieces|piece|nos)\b/i;
-const MRP_VALUE_RE = /(?:₹|rs\.?|inr)\s*([0-9][0-9,]*(?:[.,][0-9]{1,2})?)\b/i;
-const MRP_LABEL_RE = /\bm\.?\s*r\.?\s*p\.?\b|\bmaximum\s+retail\s+price\b/i;
-const FSSAI_LABEL_RE = /\bfssai\b|food\s+safety\s+(?:license|licence|number)/i;
-const BARCODE_CONTEXT_RE = /\b(?:barcode|bar\s*code|ean|upc|gtin)\b/i;
-const ADDRESS_WORD_RE = /\b(?:road|street|st\.?|rd\.?|nagar|district|dist\.?|state|pin\s*code|pincode|village|taluka|tehsil|industrial\s+(?:area|estate)|sector|phase|building|floor|plot|lane|avenue|near|opposite|opp\.?)\b/i;
-const ORGANIZATION_RE = /\b(?:limited|ltd\.?|private|pvt\.?|company|industr(?:y|ies)|corporation|corp\.?|foods?|pharma|laborator(?:y|ies)|manufactur(?:er|ing))\b/i;
-const GENERIC_IDENTITY_RE = /^(?:india|indian|bharat|wellness|foods?|products?|premium|quality|natural|pure|original|new|best|herbal|ayurvedic|advanced|total\s+care)$/i;
+const LEGAL_RE = /^(?:for|visit|toll|e-?mail|made\s+in|store\s+in|for\s+sale|marketed|manufactured|mfd|mfg|packed|pkd|imported|consumer|customer|country|address|ingredients?|nutrition|net|best|use|mrp|batch|barcode|license|licence|manager|regd|registered|division|office|helpline|complaint)\b/i;
+const GENERIC_IDENTITY_RE = /^(?:india|indian|bharat|wellness|foods?|products?|premium|quality|natural|pure|original|new|best|herbal|ayurvedic|advanced|total\s+care|toothpaste|tooth\s+paste)$/i;
+const PRODUCT_HINT_RE = /\b(?:toothpaste|tooth\s*powder|dentifrice|soap|shampoo|detergent|biscuits?|cookies?|namkeen|chips?|snacks?|noodles?|atta|flour|rice|dal|pulses?|spices?|masala|tea|coffee|juice|drink|beverage|oil|ghee|butter|milk|curd|yogurt|chocolate|candy|toffee|salt|sugar|sauce|ketchup|paste|powder|cream|wafer|wafers?|dental|gum|gums)\b/i;
 
 function textOf(value) {
-  return String(value ?? "").replace(/[\u00a0\t]+/g, " ").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, " ").trim();
+  return String(value ?? "")
+    .replace(/[\u00a0\t]+/g, " ")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function norm(value) {
   return textOf(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function numericConfidence(value) {
+function confidenceOf(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0.55;
   return n > 1 ? Math.max(0, Math.min(1, n / 100)) : Math.max(0, Math.min(1, n));
@@ -71,33 +81,35 @@ function normalizeBox(box) {
 }
 
 function center(box) {
-  if (!box || typeof box !== "object") return null;
-  return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
-}
-
-function overlapRatio(aStart, aSize, bStart, bSize) {
-  const aEnd = aStart + aSize;
-  const bEnd = bStart + bSize;
-  return Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart)) / Math.max(1, Math.min(aSize, bSize));
-}
-
-function verticalOverlap(a, b) {
-  return overlapRatio(a.top, a.height, b.top, b.height);
-}
-
-function horizontalOverlap(a, b) {
-  return overlapRatio(a.left, a.width, b.left, b.width);
+  return box ? { x: box.left + box.width / 2, y: box.top + box.height / 2 } : null;
 }
 
 function distance(a, b) {
   const ca = center(a);
   const cb = center(b);
-  if (!ca || !cb) return Number.POSITIVE_INFINITY;
-  return Math.hypot(ca.x - cb.x, ca.y - cb.y);
+  return ca && cb ? Math.hypot(ca.x - cb.x, ca.y - cb.y) : Number.POSITIVE_INFINITY;
 }
 
-function sameImage(a, b) {
-  return Number(a.imageIndex ?? 0) === Number(b.imageIndex ?? 0);
+function verticalGap(a, b) {
+  if (!a || !b) return Number.POSITIVE_INFINITY;
+  return Math.max(0, Math.max(a.top, b.top) - Math.min(a.top + a.height, b.top + b.height));
+}
+
+function horizontalGap(a, b) {
+  if (!a || !b) return Number.POSITIVE_INFINITY;
+  return Math.max(0, Math.max(a.left, b.left) - Math.min(a.left + a.width, b.left + b.width));
+}
+
+function verticalOverlap(a, b) {
+  if (!a || !b) return 0;
+  const overlap = Math.max(0, Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top));
+  return overlap / Math.max(1, Math.min(a.height, b.height));
+}
+
+function horizontalOverlap(a, b) {
+  if (!a || !b) return 0;
+  const overlap = Math.max(0, Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left));
+  return overlap / Math.max(1, Math.min(a.width, b.width));
 }
 
 function levenshteinSimilarity(a, b) {
@@ -121,391 +133,511 @@ function levenshteinSimilarity(a, b) {
   return 1 - prev[right.length] / Math.max(left.length, right.length);
 }
 
-function uniqueDetections(detections) {
-  const source = Array.isArray(detections) ? detections : [];
-  const seen = new Set();
-  return source.map((item, index) => {
-    const text = textOf(item?.text);
-    if (!text) return null;
-    const imageIndex = Number.isInteger(item?.imageIndex) ? item.imageIndex : 0;
-    const bbox = normalizeBox(item?.boundingBox);
-    const key = `${imageIndex}|${norm(text)}|${bbox ? `${Math.round(bbox.left)}:${Math.round(bbox.top)}` : index}`;
-    if (seen.has(key)) return null;
-    seen.add(key);
-    return {
-      id: String(item?.id ?? `det-${index}`),
-      text,
-      normalized: norm(text),
-      confidence: numericConfidence(item?.confidence),
-      boundingBox: bbox,
-      imageIndex,
-      index,
-    };
-  }).filter(Boolean);
+function numericCleanup(value) {
+  return textOf(value)
+    .replace(/[Oo]/g, "0")
+    .replace(/[Il|]/g, "1")
+    .replace(/[Zz]/g, "2");
 }
 
-function buildField(value, confidence, evidence = null, status = null, extra = {}) {
+function isDateLike(value) {
+  return DATE_RE.test(textOf(value));
+}
+
+function parseNumeric(value) {
+  const normalized = numericCleanup(value).replace(/,/g, "");
+  const match = normalized.match(/\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+function isValidEAN(value) {
+  const digits = numericCleanup(value).replace(/\D/g, "");
+  if (digits.length === 13) {
+    let sum = 0;
+    for (let i = 0; i < 12; i += 1) sum += Number(digits[i]) * (i % 2 === 0 ? 1 : 3);
+    return (10 - (sum % 10)) % 10 === Number(digits[12]);
+  }
+  if (digits.length === 8) {
+    let sum = 0;
+    for (let i = 0; i < 7; i += 1) sum += Number(digits[i]) * (i % 2 === 0 ? 3 : 1);
+    return (10 - (sum % 10)) % 10 === Number(digits[7]);
+  }
+  return digits.length === 12 || digits.length === 14;
+}
+
+function gtinDigits(value) {
+  const digits = numericCleanup(value).replace(/\D/g, "");
+  return /^\d{8,14}$/.test(digits) ? digits : null;
+}
+
+function cleanDetection(item, index) {
+  const text = textOf(item?.text);
+  if (!text) return null;
+  return {
+    id: String(item?.id ?? `det-${index}`),
+    text,
+    normalized: norm(text),
+    confidence: confidenceOf(item?.confidence),
+    boundingBox: normalizeBox(item?.boundingBox),
+    imageIndex: Number.isInteger(item?.imageIndex) ? item.imageIndex : 0,
+    index,
+  };
+}
+
+function prepareDetections(detections) {
+  const seen = new Set();
+  return (Array.isArray(detections) ? detections : [])
+    .map(cleanDetection)
+    .filter(Boolean)
+    .filter((item) => {
+      const boxKey = item.boundingBox
+        ? `${Math.round(item.boundingBox.left)}:${Math.round(item.boundingBox.top)}:${Math.round(item.boundingBox.width)}:${Math.round(item.boundingBox.height)}`
+        : `nobox:${item.index}`;
+      const key = `${item.imageIndex}|${item.normalized}|${boxKey}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function field(value, confidence, evidence = [], status = null, extra = {}) {
   const hasValue = value !== null && value !== undefined && String(value).trim() !== "";
+  const c = Math.max(0, Math.min(1, Number(confidence) || 0));
   return {
     value: hasValue ? value : null,
-    confidence: hasValue ? Math.max(0, Math.min(1, Number(confidence) || 0)) : 0,
-    confidenceLabel: !hasValue ? "LOW" : Number(confidence) >= 0.75 ? "HIGH" : Number(confidence) >= 0.45 ? "MEDIUM" : "LOW",
-    status: status || (hasValue ? "found" : "not_detected"),
-    evidence: evidence || null,
+    raw: evidence[0]?.text || null,
+    confidence: hasValue ? c : 0,
+    status: status || (hasValue ? (c >= 0.48 ? "found" : "ambiguous") : "not_detected"),
+    evidence: evidence.map((item) => ({ id: item.id, text: item.text, confidence: item.confidence, imageIndex: item.imageIndex, boundingBox: item.boundingBox })),
     source: "LOCAL_DETERMINISTIC_RECONCILER",
     ...extra,
   };
 }
 
-function candidateLikeIdentity(text) {
-  const value = textOf(text);
-  if (value.length < 2 || value.length > 72) return false;
-  if (/^\d+$/.test(value)) return false;
-  if (EMAIL_RE.test(value) || PHONE_RE.test(value)) return false;
-  EMAIL_RE.lastIndex = 0;
-  PHONE_RE.lastIndex = 0;
-  if (DATE_RE.test(value) || QUANTITY_RE.test(value) || MRP_LABEL_RE.test(value) || MRP_VALUE_RE.test(value)) return false;
-  if (PROMO_RE.test(value) || CLAIM_RE.test(value) || ADMIN_RE.test(value)) return false;
-  if (GENERIC_IDENTITY_RE.test(value)) return false;
-  if (ADDRESS_WORD_RE.test(value) && /\d/.test(value)) return false;
-  return /[A-Za-z]/.test(value);
+function anchorTypes(item) {
+  const text = item.text;
+  const types = [];
+  if (MRP_LABEL_RE.test(text)) types.push("mrp");
+  if (QUANTITY_RE.test(text) || /\bnet\s*(?:qty|quantity|weight|volume|vol|wt)\b/i.test(text)) types.push("quantity");
+  if (BATCH_LABEL_RE.test(text)) types.push("batch");
+  if (FSSAI_LABEL_RE.test(text)) types.push("fssai");
+  if (BARCODE_LABEL_RE.test(text)) types.push("barcode");
+  for (const [key, regex] of Object.entries(DATE_LABELS)) if (regex.test(text)) types.push(key);
+  for (const [key, regex] of Object.entries(LABELS)) if (regex.test(text)) types.push(key);
+  return types;
 }
 
-function repetitionScore(detection, detections) {
-  const same = detections.filter((other) => other.imageIndex !== detection.imageIndex && levenshteinSimilarity(detection.text, other.text) >= 0.88);
-  return Math.min(0.18, same.length * 0.06);
+function inlineValue(item, regex, group = 1) {
+  const match = textOf(item.text).match(regex);
+  return match ? textOf(match[group] ?? match[0]) : null;
 }
 
-function prominenceScore(detection, detections) {
-  const valid = detections.filter((item) => item.boundingBox);
-  if (!detection.boundingBox || !valid.length) return 0.35;
-  const area = detection.boundingBox.width * detection.boundingBox.height;
-  const maxArea = Math.max(1, ...valid.map((item) => item.boundingBox.width * item.boundingBox.height));
-  const maxHeight = Math.max(1, ...valid.map((item) => Number(item.boundingBox.height) || 0));
-  const areaScore = area / maxArea;
-  const heightScore = detection.boundingBox.height / maxHeight;
-  return Math.min(1, areaScore * 0.55 + heightScore * 0.45);
+function candidateScore(anchor, candidate, kind) {
+  if (anchor.imageIndex !== candidate.imageIndex) return -Infinity;
+  let score = candidate.confidence * 0.30;
+  if (anchor.boundingBox && candidate.boundingBox) {
+    const maxDistance = kind === "mrp" || kind === "quantity" ? 180 : 240;
+    const d = distance(anchor.boundingBox, candidate.boundingBox);
+    if (d > maxDistance) return -Infinity;
+    score += Math.max(0, 0.40 * (1 - d / maxDistance));
+    score += Math.min(0.18, verticalOverlap(anchor.boundingBox, candidate.boundingBox) * 0.18);
+    score += Math.min(0.12, horizontalOverlap(anchor.boundingBox, candidate.boundingBox) * 0.12);
+    const cAnchor = center(anchor.boundingBox);
+    const cCandidate = center(candidate.boundingBox);
+    if (cAnchor && cCandidate) {
+      const toRight = cCandidate.x >= cAnchor.x;
+      const below = cCandidate.y >= cAnchor.y;
+      if (toRight) score += 0.10;
+      if (below) score += 0.06;
+    }
+  } else {
+    score -= 0.08;
+  }
+  return score;
 }
 
-function rankIdentityCandidates(detections) {
-  return detections
-    .filter((item) => candidateLikeIdentity(item.text))
-    .map((item) => {
-      const prominence = prominenceScore(item, detections);
-      const confidence = item.confidence;
-      const repetition = repetitionScore(item, detections);
-      const words = item.text.split(/\s+/).filter(Boolean).length;
-      let score = prominence * 0.56 + confidence * 0.20 + repetition;
-      if (item.text === item.text.toUpperCase()) score += 0.07;
-      if (words <= 5) score += 0.05;
-      if (words >= 8) score -= 0.10;
-      if (CLAIM_RE.test(item.text)) score -= 0.35;
-      if (ORGANIZATION_RE.test(item.text)) score -= 0.10;
-      if (GENERIC_IDENTITY_RE.test(item.text)) score -= 0.25;
-      return { detection: item, score: Math.max(0, Math.min(1, score)), prominence, repetition };
-    })
+function nearestValue(anchor, detections, regex, kind, transform = (v) => v) {
+  const candidates = detections
+    .filter((item) => item.id !== anchor.id && item.imageIndex === anchor.imageIndex)
+    .map((item) => ({ item, match: inlineValue(item, regex, 1), score: candidateScore(anchor, item, kind) }))
+    .filter((entry) => entry.match && Number.isFinite(entry.score))
     .sort((a, b) => b.score - a.score);
+  if (!candidates.length) return null;
+  const best = candidates[0];
+  return { value: transform(best.match), item: best.item, score: best.score };
 }
 
-function pickIdentityPair(detections) {
-  const candidates = rankIdentityCandidates(detections);
-  if (!candidates.length) {
-    return { productName: buildField(null, 0), brandName: buildField(null, 0), candidates: [] };
+function collectInlineOrNearby(detections, anchors, regex, kind, transform = (v) => v) {
+  for (const anchor of anchors) {
+    const inline = inlineValue(anchor, regex, 1);
+    if (inline) return { value: transform(inline), item: anchor, score: 0.92, inline: true };
+  }
+  const all = [];
+  for (const anchor of anchors) {
+    const nearby = nearestValue(anchor, detections, regex, kind, transform);
+    if (nearby) all.push({ ...nearby, anchor });
+  }
+  return all.sort((a, b) => b.score - a.score)[0] || null;
+}
+
+function extractMRP(detections) {
+  const anchors = detections.filter((item) => MRP_LABEL_RE.test(item.text));
+  const currencyRegex = /(?:₹|rs\.?|inr)\s*([0-9][0-9,]*(?:[.,][0-9]{1,2})?)/i;
+  const bareRegex = /\b([0-9]{1,5}(?:[.,][0-9]{1,2})?)\b/;
+  const best = collectInlineOrNearby(detections, anchors, currencyRegex, "mrp", (v) => v.replace(/,/g, ""));
+  if (best) {
+    const numeric = parseNumeric(best.value);
+    if (numeric !== null && numeric <= 100000) {
+      const confidence = Math.min(0.98, 0.54 + best.score * 0.45);
+      return field(best.value, confidence, [best.item, ...(best.anchor ? [best.anchor] : [])]);
+    }
   }
 
-  const brandPool = candidates.filter((candidate) => candidate.detection.text.split(/\s+/).filter(Boolean).length <= 3);
-  const brand = (brandPool.length ? brandPool : candidates)[0];
+  const bare = collectInlineOrNearby(detections, anchors, bareRegex, "mrp", (v) => v.replace(/,/g, ""));
+  if (bare) {
+    const value = parseNumeric(bare.value);
+    const raw = bare.item.text;
+    const suspiciousYear = /^\d{4}$/.test(String(value)) && !/(?:₹|rs\.?|inr)/i.test(raw);
+    if (value !== null && value <= 100000 && !isDateLike(raw) && !suspiciousYear) {
+      return field(String(value), Math.min(0.78, 0.36 + bare.score * 0.35), [bare.item, ...(bare.anchor ? [bare.anchor] : [])], "ambiguous");
+    }
+  }
+  return field(null, 0);
+}
 
-  const productPool = candidates.filter((candidate) => candidate.detection.id !== brand.detection.id && candidate.detection.text.split(/\s+/).filter(Boolean).length >= 2);
-  const product = productPool[0] || candidates.find((candidate) => candidate.detection.id !== brand.detection.id) || brand;
+function extractQuantity(detections) {
+  const anchors = detections.filter((item) => /\bnet\s*(?:qty|quantity|weight|volume|vol|wt)\b/i.test(item.text));
+  const qty = collectInlineOrNearby(detections, anchors, QUANTITY_RE, "quantity", (v) => textOf(v).replace(/\s+/g, " "));
+  if (!qty) {
+    const candidates = detections
+      .map((item) => ({ item, match: inlineValue(item, QUANTITY_RE, 0) }))
+      .filter((entry) => entry.match && /\bnet|\bweight|\bvolume/i.test(entry.item.text))
+      .sort((a, b) => b.item.confidence - a.item.confidence);
+    if (!candidates.length) return { quantity: field(null, 0), unit: field(null, 0) };
+    const best = candidates[0];
+    return quantityResult(best.match, best.item, 0.88);
+  }
+  return quantityResult(qty.value, qty.item, Math.min(0.96, 0.48 + qty.score * 0.50));
+}
 
-  const productConfidence = Math.min(0.94, 0.32 + product.score * 0.65 + (product.repetition || 0));
-  const brandConfidence = Math.min(0.92, 0.30 + brand.score * 0.60 + (brand.repetition || 0));
+function quantityResult(value, item, confidence) {
+  const match = textOf(value).match(QUANTITY_RE);
+  const number = match?.[1] || null;
+  const unit = match?.[2]?.toLowerCase() || null;
+  const canonicalUnit = ({ gm: "g", gms: "g", gram: "g", grams: "g", kgs: "kg", ltr: "l", ltrs: "l", litre: "l", litres: "l", liters: "l", liter: "l", pieces: "pcs", piece: "pcs", units: "pcs", nos: "pcs" })[unit] || unit;
+  return { quantity: field(number, confidence, [item]), unit: field(canonicalUnit, Math.max(0, confidence - 0.02), [item]) };
+}
 
+function extractDateField(detections, fieldName) {
+  const anchors = detections.filter((item) => DATE_LABELS[fieldName]?.test(item.text));
+  const regex = new RegExp(DATE_RE.source, "i");
+  const result = collectInlineOrNearby(detections, anchors, regex, "date");
+  if (!result) return field(null, 0);
+  return field(result.value, Math.min(0.95, 0.48 + result.score * 0.45), [result.item, ...(result.anchor ? [result.anchor] : [])]);
+}
+
+function extractBatch(detections) {
+  const anchors = detections.filter((item) => BATCH_LABEL_RE.test(item.text));
+  const regex = /\b(?:batch|lot|b\.?\s*no\.?)?\s*[:#\-]?\s*([A-Z0-9][A-Z0-9./_-]{1,28})\b/i;
+  const result = collectInlineOrNearby(detections, anchors, regex, "batch");
+  if (!result) return field(null, 0);
+  if (isDateLike(result.value) || /^\d+$/.test(result.value)) return field(null, 0, [], "ambiguous");
+  return field(result.value, Math.min(0.94, 0.46 + result.score * 0.47), [result.item, ...(result.anchor ? [result.anchor] : [])]);
+}
+
+function extractFSSAI(detections) {
+  const anchors = detections.filter((item) => FSSAI_LABEL_RE.test(item.text));
+  const fssaiRegex = /\b([0-9OolI]{14})\b/;
+  const result = collectInlineOrNearby(detections, anchors, fssaiRegex, "fssai", (v) => numericCleanup(v));
+  if (!result) return field(null, 0);
+  if (!/^\d{14}$/.test(result.value)) return field(null, 0, [result.item], "ambiguous");
+  return field(result.value, Math.min(0.97, 0.58 + result.score * 0.42), [result.item, ...(result.anchor ? [result.anchor] : [])]);
+}
+
+function extractBarcode(detections) {
+  const labelled = detections.filter((item) => BARCODE_LABEL_RE.test(item.text));
+  const contextual = [];
+  for (const item of detections) {
+    const digitMatch = item.text.match(/\b[0-9OolI]{8,14}\b/g) || [];
+    for (const raw of digitMatch) {
+      const digits = gtinDigits(raw);
+      if (!digits || !isValidEAN(digits)) continue;
+      let score = item.confidence * 0.45 + (labelled.some((anchor) => anchor.imageIndex === item.imageIndex && distance(anchor.boundingBox, item.boundingBox) < 220) ? 0.30 : 0);
+      if (item.boundingBox) score += Math.min(0.20, (item.boundingBox.width * item.boundingBox.height) / 20000);
+      contextual.push({ item, digits, score });
+    }
+  }
+  contextual.sort((a, b) => b.score - a.score);
+  const best = contextual[0];
+  return best ? field(best.digits, Math.min(0.96, 0.32 + best.score * 0.75), [best.item]) : field(null, 0);
+}
+
+function extractContact(detections) {
+  const phones = [];
+  const emails = [];
+  for (const item of detections) {
+    for (const raw of item.text.match(PHONE_RE) || []) {
+      const digits = raw.replace(/\D/g, "");
+      if (digits.length >= 10 && digits.length <= 12) phones.push({ item, value: raw.trim(), score: item.confidence });
+    }
+    for (const raw of item.text.match(EMAIL_RE) || []) emails.push({ item, value: raw.trim(), score: item.confidence });
+  }
+  phones.sort((a, b) => b.score - a.score);
+  emails.sort((a, b) => b.score - a.score);
   return {
-    productName: buildField(product.detection.text, productConfidence, `Prominence=${product.prominence.toFixed(2)}; repetition support=${product.repetition.toFixed(2)}`, productConfidence >= 0.50 ? "found" : "needs_review", { imageIndex: product.detection.imageIndex }),
-    brandName: buildField(brand.detection.text, brandConfidence, `Identity candidate score=${brand.score.toFixed(2)}; repetition support=${brand.repetition.toFixed(2)}`, brandConfidence >= 0.50 ? "found" : "needs_review", { imageIndex: brand.detection.imageIndex }),
-    candidates: candidates.slice(0, 8).map((item) => ({ text: item.detection.text, score: Number(item.score.toFixed(3)), imageIndex: item.detection.imageIndex })),
+    phone: phones[0] ? field(phones[0].value, Math.min(0.94, 0.42 + phones[0].score * 0.52), [phones[0].item]) : field(null, 0),
+    email: emails[0] ? field(emails[0].value, Math.min(0.96, 0.46 + emails[0].score * 0.50), [emails[0].item]) : field(null, 0),
   };
 }
 
-function findNearbyValue(lines, labelLine, predicate) {
-  if (!labelLine.boundingBox) return null;
-  const candidates = lines.filter((candidate) => candidate.id !== labelLine.id && sameImage(candidate, labelLine) && candidate.boundingBox && predicate(candidate.text));
-  if (!candidates.length) return null;
-  const labelBox = labelLine.boundingBox;
-  candidates.sort((a, b) => {
-    const score = (item) => {
-      const box = item.boundingBox;
-      const dy = Math.abs((box.top + box.height / 2) - (labelBox.top + labelBox.height / 2));
-      const dx = Math.abs((box.left + box.width / 2) - (labelBox.left + labelBox.width / 2));
-      const overlap = verticalOverlap(labelBox, box) + horizontalOverlap(labelBox, box);
-      return dy + dx * 0.25 - overlap * 50;
-    };
-    return score(a) - score(b);
-  });
-  return candidates[0] || null;
-}
-
-function parseMRP(lines) {
-  for (const line of lines) {
-    const direct = line.text.match(MRP_VALUE_RE);
-    if (direct) return buildField(direct[1].replace(/,/g, ""), 0.90, line.text, "found", { imageIndex: line.imageIndex });
-    if (!MRP_LABEL_RE.test(line.text)) continue;
-    const valueLine = findNearbyValue(lines, line, (text) => MRP_VALUE_RE.test(text) || /^\s*(?:₹|rs\.?|inr)?\s*\d{1,6}(?:[.,]\d{1,2})?\s*$/i.test(text));
-    if (valueLine) {
-      const match = valueLine.text.match(MRP_VALUE_RE) || valueLine.text.match(/\d{1,6}(?:[.,]\d{1,2})?/);
-      if (match) return buildField(match[1] || match[0], 0.82, `${line.text} ${valueLine.text}`, "found", { imageIndex: valueLine.imageIndex });
-    }
-  }
-  return buildField(null, 0);
-}
-
-function parseQuantity(lines) {
-  for (const line of lines) {
-    const match = line.text.match(QUANTITY_RE);
-    if (match) return { netQuantity: buildField(match[1], 0.86, line.text, "found", { imageIndex: line.imageIndex }), unit: buildField(match[2], 0.86, line.text, "found", { imageIndex: line.imageIndex }) };
-  }
-  return { netQuantity: buildField(null, 0), unit: buildField(null, 0) };
-}
-
-function parseBatch(lines) {
-  for (const line of lines) {
-    if (!/\b(?:batch|batch\s*no|lot|lot\s*no)\b/i.test(line.text)) continue;
-    const value = line.text.replace(/^.*?\b(?:batch|batch\s*no|lot|lot\s*no)\b\s*[:#\-]?\s*/i, "").trim();
-    if (value && value !== line.text) {
-      if (/(?:see\s+below|refer|individual\s+pack|inner\s+pack|under\s+the\s+seal|inside|other\s+details)/i.test(value)) {
-        return buildField(null, 0, line.text, "referenced_inner_pack", { imageIndex: line.imageIndex });
-      }
-      return buildField(value, 0.84, line.text, "found", { imageIndex: line.imageIndex });
-    }
-    const nearby = findNearbyValue(lines, line, (text) => !/\b(?:batch|lot|mfd|mfg|expiry|exp|mrp|maximum\s+retail\s+price)\b/i.test(text) && /^[A-Za-z0-9./_-]{3,30}$/.test(text.trim()));
-    if (nearby) return buildField(nearby.text, 0.76, `${line.text} ${nearby.text}`, "found", { imageIndex: nearby.imageIndex });
-  }
-  return buildField(null, 0);
-}
-
-function parseDates(lines) {
-  const result = {};
-  for (const [fieldName, pattern] of Object.entries(DATE_LABELS)) {
-    result[fieldName] = buildField(null, 0);
-    for (const line of lines) {
-      if (!pattern.test(line.text)) continue;
-      const direct = line.text.match(DATE_RE);
-      if (direct) {
-        result[fieldName] = buildField(direct[0], 0.82, line.text, "found", { imageIndex: line.imageIndex });
-        break;
-      }
-      const valueLine = findNearbyValue(lines, line, (text) => DATE_RE.test(text));
-      if (valueLine) {
-        result[fieldName] = buildField(valueLine.text.match(DATE_RE)?.[0] || valueLine.text, 0.68, `${line.text} ${valueLine.text}`, "found", { imageIndex: valueLine.imageIndex });
-        break;
-      }
-    }
-  }
-  return result;
-}
-
-function parseContacts(lines, rawText) {
-  let email = null;
-  let emailLine = null;
-  let phone = null;
-  let phoneLine = null;
-  for (const line of lines) {
+function identityNoise(text) {
+  const value = textOf(text);
+  if (value.length < 2 || value.length > 70) return true;
+  if (/^\d+$/.test(value)) return true;
+  if (isDateLike(value) || QUANTITY_RE.test(value) || MRP_LABEL_RE.test(value)) return true;
+  if (EMAIL_RE.test(value) || PHONE_RE.test(value)) {
     EMAIL_RE.lastIndex = 0;
     PHONE_RE.lastIndex = 0;
-    const e = line.text.match(EMAIL_RE)?.[0];
-    const p = line.text.match(PHONE_RE)?.[0];
-    if (!email && e) { email = e; emailLine = line; }
-    if (!phone && p && /\b(?:consumer|customer|care|helpline|complaint|toll\s*free)\b/i.test(line.text)) { phone = p; phoneLine = line; }
+    return true;
   }
-  if (!email) { EMAIL_RE.lastIndex = 0; email = String(rawText || "").match(EMAIL_RE)?.[0] || null; }
-  if (!phone) {
-    for (const line of lines) {
-      PHONE_RE.lastIndex = 0;
-      const p = line.text.match(PHONE_RE)?.[0];
-      if (p && !/\b(?:fssai|license|lic\.?|batch|lot)\b/i.test(line.text)) { phone = p; phoneLine = line; break; }
-    }
-  }
+  EMAIL_RE.lastIndex = 0;
+  PHONE_RE.lastIndex = 0;
+  if (PROMO_RE.test(value) || CLAIM_RE.test(value) || LEGAL_RE.test(value)) return true;
+  if (/\b(?:ingredients?|nutrition|calories|directions|warning|caution|storage|keep|store|license|licence|customer|consumer|helpline|complaint)\b/i.test(value)) return true;
+  if (ADDRESS_RE.test(value) && /\d/.test(value)) return true;
+  if (GENERIC_IDENTITY_RE.test(value)) return true;
+  if (/^[^A-Za-z]*$/.test(value)) return true;
+  return false;
+}
+
+function identityFeatures(item, detections) {
+  const valid = detections.filter((d) => d.boundingBox);
+  const maxArea = Math.max(1, ...valid.map((d) => d.boundingBox.width * d.boundingBox.height));
+  const maxHeight = Math.max(1, ...valid.map((d) => d.boundingBox.height));
+  const areaRatio = item.boundingBox ? (item.boundingBox.width * item.boundingBox.height) / maxArea : 0.18;
+  const heightRatio = item.boundingBox ? item.boundingBox.height / maxHeight : 0.18;
+  const repeated = detections.filter((other) => other.imageIndex !== item.imageIndex && levenshteinSimilarity(item.text, other.text) >= 0.86).length;
+  const words = item.text.split(/\s+/).filter(Boolean).length;
+  const shortPenalty = words > 7 ? 0.12 : 0;
+  const genericPenalty = GENERIC_IDENTITY_RE.test(item.text) ? 0.40 : 0;
+  const orgPenalty = ORGANIZATION_RE.test(item.text) && /\b(?:ltd|limited|pvt|private|company|corporation|industr)/i.test(item.text) ? 0.10 : 0;
+  const productHint = PRODUCT_HINT_RE.test(item.text) ? 0.14 : 0;
+  const claimPenalty = CLAIM_RE.test(item.text) ? 0.32 : 0;
+  const adminPenalty = LEGAL_RE.test(item.text) ? 0.28 : 0;
+  return { areaRatio, heightRatio, repeated, words, shortPenalty, genericPenalty, orgPenalty, productHint, claimPenalty, adminPenalty };
+}
+
+function rankIdentity(detections) {
+  const candidates = detections.filter((item) => !identityNoise(item.text));
+  return candidates.map((item) => {
+    const f = identityFeatures(item, detections);
+    let score = 0;
+    score += f.areaRatio * 0.32;
+    score += f.heightRatio * 0.28;
+    score += item.confidence * 0.18;
+    score += Math.min(0.16, f.repeated * 0.08);
+    score += f.productHint;
+    if (f.words >= 2 && f.words <= 5) score += 0.07;
+    if (f.words === 1) score += 0.02;
+    score -= f.shortPenalty + f.genericPenalty + f.orgPenalty + f.claimPenalty + f.adminPenalty;
+    if (/^[A-Z0-9][A-Za-z0-9&' .-]{2,50}$/.test(item.text)) score += 0.04;
+    return { item, score: Math.max(0, Math.min(1, score)), features: f };
+  }).sort((a, b) => b.score - a.score);
+}
+
+function pairIdentity(detections) {
+  const ranked = rankIdentity(detections);
+  if (!ranked.length) return { productName: field(null, 0), brandName: field(null, 0), candidates: [] };
+
+  const product = ranked.find((candidate) => candidate.features.productHint > 0 && candidate.features.words <= 6) || ranked[0];
+  const brandCandidates = ranked
+    .filter((candidate) => candidate.item.id !== product.item.id)
+    .filter((candidate) => candidate.features.words <= 4)
+    .sort((a, b) => (b.features.areaRatio + b.features.heightRatio + b.item.confidence) - (a.features.areaRatio + a.features.heightRatio + a.item.confidence));
+  const brand = brandCandidates[0] || product;
+
+  const productConfidence = Math.min(0.93, 0.34 + product.score * 0.68);
+  const brandConfidence = Math.min(0.91, 0.31 + brand.score * 0.64);
+  const productStatus = productConfidence >= 0.56 ? "found" : "ambiguous";
+  const brandStatus = brandConfidence >= 0.54 ? "found" : "ambiguous";
+
   return {
-    consumerCareEmail: buildField(email, email ? 0.84 : 0, emailLine?.text || (email ? "Recovered from raw OCR text" : null), email ? "found" : "not_detected", emailLine ? { imageIndex: emailLine.imageIndex } : {}),
-    consumerCarePhone: buildField(phone, phone ? 0.76 : 0, phoneLine?.text || null, phone ? "found" : "not_detected", phoneLine ? { imageIndex: phoneLine.imageIndex } : {}),
+    productName: field(product.item.text, productConfidence, [product.item], productStatus, { imageIndex: product.item.imageIndex }),
+    brandName: field(brand.item.text, brandConfidence, [brand.item], brandStatus, { imageIndex: brand.item.imageIndex }),
+    candidates: ranked.slice(0, 12).map((candidate) => ({
+      text: candidate.item.text,
+      score: Number(candidate.score.toFixed(3)),
+      imageIndex: candidate.item.imageIndex,
+      confidence: candidate.item.confidence,
+      productHint: Boolean(candidate.features.productHint),
+      repeated: candidate.features.repeated,
+    })),
   };
 }
 
-function parseFssai(lines) {
-  for (const line of lines) {
-    if (!FSSAI_LABEL_RE.test(line.text)) continue;
-    const nearby = line.text.match(/\b\d{14}\b/)?.[0];
-    if (nearby) return buildField(nearby, 0.90, line.text, "found", { imageIndex: line.imageIndex });
-    const valueLine = findNearbyValue(lines, line, (text) => /^\d{14}$/.test(text.trim()));
-    if (valueLine) return buildField(valueLine.text.trim(), 0.82, `${line.text} ${valueLine.text}`, "found", { imageIndex: valueLine.imageIndex });
-  }
-  return buildField(null, 0);
-}
-
-function gtinChecksum(value) {
-  const digits = String(value || "").replace(/\D/g, "");
-  if (![8, 12, 13, 14].includes(digits.length)) return false;
-  let sum = 0;
-  let weight = 3;
-  for (let i = digits.length - 2; i >= 0; i -= 1) {
-    sum += Number(digits[i]) * weight;
-    weight = weight === 3 ? 1 : 3;
-  }
-  return (10 - (sum % 10)) % 10 === Number(digits[digits.length - 1]);
-}
-
-function parseBarcode(lines) {
-  const candidates = [];
-  for (const line of lines) {
-    const rawNumbers = line.text.match(/\b\d{8,18}\b/g) || [];
-    for (const raw of rawNumbers) {
-      const hasBarcodeContext = BARCODE_CONTEXT_RE.test(line.text);
-      const prohibitedContext = FSSAI_LABEL_RE.test(line.text) || /\b(?:license|lic\.?|batch|lot|phone|mobile|toll\s*free|consumer\s+care)\b/i.test(line.text);
-      if (prohibitedContext) continue;
-      if (gtinChecksum(raw)) {
-        const contextBoost = hasBarcodeContext ? 0.10 : 0;
-        const lengthBoost = raw.length === 13 ? 0.04 : 0;
-        candidates.push({ raw, line, score: 0.86 + contextBoost + lengthBoost, verified: true });
-      } else if (hasBarcodeContext || /^\d{8,18}$/.test(line.text.trim())) {
-        candidates.push({ raw, line, score: hasBarcodeContext ? 0.78 : 0.58, verified: false });
-      }
+function extractRoleAndAddress(detections, role) {
+  const anchors = detections.filter((item) => LABELS[role]?.test(item.text));
+  if (!anchors.length) return { value: field(null, 0), address: field(null, 0) };
+  const valueCandidates = [];
+  for (const anchor of anchors) {
+    const inline = textOf(anchor.text).match(/(?:manufactured|mfd|mfg|packed|pkd|marketed|imported|manufacturer|packer|marketer|importer)\s*(?:by|:)?\s*(.+)$/i);
+    if (inline?.[1] && inline[1].trim().length > 1 && !LABELS[role].test(inline[1])) {
+      valueCandidates.push({ anchor, item: anchor, value: inline[1].trim(), score: 0.92 });
+      continue;
     }
+    const nearby = detections
+      .filter((item) => item.imageIndex === anchor.imageIndex && item.id !== anchor.id)
+      .map((item) => ({ item, score: candidateScore(anchor, item, "role") }))
+      .filter((entry) => Number.isFinite(entry.score) && entry.score > 0.20)
+      .filter((entry) => !MRP_LABEL_RE.test(entry.item.text) && !FSSAI_LABEL_RE.test(entry.item.text) && !QUANTITY_RE.test(entry.item.text))
+      .sort((a, b) => b.score - a.score);
+    if (nearby[0]) valueCandidates.push({ anchor, item: nearby[0].item, value: nearby[0].item.text, score: nearby[0].score });
   }
-  candidates.sort((a, b) => b.score - a.score);
-  const winner = candidates[0];
-  if (!winner) return buildField(null, 0);
-  return winner.verified
-    ? buildField(winner.raw, winner.score, `Checksum-valid GTIN candidate from: ${winner.line.text}`, "found", { imageIndex: winner.line.imageIndex })
-    : buildField(winner.raw, winner.score, `Barcode candidate recovered from OCR: ${winner.line.text}; checksum not verified`, "found", { imageIndex: winner.line.imageIndex, validation: "unverified" });
-}
+  valueCandidates.sort((a, b) => b.score - a.score);
+  const best = valueCandidates[0];
+  if (!best) return { value: field(null, 0), address: field(null, 0) };
 
-function extractLabeledEntity(lines, key) {
-  const label = LABELS[key];
-  const labelLines = lines.filter((line) => label.test(line.text));
-  for (const line of labelLines) {
-    const sameLine = textOf(line.text.replace(label, "").replace(/^\s*[:\-–,]+\s*/, ""));
-    if (sameLine && !LABELS[key].test(sameLine)) {
-      const value = sameLine.replace(/^[:\-–,]+/, "").trim();
-      if (value) return buildField(value, 0.84, line.text, "found", { imageIndex: line.imageIndex });
+  const lines = [best.item];
+  let current = best.item;
+  for (let i = 0; i < 4; i += 1) {
+    if (!current.boundingBox) break;
+    const next = detections
+      .filter((item) => item.imageIndex === current.imageIndex && !lines.some((line) => line.id === item.id) && item.boundingBox)
+      .map((item) => ({ item, gap: verticalGap(current.boundingBox, item.boundingBox), xGap: Math.abs(item.boundingBox.left - current.boundingBox.left), score: candidateScore(best.anchor, item, "role") }))
+      .filter((entry) => entry.item.boundingBox.top >= current.boundingBox.top && entry.gap <= Math.max(28, current.boundingBox.height * 1.8) && entry.xGap <= Math.max(60, current.boundingBox.width * 0.7))
+      .filter((entry) => entry.score > 0.15 && !MRP_LABEL_RE.test(entry.item.text) && !FSSAI_LABEL_RE.test(entry.item.text) && !BARCODE_LABEL_RE.test(entry.item.text))
+      .sort((a, b) => a.gap - b.gap || b.score - a.score);
+    if (!next[0]) break;
+    lines.push(next[0].item);
+    current = next[0].item;
+  }
+
+  const addressLines = lines.filter((item, index) => index > 0 && (ADDRESS_RE.test(item.text) || /\d/.test(item.text) || ORGANIZATION_RE.test(item.text)));
+  const combinedValue = lines.map((item) => item.text).join(" ");
+  const combinedAddress = addressLines.map((item) => item.text).join(" ");
+  const boxItems = addressLines.length ? addressLines : lines;
+  const combinedBox = boxItems.every((item) => item.boundingBox)
+    ? {
+      left: Math.min(...boxItems.map((item) => item.boundingBox.left)),
+      top: Math.min(...boxItems.map((item) => item.boundingBox.top)),
+      width: Math.max(...boxItems.map((item) => item.boundingBox.left + item.boundingBox.width)) - Math.min(...boxItems.map((item) => item.boundingBox.left)),
+      height: Math.max(...boxItems.map((item) => item.boundingBox.top + item.boundingBox.height)) - Math.min(...boxItems.map((item) => item.boundingBox.top)),
     }
-    const nearby = [];
-    for (const candidate of lines) {
-      if (candidate.id === line.id || !sameImage(candidate, line)) continue;
-      if (candidate.boundingBox && line.boundingBox) {
-        const dy = candidate.boundingBox.top - line.boundingBox.top;
-        if (dy < -line.boundingBox.height || dy > Math.max(5 * line.boundingBox.height, 220)) continue;
-      }
-      if (LABELS[key].test(candidate.text) || MRP_LABEL_RE.test(candidate.text) || QUANTITY_RE.test(candidate.text) || DATE_RE.test(candidate.text)) continue;
-      if (PROMO_RE.test(candidate.text) || CLAIM_RE.test(candidate.text)) continue;
-      nearby.push(candidate);
-    }
-    nearby.sort((a, b) => (a.boundingBox ? distance(line.boundingBox, a.boundingBox) : 999999) - (b.boundingBox ? distance(line.boundingBox, b.boundingBox) : 999999));
-    const winner = nearby[0];
-    if (winner) return buildField(winner.text, 0.70, `${line.text} ${winner.text}`, "found", { imageIndex: winner.imageIndex });
-  }
-  return buildField(null, 0);
+    : null;
+
+  const roleValue = field(combinedValue, Math.min(0.93, 0.42 + best.score * 0.50), lines, combinedValue === best.value ? null : "found");
+  const addressConfidence = addressLines.length ? Math.min(0.91, 0.40 + addressLines.length * 0.08 + best.score * 0.30) : 0;
+  const address = addressLines.length
+    ? field(combinedAddress, addressConfidence, addressLines, null, { boundingBox: combinedBox })
+    : field(null, 0);
+  return { value: roleValue, address };
 }
 
-function extractCountry(lines) {
-  for (const line of lines) {
-    const match = line.text.match(/\b(?:made\s+in|country\s+of\s+origin)\s*[:\-]?\s*(.+)$/i);
-    if (match) return buildField(match[1].trim(), 0.86, line.text, "found", { imageIndex: line.imageIndex });
-  }
-  return buildField(null, 0);
+function countryOfOrigin(detections) {
+  const anchor = detections.filter((item) => /\bcountry\s+of\s+origin\b|\bmade\s+in\b|\bproduct\s+of\b/i.test(item.text));
+  const regex = /(?:country\s+of\s+origin|made\s+in|product\s+of)\s*[:\-]?\s*([A-Za-z][A-Za-z .'-]{1,40})/i;
+  const result = collectInlineOrNearby(detections, anchor, regex, "country");
+  return result ? field(textOf(result.value).replace(/[.,]+$/, ""), Math.min(0.92, 0.45 + result.score * 0.45), [result.item]) : field(null, 0);
 }
 
-function imageQuality(detections) {
-  const byImage = new Map();
-  for (const d of detections) {
-    if (!byImage.has(d.imageIndex)) byImage.set(d.imageIndex, []);
-    byImage.get(d.imageIndex).push(d);
-  }
-  const output = {};
-  for (const [index, group] of byImage) {
-    const averageConfidence = group.length ? group.reduce((sum, d) => sum + d.confidence, 0) / group.length : 0;
-    const totalCharacters = group.reduce((sum, d) => sum + d.text.length, 0);
-    output[index] = {
-      status: totalCharacters < 5 ? "unreadable_low_quality" : averageConfidence < 0.35 ? "needs_review" : "readable",
-      detectionCount: group.length,
-      averageConfidence,
-      totalCharacters,
-      hasGeometry: group.some((d) => d.boundingBox),
-    };
-  }
-  return output;
+function reconcileSimilar(fieldValue, candidates) {
+  if (!fieldValue?.value) return fieldValue;
+  const peers = candidates.filter((candidate) => levenshteinSimilarity(fieldValue.value, candidate.value) >= 0.86);
+  if (!peers.length) return fieldValue;
+  const support = Math.min(0.16, peers.length * 0.05);
+  return { ...fieldValue, confidence: Math.min(0.98, fieldValue.confidence + support), status: "found", crossImageAgreement: peers.length + 1 };
 }
 
-function applyInnerPackStatus(fields, reference) {
-  if (!reference) return fields;
-  const eligible = ["mrp", "batchNumber", "dateOfManufacture", "dateOfPacking", "bestBefore", "expiryDate"];
-  for (const key of eligible) {
-    if (fields[key]?.status === "not_detected") {
-      fields[key] = buildField(null, 0, reference, "referenced_inner_pack");
-    }
+function extractIdentityAndCrossImage(detections) {
+  const identity = pairIdentity(detections);
+  for (const key of ["productName", "brandName"]) {
+    const current = identity[key];
+    if (!current.value) continue;
+    const peers = detections
+      .filter((item) => item.imageIndex !== current.imageIndex && !identityNoise(item.text))
+      .map((item) => ({ value: item.text, similarity: levenshteinSimilarity(current.value, item.text), item }))
+      .filter((entry) => entry.similarity >= 0.86)
+      .sort((a, b) => b.similarity - a.similarity)
+      .map((entry) => ({ value: entry.item.text, similarity: entry.similarity }));
+    identity[key] = reconcileSimilar(current, peers);
   }
-  return fields;
+  return identity;
 }
 
 export function interpretOcrFields({ detections = [], rawText = "" } = {}) {
-  const normalized = uniqueDetections(detections);
-  const identity = pickIdentityPair(normalized);
-  const quantity = parseQuantity(normalized);
-  const dates = parseDates(normalized);
-  const contacts = parseContacts(normalized, rawText);
-  const innerPackReference = INNER_PACK_RE.test(textOf(rawText)) || normalized.some((line) => INNER_PACK_RE.test(line.text));
+  const prepared = prepareDetections(detections);
+  const identity = extractIdentityAndCrossImage(prepared);
+  const quantity = extractQuantity(prepared);
+  const contact = extractContact(prepared);
+  const manufacturer = extractRoleAndAddress(prepared, "manufacturer");
+  const packer = extractRoleAndAddress(prepared, "packer");
+  const marketer = extractRoleAndAddress(prepared, "marketer");
+  const importer = extractRoleAndAddress(prepared, "importer");
+
   const fields = {
     productName: identity.productName,
     brandName: identity.brandName,
-    mrp: parseMRP(normalized),
-    netQuantity: quantity.netQuantity,
+    mrp: extractMRP(prepared),
+    netQuantity: quantity.quantity,
     unit: quantity.unit,
-    batchNumber: parseBatch(normalized),
-    ...dates,
-    manufacturer: extractLabeledEntity(normalized, "manufacturer"),
-    manufacturerAddress: buildField(null, 0),
-    packer: extractLabeledEntity(normalized, "packer"),
-    packerAddress: buildField(null, 0),
-    marketer: extractLabeledEntity(normalized, "marketer"),
-    marketerAddress: buildField(null, 0),
-    importer: extractLabeledEntity(normalized, "importer"),
-    importerAddress: buildField(null, 0),
-    consumerCarePhone: contacts.consumerCarePhone,
-    consumerCareEmail: contacts.consumerCareEmail,
-    countryOfOrigin: extractCountry(normalized),
-    fssaiLicenseNumber: parseFssai(normalized),
-    barcode: parseBarcode(normalized),
+    batchNumber: extractBatch(prepared),
+    dateOfManufacture: extractDateField(prepared, "dateOfManufacture"),
+    dateOfPacking: extractDateField(prepared, "dateOfPacking"),
+    bestBefore: extractDateField(prepared, "bestBefore"),
+    expiryDate: extractDateField(prepared, "expiryDate"),
+    manufacturer: manufacturer.value,
+    manufacturerAddress: manufacturer.address,
+    packer: packer.value,
+    packerAddress: packer.address,
+    marketer: marketer.value,
+    marketerAddress: marketer.address,
+    importer: importer.value,
+    importerAddress: importer.address,
+    consumerCarePhone: contact.phone,
+    consumerCareEmail: contact.email,
+    countryOfOrigin: countryOfOrigin(prepared),
+    fssaiLicenseNumber: extractFSSAI(prepared),
+    barcode: extractBarcode(prepared),
   };
 
-  applyInnerPackStatus(fields, innerPackReference ? "OCR detected a reference to an inner/individual pack or under-seal details." : null);
+  const detectedText = prepared.map((item) => item.text).join("\n");
+  const warnings = [];
+  if (prepared.some((item) => item.text.match(/[\u0080-\uFFFF]{2,}/))) warnings.push("OCR contains non-Latin or potentially corrupted characters; identity fields may need review.");
+  if (prepared.some((item) => !item.boundingBox)) warnings.push("Some OCR detections have no bounding box; spatial association was skipped for those detections.");
+  if (/\b(?:see|refer|check)\b[^\n]{0,120}\b(?:individual|inner\s+pack|inside|under\s+the\s+seal)\b/i.test(detectedText)) warnings.push("Package text references an inner/individual pack; batch/date/price details may be elsewhere.");
+
+  const needsReview = Object.values(fields).some((item) => item.status === "ambiguous" || (item.status === "found" && item.confidence < 0.58));
 
   return {
     fields,
+    candidateEvidence: {
+      productName: identity.candidates,
+      brandName: identity.candidates,
+      mrp: prepared.filter((item) => MRP_LABEL_RE.test(item.text) || MRP_CURRENCY_RE.test(item.text)).map((item) => item.text),
+      quantity: prepared.filter((item) => QUANTITY_RE.test(item.text)).map((item) => item.text),
+      dates: prepared.filter((item) => DATE_RE.test(item.text)).map((item) => item.text),
+      fssai: prepared.filter((item) => FSSAI_LABEL_RE.test(item.text) || /\b\d{14}\b/.test(numericCleanup(item.text))).map((item) => item.text),
+      barcode: prepared.filter((item) => BARCODE_LABEL_RE.test(item.text) || /\b\d{8,14}\b/.test(numericCleanup(item.text))).map((item) => item.text),
+    },
     metadata: {
       source: "LOCAL_DETERMINISTIC_RECONCILER",
-      detectionCount: normalized.length,
+      detectionCount: prepared.length,
+      images: new Set(prepared.map((item) => item.imageIndex)).size,
       candidateEvidence: identity.candidates,
-      imageQuality: imageQuality(normalized),
-      innerPackReference,
+      imageQuality: {
+        detections: prepared.length,
+        withBoundingBoxes: prepared.filter((item) => item.boundingBox).length,
+        averageConfidence: prepared.length ? prepared.reduce((sum, item) => sum + item.confidence, 0) / prepared.length : 0,
+      },
+      innerPackReference: /\b(?:see|refer|check)\b[^\n]{0,120}\b(?:individual|inner\s+pack|inside|under\s+the\s+seal)\b/i.test(detectedText),
       rawTextPreserved: true,
       noExternalModel: true,
+      needsReview,
+      warningCount: warnings.length,
     },
-    candidateEvidence: {
-      identity: identity.candidates,
-    },
-    rawText: textOf(rawText),
+    rawText: textOf(rawText) || detectedText,
+    warnings,
   };
 }
 
-export function rankProductCandidates(detections = []) {
-  return rankIdentityCandidates(uniqueDetections(detections)).map((candidate) => ({
-    text: candidate.detection.text,
-    score: Number(candidate.score.toFixed(4)),
-    prominence: Number(candidate.prominence.toFixed(4)),
-    repetition: Number(candidate.repetition.toFixed(4)),
-    imageIndex: candidate.detection.imageIndex,
-  }));
-}
-
-export { gtinChecksum, normalizeBox, distance, levenshteinSimilarity, FIELD_NAMES };
+export default { interpretOcrFields };
