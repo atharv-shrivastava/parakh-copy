@@ -35,7 +35,7 @@ _use_doc_unwarping = os.getenv("PADDLEOCR_DOC_UNWARPING", "false").lower() == "t
 # Upright package photos are the normal case. Orientation classification is opt-in
 # because it adds CPU latency to every scan.
 _use_textline_orientation = os.getenv("PADDLEOCR_TEXTLINE_ORIENTATION", "false").lower() == "true"
-_max_ocr_side = max(800, int(os.getenv("PADDLEOCR_MAX_SIDE", "1400")))
+_max_ocr_side = max(800, int(os.getenv("PADDLEOCR_MAX_SIDE", "1200")))
 _cache_ttl = max(5, int(os.getenv("PADDLEOCR_CACHE_TTL_SECONDS", "30")))
 _cache_limit = max(1, int(os.getenv("PADDLEOCR_CACHE_ITEMS", "8")))
 
