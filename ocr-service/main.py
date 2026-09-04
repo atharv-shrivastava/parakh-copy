@@ -1,5 +1,8 @@
 import io
 import os
+import asyncio
+import hashlib
+import time
 from typing import Any
 
 # PaddleX can enable oneDNN by default on CPU. On some Windows/PaddlePaddle 3.x
@@ -15,7 +18,6 @@ from paddleocr import PaddleOCR
 
 app = FastAPI(title="PARAKH PaddleOCR Service")
 
-# Allow the PARAKH frontend to communicate with the local PaddleOCR service.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -30,16 +32,23 @@ app.add_middleware(
 _lang = os.getenv("PADDLEOCR_LANG", "en")
 _use_doc_orientation = os.getenv("PADDLEOCR_DOC_ORIENTATION", "false").lower() == "true"
 _use_doc_unwarping = os.getenv("PADDLEOCR_DOC_UNWARPING", "false").lower() == "true"
-_use_textline_orientation = os.getenv("PADDLEOCR_TEXTLINE_ORIENTATION", "true").lower() == "true"
+# Upright package photos are the normal case. Orientation classification is opt-in
+# because it adds CPU latency to every scan.
+_use_textline_orientation = os.getenv("PADDLEOCR_TEXTLINE_ORIENTATION", "false").lower() == "true"
+_max_ocr_side = max(800, int(os.getenv("PADDLEOCR_MAX_SIDE", "1400")))
+_cache_ttl = max(5, int(os.getenv("PADDLEOCR_CACHE_TTL_SECONDS", "30")))
+_cache_limit = max(1, int(os.getenv("PADDLEOCR_CACHE_ITEMS", "8")))
 
 ocr = PaddleOCR(
     lang=_lang,
     use_doc_orientation_classify=_use_doc_orientation,
     use_doc_unwarping=_use_doc_unwarping,
     use_textline_orientation=_use_textline_orientation,
-    # Avoid the Windows/CPU PIR + oneDNN runtime conversion crash.
     enable_mkldnn=False,
 )
+
+_result_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_inflight: dict[str, asyncio.Task] = {}
 
 
 def to_float(value: Any, default: float = 0.0) -> float:
@@ -101,30 +110,55 @@ def extract_result(result: Any, image_index: int, width: int, height: int):
     return entries
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok", "service": "parakh-paddleocr"}
+def _cache_key(items: list[tuple[bytes, str]]) -> str:
+    digest = hashlib.sha256()
+    for content, media_type in items:
+        digest.update(media_type.encode("utf-8"))
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+    return digest.hexdigest()
 
 
-@app.post("/api/ocr/analyze")
-async def analyze(images: list[UploadFile] = File(...)):
-    if not images:
-        raise HTTPException(status_code=400, detail="At least one image is required.")
+def _get_cached(key: str):
+    cached = _result_cache.get(key)
+    if not cached:
+        return None
+    created_at, result = cached
+    if time.monotonic() - created_at > _cache_ttl:
+        _result_cache.pop(key, None)
+        return None
+    return result
 
+
+def _store_cached(key: str, result: dict[str, Any]):
+    _result_cache[key] = (time.monotonic(), result)
+    while len(_result_cache) > _cache_limit:
+        oldest_key = min(_result_cache, key=lambda cache_key: _result_cache[cache_key][0])
+        _result_cache.pop(oldest_key, None)
+
+
+def _prepare_image(content: bytes):
+    pil_image = Image.open(io.BytesIO(content)).convert("RGB")
+    original_width, original_height = pil_image.size
+    scale = min(1.0, _max_ocr_side / max(original_width, original_height))
+    if scale < 1.0:
+        width = max(1, round(original_width * scale))
+        height = max(1, round(original_height * scale))
+        pil_image = pil_image.resize((width, height), Image.Resampling.LANCZOS)
+    return pil_image
+
+
+async def _analyze_contents(items: list[tuple[bytes, str]]):
     all_entries = []
     raw_text_parts = []
 
-    for image_index, upload in enumerate(images[:6]):
-        content = await upload.read()
+    for image_index, (content, _media_type) in enumerate(items[:6]):
         try:
-            pil_image = Image.open(io.BytesIO(content)).convert("RGB")
+            pil_image = _prepare_image(content)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid image {image_index + 1}: {exc}") from exc
 
         width, height = pil_image.size
-
-        # PaddleOCR 3.x accepts numpy.ndarray or a file path/string, not PIL.Image.
-        # Convert the decoded RGB image to a numpy array before prediction.
         image_array = np.asarray(pil_image)
         result = ocr.predict(image_array)
 
@@ -146,3 +180,38 @@ async def analyze(images: list[UploadFile] = File(...)):
             "needsReview": any(entry["confidence"] < 0.6 for entry in all_entries),
         },
     }
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "parakh-paddleocr"}
+
+
+@app.post("/api/ocr/analyze")
+async def analyze(images: list[UploadFile] = File(...)):
+    if not images:
+        raise HTTPException(status_code=400, detail="At least one image is required.")
+
+    items = []
+    for upload in images[:6]:
+        content = await upload.read()
+        items.append((content, upload.content_type or "image/jpeg"))
+
+    key = _cache_key(items)
+    cached = _get_cached(key)
+    if cached is not None:
+        return cached
+
+    task = _inflight.get(key)
+    if task is None:
+        task = asyncio.create_task(_analyze_contents(items))
+        _inflight[key] = task
+
+    try:
+        result = await task
+    finally:
+        if _inflight.get(key) is task:
+            _inflight.pop(key, None)
+
+    _store_cached(key, result)
+    return result
