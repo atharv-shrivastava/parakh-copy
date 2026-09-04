@@ -3,10 +3,23 @@ import os
 from typing import Any
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 from paddleocr import PaddleOCR
 
 app = FastAPI(title="PARAKH PaddleOCR Service")
+
+# Allow the PARAKH frontend to communicate with the local PaddleOCR service.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _lang = os.getenv("PADDLEOCR_LANG", "en")
 _use_doc_orientation = os.getenv("PADDLEOCR_DOC_ORIENTATION", "false").lower() == "true"
