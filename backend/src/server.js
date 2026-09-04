@@ -9,6 +9,7 @@ import adminRouter from "./routes/admin.js";
 import rulesRouter from "./routes/rules.js";
 import fastOcrRouter from "./ocr/fastRoutes.js";
 import ocrRouter from "./ocr/routes.js";
+import ecommerceOcrRouter from "./routes/ecommerceOcr.js";
 
 const app = express();
 app.use(cors({ origin: true }));
@@ -22,6 +23,7 @@ app.use("/api/products", productsRouter);
 app.use("/api/shops", shopsRouter);
 app.use("/api/rules", rulesRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/products/ecommerce-ocr", ecommerceOcrRouter);
 // Production OCR uses only local PaddleOCR + local semantic mapping.
 app.use("/api/ocr", fastOcrRouter);
 // Structured compliance evaluation is kept separate from OCR extraction.
