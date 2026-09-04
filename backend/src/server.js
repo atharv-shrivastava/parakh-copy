@@ -7,6 +7,7 @@ import authRouter from "./routes/auth.js";
 import shopsRouter from "./routes/shops.js";
 import adminRouter from "./routes/admin.js";
 import rulesRouter from "./routes/rules.js";
+import fastOcrRouter from "./ocr/fastRoutes.js";
 import ocrRouter from "./ocr/routes.js";
 
 const app = express();
@@ -21,6 +22,9 @@ app.use("/api/products", productsRouter);
 app.use("/api/shops", shopsRouter);
 app.use("/api/rules", rulesRouter);
 app.use("/api/admin", adminRouter);
+// Keep the normal scan endpoint fast. The legacy hybrid route remains available
+// inside ocrRouter for diagnostics, but is no longer on the main scan hot path.
+app.use("/api/ocr", fastOcrRouter);
 app.use("/api/ocr", ocrRouter);
 
 const PORT = Number(process.env.PORT || 5000);
