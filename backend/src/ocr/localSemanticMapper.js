@@ -35,8 +35,8 @@ const LOCAL_RULES = [
 ];
 
 const STOPWORDS = new Set(["and", "or", "the", "with", "for", "from", "this", "that", "pack", "quality", "premium", "since", "www", "com"]);
-const BRAND_NOISE = new Set(["india", "indian", "foods", "food", "limited", "ltd", "pvt", "private", "company", "products", "product", "industries", "industry", "corporation", "corp", "manufacturing", "manufacturer"]);
-const PRODUCT_HINTS = /\b(?:biscuits?|cookies?|namkeen|chips?|snacks?|noodles?|atta|flour|rice|dal|pulses?|spices?|masala|tea|coffee|juice|drink|beverage|soap|shampoo|detergent|oil|ghee|butter|milk|curd|yogurt|chocolate|candy|toffee|salt|sugar|sauce|ketchup|paste)\b/i;
+const BRAND_NOISE = new Set(["india", "indian", "foods", "food", "limited", "ltd", "pvt", "private", "company", "companies", "products", "product", "industries", "industry", "corporation", "corp", "manufacturing", "manufacturer", "marketed", "packaged"]);
+const PRODUCT_HINTS = /\b(?:biscuits?|cookies?|namkeen|chips?|snacks?|noodles?|atta|flour|rice|dal|pulses?|spices?|masala|tea|coffee|juice|drink|beverage|soap|shampoo|detergent|oil|ghee|butter|milk|curd|yogurt|chocolate|candy|toffee|salt|sugar|sauce|ketchup|paste|powder|cream|paste|wafer|wafers)\b/i;
 
 function normalizeText(value) {
   return String(value || "").replace(/[\u00a0\t]+/g, " ").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, " ").trim();
@@ -83,6 +83,67 @@ function extractValue(type, text) {
   return source;
 }
 
+function looksLikeBrand(text) {
+  const source = normalizeText(text);
+  const lower = source.toLowerCase();
+  if (!source || BRAND_NOISE.has(lower)) return false;
+  if (source.length > 60 || /\d/.test(source)) return false;
+  if (LOCAL_RULES.some((rule) => ruleScore(source, rule) > 0)) return false;
+  if (/^(?:made|with|containing|ingredients?|nutrition|net|best|use|mrp|batch|mfd|mfg|packed|marketed|imported|country|address|www)\b/i.test(source)) return false;
+  return source.length >= 3 && /[A-Za-z]/.test(source);
+}
+
+function brandScore(candidate, candidates) {
+  const text = normalizeText(candidate.text);
+  if (!looksLikeBrand(text)) return -1;
+  let score = 15;
+  if (text === text.toUpperCase()) score += 25;
+  if (/^[A-Z][A-Za-z0-9&' .-]{2,35}$/.test(text)) score += 10;
+  const sameImage = candidates.filter((item) => item.imageIndex === candidate.imageIndex && item.id !== candidate.id);
+  const relativeY = candidate.boundingBox ? (Number(candidate.boundingBox.top) || 0) : null;
+  if (candidate.boundingBox) {
+    const width = Math.max(0, Number(candidate.boundingBox.width) || 0);
+    const height = Math.max(0, Number(candidate.boundingBox.height) || 0);
+    const area = width * height;
+    if (area > 25000 || width >= 300 || height >= 80) score += 20;
+    else if (area > 8000 || width >= 180 || height >= 55) score += 10;
+    if (relativeY !== null && relativeY <= 0.35 * Math.max(1, Math.max(...sameImage.map((item) => Number(item.boundingBox?.top) || 0), relativeY))) score += 8;
+  }
+  if (candidate.confidence >= 0.9) score += 10;
+  else if (candidate.confidence >= 0.75) score += 5;
+  if (PRODUCT_HINTS.test(text)) score -= 12;
+  return score;
+}
+
+function looksLikeProduct(text) {
+  const source = normalizeText(text);
+  if (!source || source.length > 80 || /\b(?:mrp|batch|mfd|mfg|best before|expiry|manufactured by|packed by|marketed by|imported by)\b/i.test(source)) return false;
+  return PRODUCT_HINTS.test(source);
+}
+
+function productScore(candidate) {
+  const text = normalizeText(candidate.text);
+  if (!looksLikeProduct(text)) return -1;
+  let score = 10;
+  if (/^[A-Z][A-Za-z0-9&' .-]{3,50}$/.test(text)) score += 10;
+  if (text === text.toUpperCase()) score += 10;
+  if (candidate.confidence >= 0.85) score += 10;
+  return score;
+}
+
+function makeInferredMappings(candidates, existingMappings) {
+  const mappings = [];
+  if (!existingMappings.some((item) => item.type === "BRAND")) {
+    const bestBrand = [...candidates].map((candidate) => ({ candidate, score: brandScore(candidate, candidates) })).sort((a, b) => b.score - a.score)[0];
+    if (bestBrand && bestBrand.score >= 35) mappings.push(makeMapping(bestBrand.candidate, "BRAND", "LAYOUT_HEURISTIC", bestBrand.candidate.text, bestBrand.score >= 55 ? "MEDIUM" : "LOW", Math.min(0.82, 0.42 + bestBrand.score / 100)));
+  }
+  if (!existingMappings.some((item) => item.type === "PRODUCT_NAME")) {
+    const bestProduct = [...candidates].map((candidate) => ({ candidate, score: productScore(candidate) })).sort((a, b) => b.score - a.score)[0];
+    if (bestProduct && bestProduct.score >= 18) mappings.push(makeMapping(bestProduct.candidate, "PRODUCT_NAME", "LAYOUT_HEURISTIC", bestProduct.candidate.text, "LOW", Math.min(0.72, 0.42 + bestProduct.score / 100)));
+  }
+  return mappings;
+}
+
 function makeMapping(candidate, type, source, value, confidence, confidenceValue) {
   return { id: candidate.id, imageIndex: candidate.imageIndex, type, text: candidate.text, value: value || extractValue(type, candidate.text), confidence, confidenceValue, source, boundingBox: candidate.boundingBox || null };
 }
@@ -122,49 +183,6 @@ async function glinerMap(candidates) {
   const parsed = GlinerResponseSchema.safeParse(data);
   if (!parsed.success) throw new Error("GLiNER2 returned invalid schema");
   return parsed.data.mappings;
-}
-
-function looksLikeBrand(text) {
-  const source = normalizeText(text);
-  if (!source || BRAND_NOISE.has(source.toLowerCase())) return false;
-  if (source.length > 60 || /\d/.test(source)) return false;
-  if (LOCAL_RULES.some((rule) => ruleScore(source, rule) > 0)) return false;
-  if (/^(?:made|with|containing|ingredients?|nutrition|net|best|use|mrp|batch|mfd|mfg|packed|marketed|imported|country|address|www)\b/i.test(source)) return false;
-  return source.length >= 3 && /[A-Za-z]/.test(source);
-}
-
-function brandScore(candidate) {
-  const text = normalizeText(candidate.text);
-  if (!looksLikeBrand(text)) return 0;
-  let score = 20;
-  if (text === text.toUpperCase()) score += 20;
-  if (/^[A-Z][A-Za-z0-9&' .-]{2,35}$/.test(text)) score += 10;
-  if (candidate.boundingBox) {
-    const area = Math.max(0, Number(candidate.boundingBox.width) || 0) * Math.max(0, Number(candidate.boundingBox.height) || 0);
-    if (area >= 0.08) score += 25;
-    else if (area >= 0.03) score += 15;
-  }
-  if (PRODUCT_HINTS.test(text)) score -= 10;
-  return score;
-}
-
-function looksLikeProduct(text) {
-  const source = normalizeText(text);
-  if (!source || source.length > 80 || /\b(?:mrp|batch|mfd|mfg|best before|expiry|manufactured by|packed by|marketed by|imported by)\b/i.test(source)) return false;
-  return PRODUCT_HINTS.test(source);
-}
-
-function makeInferredMappings(candidates, existingMappings) {
-  const mappings = [];
-  if (!existingMappings.some((item) => item.type === "BRAND")) {
-    const bestBrand = [...candidates].sort((a, b) => brandScore(b) - brandScore(a))[0];
-    if (bestBrand && brandScore(bestBrand) >= 30) mappings.push(makeMapping(bestBrand, "BRAND", "LAYOUT_HEURISTIC", bestBrand.text, brandScore(bestBrand) >= 55 ? "MEDIUM" : "LOW", Math.min(0.78, 0.45 + brandScore(bestBrand) / 100)));
-  }
-  if (!existingMappings.some((item) => item.type === "PRODUCT_NAME")) {
-    const product = candidates.find((candidate) => looksLikeProduct(candidate.text));
-    if (product) mappings.push(makeMapping(product, "PRODUCT_NAME", "LAYOUT_HEURISTIC", product.text, "LOW", 0.58));
-  }
-  return mappings;
 }
 
 export async function runSemanticMapper(evidence) {
