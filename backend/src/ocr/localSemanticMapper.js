@@ -122,7 +122,7 @@ function buildFields(mappings) {
 
 async function glinerMap(candidates) {
   const url = process.env.GLINER_SERVICE_URL || "http://localhost:8091";
-  const response = await fetch(`${url}/map`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(Number(process.env.GLINER_TIMEOUT_MS || "45000")), body: JSON.stringify({ candidates }) });
+  const response = await fetch(`${url}/map`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(Number(process.env.GLINER_TIMEOUT_MS || "15000")), body: JSON.stringify({ candidates }) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.detail || data?.error || `GLiNER2 failed (${response.status})`);
   const parsed = GlinerResponseSchema.safeParse(data);
@@ -147,7 +147,7 @@ export async function runSemanticMapper(evidence) {
   // Keep the request bounded so package artwork/text-heavy images cannot stall the scan.
   const semanticCandidates = Array.from(
     new Map(unresolved.map((item) => [`${item.imageIndex}:${normalizeText(item.text).toLowerCase()}`, item])).values()
-  ).slice(0, Number(process.env.GLINER_MAX_CANDIDATES || "64"));
+  ).slice(0, Number(process.env.GLINER_MAX_CANDIDATES || "24"));
 
   let glinerMappings = [];
   let glinerError = null;
