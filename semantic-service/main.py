@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -9,7 +10,12 @@ try:
 except ImportError as exc:
     raise RuntimeError('gliner2 is not installed. Run: pip install "gliner2[local]"') from exc
 
-app = FastAPI(title="PARAKH Local Semantic Mapper")
+@asynccontextmanager
+async def lifespan(_app):
+    get_model()
+    yield
+
+app = FastAPI(title="PARAKH Local Semantic Mapper", lifespan=lifespan)
 MODEL_NAME = os.getenv("GLINER_MODEL", "fastino/gliner2-base-v1")
 USE_CUDA = os.getenv("GLINER_DEVICE", "auto").lower() == "cuda"
 BATCH_SIZE = max(1, int(os.getenv("GLINER_BATCH_SIZE", "8")))
