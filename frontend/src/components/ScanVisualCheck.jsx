@@ -259,7 +259,6 @@ export default function ScanVisualCheck() {
     const sources = getScanImages();
     if (!sources.length) return undefined;
 
-    setDeclarationBusy((current) => current || false);
     Promise.all(sources.map((src) => inspectImageSource(src).catch(() => null)))
       .then((next) => {
         if (cancelled) return;
@@ -360,7 +359,7 @@ export default function ScanVisualCheck() {
         <div className="visual-declaration-header">
           <div>
             <h3>Declaration map</h3>
-            <p>{declarationMessage || "Every declaration returned by OCR is shown here. Bounding boxes are drawn only when the OCR provider supplied coordinates."}</p>
+            <p>{declarationMessage || "Every semantic declaration returned by OCR is shown here. Bounding boxes are drawn only when the physical OCR provider supplied coordinates."}</p>
           </div>
         </div>
         <div className="visual-declaration-browser">
@@ -384,14 +383,14 @@ export default function ScanVisualCheck() {
           {(() => {
             const imageIndex = Math.min(activeDeclarationImage, results.length - 1);
             const image = getScanImages()[imageIndex];
-            const imageDeclarations = declarations.filter((item) => item.imageIndex === imageIndex);
+            const imageDeclarations = declarations.filter((item) => item.imageIndex === imageIndex && item.type !== "OCR_TEXT");
             return <div className="visual-declaration-card is-single">
               <div className="visual-declaration-canvas">
                 <img src={image} alt={`Declaration map for package image ${imageIndex + 1}`} />
-                {imageDeclarations.map((item, index) => item.boundingBox && <div className="visual-declaration-box" key={`${item.type}-${item._index ?? index}`} style={{ left: `${item.boundingBox.left * 100}%`, top: `${item.boundingBox.top * 100}%`, width: `${item.boundingBox.width * 100}%`, height: `${item.boundingBox.height * 100}%` }} title={`${item.type} · ${Math.round(item.confidence * 100)}%`}><span>{item.type.replaceAll("_", " ")}</span></div>)}
+                {imageDeclarations.map((item, index) => item.boundingBox && <div className="visual-declaration-box" key={`${item.type}-${item._index ?? index}`} style={{ left: `${item.boundingBox.left * 100}%`, top: `${item.boundingBox.top * 100}%`, width: `${item.boundingBox.width * 100}%`, height: `${item.boundingBox.height * 100}%` }} title={item.text ? `${item.type.replaceAll("_", " ")} · ${item.text}` : item.type.replaceAll("_", " ")}><span>{item.type.replaceAll("_", " ")}</span></div>)}
               </div>
               <div className="visual-declaration-list">
-                {imageDeclarations.length ? imageDeclarations.map((item, index) => <div key={`${item.type}-${item._index ?? index}`}><strong>{item.type.replaceAll("_", " ")}</strong><span>{item.text || "Declaration detected"}</span><small>{Math.round(item.confidence * 100)}% confidence{item.boundingBox ? " · localized" : " · location uncertain"}</small></div>) : <div className="visual-declaration-empty"><strong>No declaration evidence for this image.</strong><span>The image may have no detected declaration fields, or the OCR provider returned them without an image-level location. This is not treated as an automatic absence.</span></div>}
+                {imageDeclarations.length ? imageDeclarations.map((item, index) => <div key={`${item.type}-${item._index ?? index}`}><strong>{item.type.replaceAll("_", " ")}</strong><span>{item.text || "Declaration detected"}</span><small>{item.boundingBox ? "localized" : "location uncertain"}</small></div>) : <div className="visual-declaration-empty"><strong>No semantic declaration evidence for this image.</strong><span>Physical OCR text is kept as evidence, but unclassified OCR lines are not presented as declarations.</span></div>}
               </div>
             </div>;
           })()}
