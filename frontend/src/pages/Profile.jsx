@@ -1,5 +1,1 @@
-function Profile() {
-  return <h1>Profile</h1>;
-}
-
-export default Profile;
+import {getUser} from "../lib/auth";export default function Profile(){const u=getUser();return <div className="products-page"><div className="page-header"><p className="eyebrow">ACCOUNT</p><h1>Profile</h1><p>Your PARAKH account information.</p></div><section className="product-categories"><div className="ocr-details-grid"><div><strong>Name</strong><span>{u?.name||"Not available"}</span></div><div><strong>Email</strong><span>{u?.email||"Not available"}</span></div><div><strong>Role</strong><span>{u?.role||"USER"}</span></div></div></section></div>}
