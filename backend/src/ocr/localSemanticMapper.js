@@ -29,7 +29,7 @@ const LOCAL_RULES = [
   { type: "IMPORTER", priority: 94, patterns: [/\bimported\s+by\b/i, /\bimporter\b/i] },
   { type: "CONSUMER_CARE", priority: 82, patterns: [/\bcustomer\s*care\b/i, /\bconsumer\s*care\b/i, /\bhelpline\b/i, /\btoll\s*free\b/i] },
   { type: "COUNTRY_OF_ORIGIN", priority: 82, patterns: [/\bcountry\s+of\s+origin\b/i, /\bmade\s+in\b/i, /\bproduct\s+of\b/i] },
-  { type: "FSSAI_LICENSE", priority: 88, patterns: [/\bfssai\b/i, /\blic(?:ense|ence)\s*(?:no|number)?\b/i] },
+  { type: "FSSAI_LICENSE", priority: 88, patterns: [/\bfssai\b/i, /\bfssai\s*(?:no|number|licen[cs]e)?\b/i, /\bfood\s+safety\s+(?:licen[cs]e|number)\b/i] },
   { type: "BARCODE", priority: 78, patterns: [/\b(?:barcode|bar\s*code|ean|upc|gtin)\b/i, /\b[0-9]{8,14}\b/] },
   { type: "ADDRESS", priority: 55, patterns: [/\b(?:address|road|rd\.?|street|st\.?|nagar|district|dist\.?|pin\s*code|pincode)\b/i] },
 ];
@@ -38,6 +38,7 @@ const STOPWORDS = new Set(["and", "or", "the", "with", "for", "from", "this", "t
 const BRAND_NOISE = new Set(["india", "indian", "bharat", "foods", "food", "limited", "ltd", "pvt", "private", "company", "companies", "products", "product", "industries", "industry", "corporation", "corp", "manufacturing", "manufacturer", "marketed", "packaged", "wellness"]);
 const CLAIM_WORDS = /\b(?:tightens?|fights?|gives?|protects?|prevents?|removes?|reduces?|controls?|treats?|helps?|improves?|strengthens?|whitens?|freshens?|cleans?|purifies?|repels?|restores?|supports?|boosts?|enhances?|long\s+life|strong\s+teeth|healthy\s+gums?|gum\s+care|germ\s+protection|germ\s+fight|fresh\s+breath)\b/i;
 const LEGAL_OR_INSTRUCTION = /^(?:for|visit|toll|e-?mail|made\s+in|store\s+in|for\s+sale|marketed|manufactured|mfd|mfg|packed|pkd|imported|consumer|customer|country|address|ingredients?|nutrition|net|best|use|mrp|batch|barcode|license|manufacturing|division|regd|registered)\b/i;
+const VALUE_ONLY_NOISE = /^(?:[a-z]\)?[.)]?|[0-9]{1,3}|[#*]+)$/i;
 const PRODUCT_HINTS = /\b(?:biscuits?|cookies?|namkeen|chips?|snacks?|noodles?|atta|flour|rice|dal|pulses?|spices?|masala|tea|coffee|juice|drink|beverage|soap|shampoo|detergent|oil|ghee|butter|milk|curd|yogurt|chocolate|candy|toffee|salt|sugar|sauce|ketchup|paste|powder|cream|wafer|wafers?|toothpaste|tooth\s*powder|dental|dentifrice|gum|gums|ayurvedic)\b/i;
 
 function normalizeText(value) {
@@ -60,7 +61,7 @@ function ruleScore(text, rule) {
 }
 
 const RELEVANCE_PATTERNS = [
-  /\b(?:mrp|m\.?r\.?p|maximum retail price|net (?:qty|quantity|weight|volume)|batch|lot|mfd|mfg|manufactur(?:ed|er|ing)|packed|pkd|packer|marketed|marketer|imported|importer|best before|use by|expiry|exp\.?|consumer care|customer care|helpline|country of origin|made in|fssai|license|barcode|ean|upc|gtin)\b/i,
+  /\b(?:mrp|m\.?r\.?p|maximum retail price|net (?:qty|quantity|weight|volume)|batch|lot|mfd|mfg|manufactur(?:ed|er|ing)|packed|pkd|packer|marketed|marketer|imported|importer|best before|use by|expiry|exp\.?|consumer care|customer care|helpline|country of origin|made in|fssai|barcode|ean|upc|gtin)\b/i,
   /(?:₹|rs\.?|inr)\s*[0-9oOlI]{1,6}/i,
   /\b[0-9]{8,14}\b/,
   /\b[0-9]{1,6}\s*(?:mg|g|kg|ml|l|cl|oz|lb)\b/i,
@@ -83,6 +84,7 @@ function extractValue(type, text) {
     const match = /\bnet\s*(?:qty|quantity|weight|volume)\b/i.test(source) ? matches[matches.length - 1] : matches[0];
     return `${match[1].replace(/,/g, "")} ${match[2]}`;
   }
+  if (type === "FSSAI_LICENSE") return source.match(/\b\d{14}\b/)?.[0] || null;
   const roleMatch = source.match(/(?:manufactured|mfd|mfg|packed|pkd|marketed|imported)\.?\s+by\s*[:\-]?\s*(.+)$/i);
   if (roleMatch) return roleMatch[1].trim();
   const labeledMatch = source.match(/\b(?:manufacturer|packer|marketer|importer)\s*[:\-]\s*(.+)$/i);
@@ -90,22 +92,22 @@ function extractValue(type, text) {
   return source;
 }
 
-function isGenericBoilerplate(text) {
-  const source = normalizeText(text);
-  if (!source) return true;
-  if (source.length > 80 || /\d/.test(source)) return true;
-  if (LOCAL_RULES.some((rule) => ruleScore(source, rule) > 0)) return true;
-  if (LEGAL_OR_INSTRUCTION.test(source)) return true;
-  if (CLAIM_WORDS.test(source)) return true;
-  if (/^(?:save|offer|free|new|original|natural|pure|premium|best|number|no)\b/i.test(source) && source.split(/\s+/).length <= 4) return true;
-  return false;
-}
-
 function looksLikeBrand(text) {
   const source = normalizeText(text);
   const lower = source.toLowerCase();
   if (!source || BRAND_NOISE.has(lower) || isGenericBoilerplate(source)) return false;
   return source.length >= 3 && /[A-Za-z]/.test(source) && source.split(/\s+/).length <= 4;
+}
+
+function isGenericBoilerplate(text) {
+  const source = normalizeText(text);
+  if (!source || VALUE_ONLY_NOISE.test(source)) return true;
+  if (source.length > 80 || /\d/.test(source)) return true;
+  if (LOCAL_RULES.some((rule) => ruleScore(source, rule) > 0)) return true;
+  if (LEGAL_OR_INSTRUCTION.test(source)) return true;
+  if (CLAIM_WORDS.test(source)) return true;
+  if (/^(?:save|offer|free|new|original|natural|pure|premium|best|number|no)\b/i.test(source) && source.split(/\s+/).length <= 5) return true;
+  return false;
 }
 
 function getBoxMetrics(candidate, candidates) {
@@ -159,26 +161,20 @@ function productNameScore(candidate, candidates) {
 function makeInferredMappings(candidates, existingMappings) {
   const mappings = [];
   if (!existingMappings.some((item) => item.type === "PRODUCT_NAME")) {
-    const bestProduct = [...candidates]
-      .map((candidate) => ({ candidate, score: productNameScore(candidate, candidates) }))
-      .sort((a, b) => b.score - a.score)[0];
-    if (bestProduct && bestProduct.score >= 45) {
-      mappings.push(makeMapping(bestProduct.candidate, "PRODUCT_NAME", "LAYOUT_HEURISTIC", bestProduct.candidate.text, bestProduct.score >= 80 ? "MEDIUM" : "LOW", Math.min(0.86, 0.38 + bestProduct.score / 100)));
-    }
+    const bestProduct = [...candidates].map((candidate) => ({ candidate, score: productNameScore(candidate, candidates) })).sort((a, b) => b.score - a.score)[0];
+    if (bestProduct && bestProduct.score >= 45) mappings.push(makeMapping(bestProduct.candidate, "PRODUCT_NAME", "LAYOUT_HEURISTIC", bestProduct.candidate.text, bestProduct.score >= 80 ? "MEDIUM" : "LOW", Math.min(0.86, 0.38 + bestProduct.score / 100)));
   }
   if (!existingMappings.some((item) => item.type === "BRAND")) {
-    const bestBrand = [...candidates]
-      .map((candidate) => ({ candidate, score: brandScore(candidate, candidates) }))
-      .sort((a, b) => b.score - a.score)[0];
-    if (bestBrand && bestBrand.score >= 40) {
-      mappings.push(makeMapping(bestBrand.candidate, "BRAND", "LAYOUT_HEURISTIC", bestBrand.candidate.text, bestBrand.score >= 70 ? "MEDIUM" : "LOW", Math.min(0.82, 0.4 + bestBrand.score / 100)));
-    }
+    const bestBrand = [...candidates].map((candidate) => ({ candidate, score: brandScore(candidate, candidates) })).sort((a, b) => b.score - a.score)[0];
+    if (bestBrand && bestBrand.score >= 40) mappings.push(makeMapping(bestBrand.candidate, "BRAND", "LAYOUT_HEURISTIC", bestBrand.candidate.text, bestBrand.score >= 70 ? "MEDIUM" : "LOW", Math.min(0.82, 0.4 + bestBrand.score / 100)));
   }
   return mappings;
 }
 
 function makeMapping(candidate, type, source, value, confidence, confidenceValue) {
-  return { id: candidate.id, imageIndex: candidate.imageIndex, type, text: candidate.text, value: value || extractValue(type, candidate.text), confidence, confidenceValue, source, boundingBox: candidate.boundingBox || null };
+  const normalizedValue = value || extractValue(type, candidate.text);
+  if (!normalizedValue) return null;
+  return { id: candidate.id, imageIndex: candidate.imageIndex, type, text: candidate.text, value: normalizedValue, confidence, confidenceValue, source, boundingBox: candidate.boundingBox || null };
 }
 
 function mapToField(type) {
@@ -190,7 +186,7 @@ function fieldObject() { return { value: null, raw: null, confidence: 0, evidenc
 function buildFields(mappings) {
   const fields = {};
   ["productName", "brandName", "manufacturer", "manufacturerAddress", "packer", "packerAddress", "marketer", "importer", "importerAddress", "netQuantity", "unit", "mrp", "currency", "dateOfManufacture", "dateOfPacking", "bestBefore", "expiryDate", "batchNumber", "consumerCarePhone", "consumerCareEmail", "countryOfOrigin", "fssaiLicenseNumber", "barcode"].forEach((key) => { fields[key] = fieldObject(); });
-  for (const mapping of mappings) {
+  for (const mapping of mappings.filter(Boolean)) {
     const key = mapToField(mapping.type);
     if (!key || fields[key].status === "found") continue;
     let value = mapping.value || mapping.text;
@@ -210,7 +206,7 @@ function buildFields(mappings) {
 
 async function glinerMap(candidates) {
   const url = process.env.GLINER_SERVICE_URL || "http://localhost:8091";
-  const timeoutMs = Number(process.env.GLINER_TIMEOUT_MS || "8000");
+  const timeoutMs = Number(process.env.GLINER_TIMEOUT_MS || "5000");
   const response = await fetch(`${url}/map`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(timeoutMs), body: JSON.stringify({ candidates }) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.detail || data?.error || `GLiNER2 failed (${response.status})`);
@@ -225,19 +221,22 @@ export async function runSemanticMapper(evidence) {
   const unresolved = [];
   for (const candidate of candidates) {
     const local = localClassification(candidate);
-    if (local) localMappings.push(makeMapping(candidate, local.type, "LOCAL_RULES", local.value, local.confidence, local.confidenceValue));
-    else if (isRelevantSemanticCandidate(candidate)) unresolved.push(candidate);
+    if (local) {
+      const mapping = makeMapping(candidate, local.type, "LOCAL_RULES", local.value, local.confidence, local.confidenceValue);
+      if (mapping) localMappings.push(mapping);
+    } else if (isRelevantSemanticCandidate(candidate)) unresolved.push(candidate);
   }
-  const semanticCandidates = Array.from(new Map(unresolved.map((item) => [`${item.imageIndex}:${normalizeText(item.text).toLowerCase()}`, item])).values()).slice(0, Number(process.env.GLINER_MAX_CANDIDATES || "16"));
+  const semanticCandidates = Array.from(new Map(unresolved.map((item) => [`${item.imageIndex}:${normalizeText(item.text).toLowerCase()}`, item])).values()).slice(0, Number(process.env.GLINER_MAX_CANDIDATES || "12"));
   let glinerMappings = [];
   let glinerError = null;
-  if (semanticCandidates.length && semanticCandidates.some((candidate) => !candidate.text.match(/^(?:for|visit us|toll free|made in|store in|for sale|mfg|mfd|marketed|manufactured|packed|imported)\b/i))) {
+  const glinerEnabled = process.env.GLINER_SEMANTIC_ENABLED !== "false";
+  if (glinerEnabled && semanticCandidates.length && semanticCandidates.some((candidate) => !candidate.text.match(/^(?:for|visit us|toll free|made in|store in|for sale|mfg|mfd|marketed|manufactured|packed|imported)\b/i))) {
     try { glinerMappings = await glinerMap(semanticCandidates); } catch (error) { glinerError = error.message; }
   }
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
   const acceptedGliner = glinerMappings.map((mapping) => { const candidate = byId.get(String(mapping.id)); return candidate ? makeMapping(candidate, mapping.type, "GLINER2", mapping.value || mapping.text, mapping.confidence, mapping.confidenceValue) : null; }).filter(Boolean);
   const baseMappings = [...localMappings, ...acceptedGliner].filter((item, index, arr) => arr.findIndex((other) => other.id === item.id) === index);
-  const inferredMappings = makeInferredMappings(candidates, baseMappings);
+  const inferredMappings = makeInferredMappings(candidates, baseMappings).filter(Boolean);
   const mappings = [...baseMappings, ...inferredMappings].filter((item, index, arr) => arr.findIndex((other) => other.id === item.id) === index).sort((a, b) => a.imageIndex - b.imageIndex || (a.boundingBox?.top || 0) - (b.boundingBox?.top || 0) || (a.boundingBox?.left || 0) - (b.boundingBox?.left || 0));
   const mappedIds = new Set(mappings.map((item) => item.id));
   const declarationEvidence = mappings.map((item) => ({ imageIndex: item.imageIndex + 1, type: item.type, text: item.text, confidence: item.confidenceValue, boundingBox: item.boundingBox, source: item.source }));
@@ -253,5 +252,7 @@ function localClassification(candidate) {
   if (scored[1] && scored[0].score - scored[1].score < 7) return null;
   const best = scored[0];
   const confidence = best.score >= 95 ? "HIGH" : best.score >= 84 ? "MEDIUM" : "LOW";
-  return { type: best.rule.type, value: extractValue(best.rule.type, candidate.text), confidence, confidenceValue: confidence === "HIGH" ? Math.max(0.86, candidate.confidence) : confidence === "MEDIUM" ? Math.max(0.65, candidate.confidence) : Math.max(0.45, candidate.confidence) };
+  const value = extractValue(best.rule.type, candidate.text);
+  if (!value) return null;
+  return { type: best.rule.type, value, confidence, confidenceValue: confidence === "HIGH" ? Math.max(0.86, candidate.confidence) : confidence === "MEDIUM" ? Math.max(0.65, candidate.confidence) : Math.max(0.45, candidate.confidence) };
 }
