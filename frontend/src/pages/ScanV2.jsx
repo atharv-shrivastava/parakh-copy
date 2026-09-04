@@ -5,9 +5,7 @@ import "../styles/scan.css";
 
 const API_URL = "http://localhost:5000/api";
 const OCR_URL = "http://localhost:5000";
-const PADDLE_OCR_URL = "http://localhost:8081";
 const MAX_IMAGES = 4;
-const MAX_PUTER_IMAGE_SIZE = 10 * 1024 * 1024;
 const OCR_FIELDS = ["productName", "brandName", "manufacturer", "manufacturerAddress", "packer", "packerAddress", "importer", "importerAddress", "netQuantity", "unit", "mrp", "currency", "dateOfManufacture", "dateOfPacking", "bestBefore", "expiryDate", "batchNumber", "consumerCarePhone", "consumerCareEmail", "countryOfOrigin", "fssaiLicenseNumber", "barcode"];
 const EMPTY_FORM = { brandName: "", productName: "", description: "", netQuantity: "", unit: "", mrp: "", barcode: "", shopName: "", shopAddress: "", shopCity: "", shopState: "", notes: "" };
 
@@ -21,48 +19,6 @@ function flattenCategories(nodes, path = []) {
 function fieldValue(result, key) {
   const field = result?.[key];
   return field?.status === "found" && field.value != null ? String(field.value) : "";
-}
-
-function normalizePuter(candidate, rawText) {
-  const result = {};
-  for (const key of OCR_FIELDS) {
-    const field = candidate?.[key];
-    result[key] = field && typeof field === "object"
-      ? { value: field.value ?? null, raw: field.raw ?? null, confidence: Number(field.confidence) || 0, evidence: field.evidence ?? null, status: ["found", "absent", "unreadable", "ambiguous"].includes(field.status) ? field.status : "absent" }
-      : { value: null, raw: null, confidence: 0, evidence: null, status: "absent" };
-  }
-  result.otherDeclarations = Array.isArray(candidate?.otherDeclarations) ? candidate.otherDeclarations : [];
-  result.declarationEvidence = Array.isArray(candidate?.declarationEvidence) ? candidate.declarationEvidence : [];
-  result.rawText = typeof candidate?.rawText === "string" && candidate.rawText.trim() ? candidate.rawText : rawText;
-  result.warnings = Array.isArray(candidate?.warnings) ? candidate.warnings : [];
-  result.unreadableFields = Array.isArray(candidate?.unreadableFields) ? candidate.unreadableFields : [];
-  result.needsReview = Boolean(candidate?.needsReview) || OCR_FIELDS.some((key) => ["unreadable", "ambiguous"].includes(result[key].status) || result[key].status === "found" && result[key].confidence < 0.6);
-  return result;
-}
-
-function extractJson(text) {
-  const source = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
-  const start = source.indexOf("{");
-  if (start < 0) throw new Error("Puter did not return structured OCR JSON.");
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < source.length; i += 1) {
-    const ch = source[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === "{") depth += 1;
-    else if (ch === "}") {
-      depth -= 1;
-      if (depth === 0) return source.slice(start, i + 1);
-    }
-  }
-  throw new Error("Puter returned incomplete structured OCR JSON.");
 }
 
 function readVisualInspection() {
@@ -90,143 +46,24 @@ async function fileToDataUrl(file) {
   return canvas.toDataURL("image/jpeg", 0.72);
 }
 
-async function runGemini(files) {
+async function runOcr(files) {
   const fd = new FormData();
   files.forEach((file) => fd.append("images", file));
   const response = await apiFetch(`${OCR_URL}/api/ocr/analyze`, { method: "POST", body: fd });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error?.message || data.error || data.message || "Hybrid OCR service unavailable.");
-  if (!data.result) throw new Error("Hybrid OCR returned no structured result.");
+  if (!response.ok) {
+    throw new Error(data.error?.message || data.error || data.message || "Local OCR service unavailable.");
+  }
+  if (!data.result) throw new Error("Local OCR returned no structured result.");
   return {
     result: data.result,
-    provider: data.provider || "local",
+    provider: data.provider || "local-rules",
     model: data.model || "local declaration mapper",
     semantic: data.semantic || data.result.semantic || null,
-    detectionProvider: data.detectionProvider || data.detectionProviders?.[0] || null,
-    detectionProviders: data.detectionProviders || [],
+    detectionProvider: data.detectionProvider || "paddleocr",
+    detectionProviders: data.detectionProviders || ["paddleocr"],
+    fallbackReason: data.fallbackReason || null,
   };
-}
-
-async function runPaddle(files) {
-  const fd = new FormData();
-  files.forEach((file) => fd.append("images", file));
-  const response = await fetch(`${PADDLE_OCR_URL}/api/ocr/analyze`, { method: "POST", body: fd });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || data.message || "PaddleOCR service unavailable.");
-  if (!data.result) throw new Error("PaddleOCR returned no result.");
-  return { result: data.result, provider: "paddleocr", model: data.model || "PaddleOCR" };
-}
-
-function normalizeEvidenceText(value) {
-  return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-function enrichDeclarationEvidence(extracted, paddleResult) {
-  const paddleEvidence = Array.isArray(paddleResult?.declarationEvidence) ? paddleResult.declarationEvidence : [];
-  if (!paddleEvidence.length) return extracted;
-  const semanticEvidence = Array.isArray(extracted?.declarationEvidence) ? extracted.declarationEvidence : [];
-  const usedPaddle = new Set();
-  const merged = semanticEvidence.map((item) => {
-    if (item?.boundingBox) return item;
-    const target = normalizeEvidenceText(item?.text);
-    if (!target) return item;
-    let bestIndex = -1;
-    let bestScore = 0;
-    paddleEvidence.forEach((candidate, index) => {
-      if (usedPaddle.has(index) || Number(candidate?.imageIndex) !== Number(item?.imageIndex)) return;
-      const source = normalizeEvidenceText(candidate?.text);
-      if (!source) return;
-      const score = source === target ? 1 : source.includes(target) || target.includes(source) ? 0.8 : 0;
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = index;
-      }
-    });
-    if (bestIndex < 0) return item;
-    usedPaddle.add(bestIndex);
-    return { ...item, boundingBox: paddleEvidence[bestIndex].boundingBox };
-  });
-  // Do not turn every OCR line into a semantic declaration. Unmatched physical OCR
-  // stays available through rawText/OCR evidence, while the Declaration Map contains
-  // only recognized declaration types.
-  return { ...extracted, declarationEvidence: merged, rawText: extracted?.rawText || paddleResult?.rawText || "" };
-}
-
-async function runPuter(files) {
-  const puter = window.puter;
-  if (!puter?.ai?.img2txt) throw new Error("Puter.js OCR fallback is not available.");
-  const chunks = [];
-  for (let index = 0; index < files.length; index += 1) {
-    const file = files[index];
-    if (file.size > MAX_PUTER_IMAGE_SIZE) throw new Error(`Image ${index + 1} exceeds Puter OCR's 10 MB limit.`);
-    const text = String(await puter.ai.img2txt(file, { provider: "mistral" }) || "").trim();
-    if (text) chunks.push(`[IMAGE ${index}]\n${text}`);
-  }
-  const rawText = chunks.join("\n\n");
-  if (!rawText.trim()) throw new Error("Puter OCR found no readable text.");
-  if (!puter.ai.chat) return { result: normalizePuter({}, rawText), provider: "puter-js", model: "mistral img2txt fallback" };
-  const compactPrompt = `Using ONLY this OCR transcript, map the visible package information into JSON. Never invent or infer. Return ALL requested fields, but keep each evidence string short. Also return declarationEvidence as an array with imageIndex, type, text, confidence and normalized boundingBox if the transcript contains location data; otherwise use boundingBox:null. Do not create locations from guesswork. Use this exact top-level shape: { fields: { <field>: {value,raw,confidence,evidence,status} }, otherDeclarations:[], declarationEvidence:[], rawText:"", warnings:[], unreadableFields:[], needsReview:false }. Valid statuses: found, absent, unreadable, ambiguous. Fields: ${OCR_FIELDS.join(", ")}. Transcript:\n${rawText}`;
-  const response = await puter.ai.chat(compactPrompt, { model: "gpt-5-nano", max_tokens: 12000, normalize: true });
-  const responseText = response?.message?.content || response?.content || response?.text || "";
-  if (!responseText) throw new Error("Puter returned an empty structured OCR response.");
-  let candidate;
-  try {
-    candidate = JSON.parse(extractJson(responseText));
-  } catch (error) {
-    const repairedPrompt = `Return ONLY compact valid JSON for this PARAKH OCR transcript. Preserve any useful fields from the transcript, but never invent. Do not include declarationEvidence unless you have a real location. Transcript:\n${rawText}`;
-    const repaired = await puter.ai.chat(repairedPrompt, { model: "gpt-5-nano", max_tokens: 8000, normalize: true });
-    const repairedText = repaired?.message?.content || repaired?.content || repaired?.text || "";
-    candidate = JSON.parse(extractJson(repairedText));
-  }
-  const result = normalizePuter(candidate.fields || candidate, rawText);
-  result.otherDeclarations = Array.isArray(candidate.otherDeclarations) ? candidate.otherDeclarations : result.otherDeclarations;
-  result.declarationEvidence = Array.isArray(candidate.declarationEvidence) ? candidate.declarationEvidence : [];
-  result.warnings = Array.isArray(candidate.warnings) ? candidate.warnings : result.warnings;
-  result.unreadableFields = Array.isArray(candidate.unreadableFields) ? candidate.unreadableFields : result.unreadableFields;
-  result.needsReview = Boolean(candidate.needsReview) || result.needsReview;
-  return { result, provider: "puter-js", model: "gpt-5-nano + mistral OCR" };
-}
-
-async function runOcr(files) {
-  // Backend now handles Cloud Vision + local semantic mapping + Gemini/OpenAI.
-  // Paddle remains in parallel as an independent physical OCR/bounding-box source.
-  const [hybridAttempt, paddleAttempt] = await Promise.allSettled([runGemini(files), runPaddle(files)]);
-  const paddle = paddleAttempt.status === "fulfilled" ? paddleAttempt.value : null;
-  const hybrid = hybridAttempt.status === "fulfilled" ? hybridAttempt.value : null;
-
-  if (hybrid) {
-    const result = enrichDeclarationEvidence(hybrid.result, paddle?.result);
-    return {
-      ...hybrid,
-      result,
-      detectionProvider: paddle ? [hybrid.detectionProvider, "paddleocr"].filter(Boolean).join(" + ") : hybrid.detectionProvider,
-      detectionProviders: Array.from(new Set([...(hybrid.detectionProviders || []), ...(paddle ? ["paddleocr"] : [])].filter(Boolean))),
-      fallbackReason: paddle ? null : `PaddleOCR unavailable: ${paddleAttempt.reason?.message || "unknown error"}`,
-    };
-  }
-
-  try {
-    const fallback = await runPuter(files);
-    const result = enrichDeclarationEvidence(fallback.result, paddle?.result);
-    return {
-      ...fallback,
-      result,
-      detectionProvider: paddle ? "paddleocr" : null,
-      fallbackReason: `Hybrid backend unavailable: ${hybridAttempt.reason?.message || "unknown error"}`,
-    };
-  } catch (puterError) {
-    if (paddle) {
-      return {
-        provider: "paddleocr",
-        model: "PaddleOCR",
-        result: paddle.result,
-        detectionProvider: "paddleocr",
-        detectionProviders: ["paddleocr"],
-        fallbackReason: `Hybrid backend and Puter.js unavailable. PaddleOCR was used as the final OCR fallback. Hybrid: ${hybridAttempt.reason?.message || "unknown error"}; Puter: ${puterError.message}`,
-      };
-    }
-    throw new Error(`All OCR providers failed. Hybrid: ${hybridAttempt.reason?.message || "unknown error"}; Puter: ${puterError.message}`);
-  }
 }
 
 export default function ScanV2() {
@@ -338,7 +175,7 @@ export default function ScanV2() {
   async function analyze() {
     if (!images.length) return setMessage("Add at least one package image first.");
     setAnalyzing(true);
-    setMessage("Running PaddleOCR + Cloud Vision, with local declaration mapping and Gemini/OpenAI fallback...");
+    setMessage("Running local PaddleOCR + declaration mapping...");
     try {
       const info = await runOcr(images.map((item) => item.file));
       const extracted = info.result;
@@ -346,17 +183,13 @@ export default function ScanV2() {
       window.dispatchEvent(new CustomEvent("parakh:declaration-evidence", { detail: extracted.declarationEvidence || [] }));
       const visualInspection = readVisualInspection();
       setProviderInfo(info);
-      const semanticLabel = info.semantic?.provider === "gemini"
-        ? `Gemini ${info.model || "semantic mapper"}`
-        : info.semantic?.provider === "openai"
-          ? `OpenAI ${info.model || "semantic mapper"}`
-          : info.semantic?.provider === "local"
-            ? "Local semantic mapper"
-            : info.provider === "puter-js"
-              ? "Puter.js fallback"
-              : "OCR fallback";
-      const detectionLabel = info.detectionProviders?.length ? info.detectionProviders.join(" + ") : info.detectionProvider || "OCR";
-      const providerMessage = `Hybrid analysis completed with ${semanticLabel} + ${detectionLabel}. Running Rules Engine...`;
+      const semanticLabel = info.semantic?.provider === "gliner2-local"
+        ? "GLiNER2 local semantic mapper"
+        : "Local declaration mapper";
+      const detectionLabel = info.detectionProviders?.length
+        ? info.detectionProviders.join(" + ")
+        : info.detectionProvider || "PaddleOCR";
+      const providerMessage = `${semanticLabel} + ${detectionLabel} completed. Running Rules Engine...`;
       setMessage(providerMessage);
       const response = await apiFetch(`${OCR_URL}/api/ocr/evaluate-structured`, {
         method: "POST",
@@ -400,7 +233,7 @@ export default function ScanV2() {
       }));
       setSelectedCategoryId("");
       setShowRegistration(true);
-      setMessage(info.fallbackReason ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} ${info.fallbackReason}` : "Hybrid OCR and Rules Engine evaluation complete. Select an offline category before registration.");
+      setMessage(info.fallbackReason ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} ${info.fallbackReason}` : "Local OCR and Rules Engine evaluation complete. Select an offline category before registration.");
     } catch (error) {
       setMessage(error.message || "OCR analysis failed.");
     } finally {
