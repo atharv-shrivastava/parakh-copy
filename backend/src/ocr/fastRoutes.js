@@ -40,11 +40,18 @@ async function readImages(files) {
 }
 
 async function handleFastAnalyze(_req, res, files) {
+  const startedAt = Date.now();
   try {
     if (!files.length) return res.status(400).json({ error: { code: "OCR_NO_IMAGES", message: "Upload at least one package image." } });
     const images = await readImages(files);
+    const uploadMs = Date.now() - startedAt;
+    const paddleStartedAt = Date.now();
     const paddle = await analyzeWithPaddle(images);
+    const paddleMs = Date.now() - paddleStartedAt;
+    const semanticStartedAt = Date.now();
     const semantic = await runSemanticMapper(paddle.evidence, config);
+    const semanticMs = Date.now() - semanticStartedAt;
+    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} upload=${uploadMs}ms paddle=${paddleMs}ms semantic=${semanticMs}ms total=${Date.now() - startedAt}ms`);
     res.json({
       result: semantic,
       provider: semantic?.semantic?.provider || "local-rules",
