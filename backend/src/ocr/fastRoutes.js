@@ -8,6 +8,7 @@ import { authenticate } from "../middleware/auth.js";
 import { getOcrConfig } from "./config.js";
 import { runSemanticMapper } from "./localSemanticMapper.js";
 import { interpretPackage } from "./aiSemanticInterpreter.js";
+import { interpretOcrFields } from "./ocrFieldInterpreter.js";
 
 const router = express.Router();
 const config = getOcrConfig();
@@ -315,7 +316,6 @@ async function handleFastAnalyze(_req, res, files) {
     const semanticSanitized = sanitizeSemanticResult(semantic);
     const identitySanitized = sanitizeIdentityFields(semanticSanitized, paddle.rawText);
     const codeSanitized = repairBarcode(identitySanitized, paddle.rawText);
-    const innerPackReference = detectInnerPackReference(paddle.rawText);
     const merged = { ...codeSanitized };
     for (const [key, value] of Object.entries(heuristic)) {
       if (["declarationEvidence", "otherDeclarations", "rawText", "warnings", "semanticMetadata"].includes(key)) continue;
@@ -327,6 +327,20 @@ async function handleFastAnalyze(_req, res, files) {
       const shouldUpgradeIdentity = identityField && value?.status === "found" && value.value != null && candidateConfidence > existingConfidence + 0.08;
       if (shouldFill || shouldUpgradeIdentity) merged[key] = { ...value, source: "SEMANTIC_HEURISTIC" };
     }
+
+    const reconciliation = interpretOcrFields({
+      detections: paddle.evidence,
+      rawText: paddle.rawText,
+      existingFields: merged,
+    });
+    Object.assign(merged, reconciliation.fields);
+    merged.semanticReconciliation = reconciliation.metadata;
+    merged.candidateEvidence = {
+      ...(merged.candidateEvidence || {}),
+      geometryIdentityCandidates: reconciliation.candidateEvidence.identity,
+    };
+
+    const innerPackReference = detectInnerPackReference(paddle.rawText) || reconciliation.innerPackReference.detected;
     if (innerPackReference) {
       merged.innerPackReference = true;
       merged.warnings = Array.from(new Set([...(Array.isArray(merged.warnings) ? merged.warnings : []), "Package text refers to an individual/inner pack for additional batch, date, price, or related details."]));
