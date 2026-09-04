@@ -37,7 +37,7 @@ function rawTextEvidence(rawText, imageIndex = 0) {
       for (let offset = 1; offset <= 6; offset += 1) {
         const next = lines[index + offset];
         if (!next) break;
-        if (/^(?:for|visit us|toll free|e-?mail|made in|store in|for sale|mfg\.? lic\.?|lic\.|www\.)/i.test(next)) break;
+        if (/^(?:for|visit us|toll free|e-?mail|made in|store in|for sale|mfg\.? lic\.?|lic\.)/i.test(next)) break;
         if (/^(?:[0-9]{1,3}|[#*]+|[A-Z]{1,3})$/.test(next)) continue;
         if (type === "MRP" && !/(?:₹|rs\.?|inr)?\s*\d{1,6}(?:[.,]\d{1,2})?/i.test(next)) continue;
         const looksLikeCompany = /\b(?:limited|ltd|private|foods|food|ayurved|herbal|industr(?:y|ies)|division|park|company|pvt)\b/i.test(next);
@@ -52,13 +52,18 @@ function rawTextEvidence(rawText, imageIndex = 0) {
   return evidence;
 }
 
+function optionalTimeoutSignal(envName) {
+  const timeoutMs = Number(process.env[envName] || "0");
+  return Number.isFinite(timeoutMs) && timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+}
+
 async function analyzeOneWithPaddle(image, imageIndex) {
   const formData = new FormData();
   const bytes = Buffer.from(image.base64, "base64");
   formData.append("images", new Blob([bytes], { type: image.mediaType }), `parakh-${imageIndex + 1}.${extension(image.mediaType)}`);
   const paddleUrl = process.env.PADDLE_OCR_URL || "http://localhost:8081";
-  const timeoutMs = Number(process.env.OCR_PADDLE_SINGLE_TIMEOUT_MS || "15000");
-  const response = await fetch(`${paddleUrl}/api/ocr/analyze`, { method: "POST", body: formData, signal: AbortSignal.timeout(timeoutMs) });
+  const signal = optionalTimeoutSignal("OCR_PADDLE_SINGLE_TIMEOUT_MS");
+  const response = await fetch(`${paddleUrl}/api/ocr/analyze`, { method: "POST", body: formData, ...(signal ? { signal } : {}) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(data?.error || data?.message || data?.detail || `PaddleOCR failed (${response.status}).`), { code: "OCR_PADDLE_ERROR", statusCode: 502 });
   const rawEvidence = Array.isArray(data?.result?.declarationEvidence) ? data.result.declarationEvidence : [];
@@ -77,6 +82,87 @@ async function analyzeWithPaddle(images) {
   }
   results.sort((a, b) => a.imageIndex - b.imageIndex);
   return { provider: "paddleocr", model: "PaddleOCR", rawText: results.map((item) => item.rawText).filter(Boolean).join("\n"), evidence: results.flatMap((item) => item.evidence) };
+}
+
+async function analyzeWithPaddleAndGliner(images) {
+  const concurrency = Math.max(1, Math.min(Number(process.env.OCR_PADDLE_CONCURRENCY || "2"), images.length));
+  const results = [];
+  for (let start = 0; start < images.length; start += concurrency) {
+    const batch = images.slice(start, start + concurrency);
+    const batchResults = await Promise.all(batch.map(async (image, offset) => {
+      const imageIndex = start + offset;
+      const paddle = await analyzeOneWithPaddle(image, imageIndex);
+      let semantic;
+      try {
+        semantic = await runSemanticMapper(paddle.evidence, config);
+      } catch (error) {
+        semantic = { error: error?.message || "GLiNER semantic mapping failed.", declarationEvidence: [], otherDeclarations: [], warnings: [error?.message || "GLiNER semantic mapping failed."] };
+      }
+      return { paddle, semantic };
+    }));
+    results.push(...batchResults);
+  }
+  const paddleResults = results.map((item) => item.paddle).sort((a, b) => a.imageIndex - b.imageIndex);
+  const semanticResults = results.map((item) => item.semantic).filter(Boolean);
+  return {
+    paddle: {
+      provider: "paddleocr",
+      model: "PaddleOCR",
+      rawText: paddleResults.map((item) => item.rawText).filter(Boolean).join("\n"),
+      evidence: paddleResults.flatMap((item) => item.evidence),
+    },
+    semanticResults,
+  };
+}
+
+function preferField(existing, candidate) {
+  if (!candidate || candidate.status !== "found" || candidate.value == null || candidate.value === "") return existing;
+  if (!existing || existing.status !== "found" || existing.value == null || existing.value === "") return candidate;
+  return Number(candidate.confidence || 0) > Number(existing.confidence || 0) ? candidate : existing;
+}
+
+function mergeSemanticResults(results) {
+  const fields = {};
+  const declarations = [];
+  const otherDeclarations = [];
+  const warnings = [];
+  const mappedIds = new Set();
+  for (const result of results) {
+    if (!result || result.error) {
+      if (result?.error) warnings.push(result.error);
+      continue;
+    }
+    for (const [key, value] of Object.entries(result)) {
+      if (["declarationEvidence", "otherDeclarations", "rawText", "warnings", "unreadableFields", "needsReview", "semantic"].includes(key)) continue;
+      if (value && typeof value === "object" && "status" in value) fields[key] = preferField(fields[key], value);
+    }
+    if (Array.isArray(result.declarationEvidence)) {
+      for (const item of result.declarationEvidence) {
+        const id = `${item.imageIndex}:${item.type}:${item.text}`;
+        if (!mappedIds.has(id)) {
+          mappedIds.add(id);
+          declarations.push(item);
+        }
+      }
+    }
+    if (Array.isArray(result.otherDeclarations)) {
+      otherDeclarations.push(...result.otherDeclarations);
+    }
+    if (Array.isArray(result.warnings)) warnings.push(...result.warnings.filter(Boolean));
+  }
+  const uniqueOther = Array.from(new Set(otherDeclarations.map((item) => typeof item === "string" ? item : item?.text).map((item) => String(item || "").trim()).filter(Boolean)));
+  const foundCount = Object.values(fields).filter((field) => field?.status === "found").length;
+  const glinerUsed = results.some((result) => result?.semantic?.provider === "gliner2-local");
+  return {
+    ...fields,
+    declarationEvidence: declarations,
+    otherDeclarations: uniqueOther,
+    rawText: results.map((result) => result?.rawText).filter(Boolean).join("\n"),
+    warnings: Array.from(new Set(warnings)),
+    unreadableFields: [],
+    needsReview: false,
+    semantic: { provider: glinerUsed ? "gliner2-local" : "local-rules+layout", mappedFields: foundCount, glinerError: warnings[0] || null },
+  };
 }
 
 function sanitizeSemanticResult(result) {
@@ -125,18 +211,14 @@ async function handleFastAnalyze(_req, res, files) {
     const images = await readImages(files);
     const uploadMs = Date.now() - startedAt;
     const paddleStartedAt = Date.now();
-    const paddle = await analyzeWithPaddle(images);
+    const { paddle, semanticResults } = await analyzeWithPaddleAndGliner(images);
     const paddleMs = Date.now() - paddleStartedAt;
-    const semanticStartedAt = Date.now();
+    const heuristicStartedAt = Date.now();
     const heuristic = interpretPackage({ ocrText: paddle.rawText, detections: paddle.evidence });
-    const heuristicMs = Date.now() - semanticStartedAt;
-    const localStartedAt = Date.now();
-    const originalGlinerFlag = process.env.GLINER_SEMANTIC_ENABLED;
-    if (originalGlinerFlag === undefined) process.env.GLINER_SEMANTIC_ENABLED = "false";
-    let semantic;
-    try { semantic = await runSemanticMapper(paddle.evidence, config); }
-    finally { if (originalGlinerFlag === undefined) delete process.env.GLINER_SEMANTIC_ENABLED; }
-    const localMs = Date.now() - localStartedAt;
+    const heuristicMs = Date.now() - heuristicStartedAt;
+    const semanticStartedAt = Date.now();
+    const semantic = mergeSemanticResults(semanticResults);
+    const semanticMs = Date.now() - semanticStartedAt;
     const sanitized = sanitizeSemanticResult(semantic);
     const merged = { ...sanitized };
     for (const [key, value] of Object.entries(heuristic)) {
@@ -150,8 +232,9 @@ async function handleFastAnalyze(_req, res, files) {
       if (shouldFill || shouldUpgradeIdentity) merged[key] = { ...value, source: "SEMANTIC_HEURISTIC" };
     }
     const totalMs = Date.now() - startedAt;
-    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} upload=${uploadMs}ms paddle=${paddleMs}ms heuristic=${heuristicMs}ms semantic=${localMs}ms total=${totalMs}ms`);
-    res.json({ result: merged, provider: merged?.semantic?.provider || "local-rules", model: merged?.semantic?.provider === "gliner2-local" ? "fastino/gliner2-base-v1" : "local rules", detectionProvider: "paddleocr", detectionProviders: ["paddleocr"], rawText: paddle.rawText, semantic: merged?.semantic || null, fallbackReason: null });
+    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} upload=${uploadMs}ms paddle+gliner=${paddleMs}ms heuristic=${heuristicMs}ms semantic-merge=${semanticMs}ms total=${totalMs}ms`);
+    const semanticWarning = semantic.warnings?.length ? semantic.warnings : null;
+    res.json({ result: merged, provider: merged?.semantic?.provider || "local-rules", model: merged?.semantic?.provider === "gliner2-local" ? "fastino/gliner2-base-v1" : "local rules", detectionProvider: "paddleocr", detectionProviders: ["paddleocr"], rawText: paddle.rawText, semantic: merged?.semantic || null, fallbackReason: semanticWarning?.[0] || null });
   } catch (error) {
     console.error("[ocr:fast]", error);
     const status = error.statusCode || 502;
