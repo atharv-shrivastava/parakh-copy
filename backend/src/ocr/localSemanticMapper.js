@@ -19,11 +19,11 @@ const LOCAL_RULES = [
   { type: "MRP", priority: 100, patterns: [/\bm\.?r\.?p\.?\b/i, /maximum\s+retail\s+price/i, /₹\s*[0-9oOlI]{1,6}(?:[.,][0-9]{1,2})?/i, /(?:rs\.?|inr)\s*[0-9oOlI]{1,6}(?:[.,][0-9]{1,2})?/i] },
   { type: "NET_QUANTITY", priority: 95, patterns: [/\bnet\s*(?:qty|quantity|weight|volume)\b/i, /\b(?:[0-9oOlI]{1,6}(?:[.,][0-9]{1,3})?)\s*(?:g|kg|mg|ml|l|cl|oz|lb)\b/i] },
   { type: "BATCH_NUMBER", priority: 90, patterns: [/\b(?:batch|lot)\s*(?:no|number|#|code)?\b/i, /\bb\.?\s*no\.?\b/i] },
-  { type: "DATE_OF_MANUFACTURE", priority: 88, patterns: [/\b(?:mfd|mfg|manufactured)\b/i, /\bmanufactur(?:ed|e|ing)\s*(?:on|date)?\b/i] },
+  { type: "DATE_OF_MANUFACTURE", priority: 88, patterns: [/\b(?:mfd|mfg)\.?\s*(?:date|dt)\b/i, /\bdate\s+of\s+(?:manufacture|manufacturing)\b/i, /\bmanufactured\s+(?:on|date)\b/i] },
   { type: "DATE_OF_PACKING", priority: 86, patterns: [/\b(?:packed|packing|pkd)\s*(?:on|date)?\b/i] },
   { type: "BEST_BEFORE", priority: 100, patterns: [/\bbest\s*before\b/i, /\buse\s*within\b/i, /\bshelf\s*life\b/i] },
   { type: "EXPIRY_DATE", priority: 99, patterns: [/\b(?:expiry|expires|exp\.?)\b/i, /\buse\s*by\b/i] },
-  { type: "MANUFACTURER", priority: 96, patterns: [/\bmanufactured\s+by\b/i, /\bmanufactured\s+(?:for|at)\b/i, /\bmanufacturer\b/i] },
+  { type: "MANUFACTURER", priority: 98, patterns: [/\b(?:mfd|mfg)\.?\s*by\b/i, /\bmanufactured\s+by\b/i, /\bmanufactured\s+(?:for|at)\b/i, /\bmanufacturer\b/i] },
   { type: "PACKER", priority: 94, patterns: [/\bpacked\s+by\b/i, /\bpacker\b/i] },
   { type: "MARKETER", priority: 94, patterns: [/\bmarketed\s+by\b/i, /\bmarketer\b/i, /\bmarketed\b/i] },
   { type: "IMPORTER", priority: 94, patterns: [/\bimported\s+by\b/i, /\bimporter\b/i] },
@@ -51,32 +51,40 @@ function ruleScore(text, rule) {
 }
 
 const RELEVANCE_PATTERNS = [
-  /\\b(?:mrp|m\\.?r\\.?p|maximum retail price|net (?:qty|quantity|weight|volume)|batch|lot|mfd|mfg|manufactur(?:ed|er|ing)|packed|pkd|packer|marketed|marketer|imported|importer|best before|use by|expiry|exp\\.?|consumer care|customer care|helpline|country of origin|made in|fssai|license|barcode|ean|upc|gtin|brand|product)\\b/i,
-  /(?:₹|rs\\.?|inr)\\s*[0-9oOlI]{1,6}/i,
-  /\\b[0-9]{8,14}\\b/,
-  /\\b[0-9]{1,6}\\s*(?:mg|g|kg|ml|l|cl|oz|lb)\\b/i,
-  /\\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\s+[0-9]{2,4}\\b/i,
+  /\b(?:mrp|m\.?r\.?p|maximum retail price|net (?:qty|quantity|weight|volume)|batch|lot|mfd|mfg|manufactur(?:ed|er|ing)|packed|pkd|packer|marketed|marketer|imported|importer|best before|use by|expiry|exp\.?|consumer care|customer care|helpline|country of origin|made in|fssai|license|barcode|ean|upc|gtin)\b/i,
+  /(?:₹|rs\.?|inr)\s*[0-9oOlI]{1,6}/i,
+  /\b[0-9]{8,14}\b/,
+  /\b[0-9]{1,6}\s*(?:mg|g|kg|ml|l|cl|oz|lb)\b/i,
+  /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+[0-9]{2,4}\b/i,
 ];
 
 function isRelevantSemanticCandidate(candidate) {
   const text = normalizeText(candidate.text);
   if (!text) return false;
-  if (RELEVANCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
-  const words = text.split(/\\s+/).filter(Boolean);
-  if (words.length >= 1 && words.length <= 6 && text.length <= 80) {
-    const alphaWords = words.filter((word) => /[A-Za-z]/.test(word) && !STOPWORDS.has(word.toLowerCase()));
-    return alphaWords.length >= 1;
-  }
-  return false;
+  if (/^for\s+batch\s+no\.?[\s,].*(?:refer|inside|details)/i.test(text)) return false;
+  return RELEVANCE_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 function extractValue(type, text) {
   const source = normalizeText(text);
-  if (type === "MRP") return source.match(/(?:₹|rs\.?|inr)?\s*([0-9][0-9,]*(?:[.,][0-9]{1,2})?)/i)?.[1]?.replace(/,/g, "") || source;
-  if (type === "NET_QUANTITY") {
-    const match = source.match(/([0-9][0-9,.]*)\s*(mg|g|kg|ml|l|cl|oz|lb)\b/i);
-    return match ? `${match[1].replace(/,/g, "")} ${match[2]}` : source;
+
+  if (type === "MRP") {
+    return source.match(/(?:₹|rs\.?|inr)?\s*([0-9][0-9,]*(?:[.,][0-9]{1,2})?)/i)?.[1]?.replace(/,/g, "") || source;
   }
+
+  if (type === "NET_QUANTITY") {
+    const matches = [...source.matchAll(/([0-9][0-9,.]*)\s*(mg|g|kg|ml|l|cl|oz|lb)\b/gi)];
+    if (!matches.length) return source;
+    const match = /\bnet\s*(?:qty|quantity|weight|volume)\b/i.test(source) ? matches[matches.length - 1] : matches[0];
+    return `${match[1].replace(/,/g, "")} ${match[2]}`;
+  }
+
+  const roleMatch = source.match(/(?:manufactured|mfd|mfg|packed|pkd|marketed|imported)\.?\s+by\s*[:\-]?\s*(.+)$/i);
+  if (roleMatch) return roleMatch[1].trim();
+
+  const labeledMatch = source.match(/\b(?:manufacturer|packer|marketer|importer)\s*[:\-]\s*(.+)$/i);
+  if (labeledMatch) return labeledMatch[1].trim();
+
   return source;
 }
 
