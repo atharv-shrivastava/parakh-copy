@@ -93,7 +93,7 @@ export default function EcommerceCategoryPage() {
   async function deleteCategory(id) {
     if (!window.confirm("Delete this category?")) return;
     const response = await apiFetch(`${API_URL}/categories/${id}`, { method: "DELETE" });
-    const data = await response.json().catch(() => null);
+    const data = await response.json().catch(() => ({}));
     if (!response.ok) return setMessage(data?.error || "Delete failed");
     window.location.href = category.parent ? `/ecommerce-products/category/${category.parent.id}` : "/ecommerce-products";
   }
@@ -139,7 +139,7 @@ export default function EcommerceCategoryPage() {
         <label className="filter-date"><span>From date</span><input type="date" value={filters.dateFrom} onChange={(event) => setFilter("dateFrom", event.target.value)} /></label>
         <label className="filter-date"><span>To date</span><input type="date" value={filters.dateTo} onChange={(event) => setFilter("dateTo", event.target.value)} /></label>
       </div>
-      <div className="product-list">{shownProducts.map((product) => <div className="product-row" key={product.id}><Link to={`/products/item/${product.id}`}><div><strong>{product.productName}</strong><span>{product.brandName || "Brand not recorded"}</span></div><div><span>{product.netQuantity || "-"} {product.unit || ""}</span><span>₹{product.mrp ?? "-"} · {product.sourceWebsiteName || "Website not recorded"}</span></div><span className={`compliance-badge ${(product.complianceStatus || "NEEDS_REVIEW").toLowerCase()}`}>{product.complianceStatus || "NEEDS_REVIEW"}</span></Link></div>)}</div>
+      <div className="product-list">{shownProducts.map((product) => <div className="product-row" key={product.id}><Link to={`/products/item/${product.id}`} state={{ product }}><div><strong>{product.productName}</strong><span>{product.brandName || "Brand not recorded"}</span></div><div><span>{product.netQuantity || "-"} {product.unit || ""}</span><span>₹{product.mrp ?? "-"} · {product.sourceWebsiteName || "Website not recorded"}</span></div><span className={`compliance-badge ${(product.complianceStatus || "NEEDS_REVIEW").toLowerCase()}`}>{product.complianceStatus || "NEEDS_REVIEW"}</span></Link></div>)}</div>
       {!shownProducts.length && <p>No e-commerce products in this final category yet.</p>}
     </section>}
   </div>;
