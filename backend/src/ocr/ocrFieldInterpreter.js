@@ -1,6 +1,6 @@
 /**
  * Generic deterministic OCR field interpreter.
- * No Gemini, OpenAI, network calls, ML models, or brand/product hardcoding.
+ * No Gemini, OpenAI, network calls, ML models, or brand hardcoding.
  *
  * Purpose: reconcile noisy OCR detections using labels, spatial proximity,
  * geometry, repetition across images, conservative validation, and explicit
@@ -232,67 +232,51 @@ function pickIdentityPair(detections) {
 
 function findNearbyValue(lines, labelLine, predicate) {
   if (!labelLine.boundingBox) return null;
-  const candidates = lines
-    .filter((line) => line.id !== labelLine.id && sameImage(line, labelLine) && line.boundingBox)
-    .filter((line) => predicate(line.text))
-    .map((line) => {
-      const dy = line.boundingBox.top - labelLine.boundingBox.top;
-      const vertical = dy >= -Math.max(labelLine.boundingBox.height, 10) && dy <= Math.max(labelLine.boundingBox.height * 8, 160);
-      const horizontal = horizontalOverlap(labelLine.boundingBox, line.boundingBox) >= 0.12;
-      return { line, distance: distance(labelLine.boundingBox, line.boundingBox), dy, vertical, horizontal };
-    })
-    .filter((item) => item.vertical && item.horizontal)
-    .sort((a, b) => a.distance - b.distance);
-  return candidates[0]?.line || null;
+  const candidates = lines.filter((candidate) => candidate.id !== labelLine.id && sameImage(candidate, labelLine) && candidate.boundingBox && predicate(candidate.text));
+  if (!candidates.length) return null;
+  const labelBox = labelLine.boundingBox;
+  candidates.sort((a, b) => {
+    const score = (item) => {
+      const box = item.boundingBox;
+      const dy = Math.abs((box.top + box.height / 2) - (labelBox.top + labelBox.height / 2));
+      const dx = Math.abs((box.left + box.width / 2) - (labelBox.left + labelBox.width / 2));
+      const overlap = verticalOverlap(labelBox, box) + horizontalOverlap(labelBox, box);
+      return dy + dx * 0.25 - overlap * 50;
+    };
+    return score(a) - score(b);
+  });
+  return candidates[0] || null;
 }
 
 function parseMRP(lines) {
-  const candidates = [];
   for (const line of lines) {
-    const labelled = MRP_LABEL_RE.test(line.text);
-    const direct = MRP_VALUE_RE.exec(line.text);
-    if (direct && labelled === false && /(?:save|offer|discount)/i.test(line.text)) continue;
-    if (direct) candidates.push({ value: Number(direct[1].replace(/,/g, "")), line, score: 0.82 + (labelled ? 0.08 : 0) });
-    if (labelled && !direct && line.boundingBox) {
-      const valueLine = findNearbyValue(lines, line, (text) => /(?:₹|rs\.?|inr)\s*\d|^\s*\d{1,6}(?:[.,]\d{1,2})?\s*$/.test(text));
-      if (valueLine && !DATE_RE.test(valueLine.text) && !QUANTITY_RE.test(valueLine.text)) {
-        const match = /(?:₹|rs\.?|inr)\s*([0-9][0-9,]*(?:[.,][0-9]{1,2})?)/i.exec(valueLine.text) || [, valueLine.text.trim()];
-        const dist = distance(line.boundingBox, valueLine.boundingBox);
-        const maxDist = Math.max(60, line.boundingBox.height * 8);
-        if (Number.isFinite(dist) && dist <= maxDist * 1.5) candidates.push({ value: Number(String(match[1]).replace(/,/g, "")), line: valueLine, score: 0.66 });
-      }
+    const direct = line.text.match(MRP_VALUE_RE);
+    if (direct) return buildField(direct[1].replace(/,/g, ""), 0.90, line.text, "found", { imageIndex: line.imageIndex });
+    if (!MRP_LABEL_RE.test(line.text)) continue;
+    const valueLine = findNearbyValue(lines, line, (text) => MRP_VALUE_RE.test(text) || /^\s*(?:₹|rs\.?|inr)?\s*\d{1,6}(?:[.,]\d{1,2})?\s*$/i.test(text));
+    if (valueLine) {
+      const match = valueLine.text.match(MRP_VALUE_RE) || valueLine.text.match(/\d{1,6}(?:[.,]\d{1,2})?/);
+      if (match) return buildField(match[1] || match[0], 0.82, `${line.text} ${valueLine.text}`, "found", { imageIndex: valueLine.imageIndex });
     }
   }
-  candidates.sort((a, b) => b.score - a.score);
-  const winner = candidates[0];
-  if (!winner) return buildField(null, 0, null, "not_detected");
-  return buildField(winner.value, winner.score, winner.line.text, "found", { imageIndex: winner.line.imageIndex });
+  return buildField(null, 0);
 }
 
 function parseQuantity(lines) {
-  const candidates = [];
   for (const line of lines) {
-    const matches = [...line.text.matchAll(/\b(\d+(?:[.,]\d+)?)\s*(mg|mcg|g|gm|gms|gram|grams|kg|kgs|ml|l|ltr|ltrs|litre|litres|liter|liters|cl|oz|lb|pcs|pieces|piece|nos)\b/gi)];
-    for (const match of matches) {
-      const value = Number(match[1].replace(/,/g, ""));
-      candidates.push({ value, unit: match[2], line, labelled: /\bnet\s*(?:qty|quantity|weight|volume)\b/i.test(line.text) });
-    }
+    const match = line.text.match(QUANTITY_RE);
+    if (match) return { netQuantity: buildField(match[1], 0.86, line.text, "found", { imageIndex: line.imageIndex }), unit: buildField(match[2], 0.86, line.text, "found", { imageIndex: line.imageIndex }) };
   }
-  candidates.sort((a, b) => Number(b.labelled) - Number(a.labelled));
-  const winner = candidates[0];
-  return winner
-    ? { netQuantity: buildField(winner.value, winner.labelled ? 0.88 : 0.76, winner.line.text, "found", { imageIndex: winner.line.imageIndex }), unit: buildField(winner.unit, winner.labelled ? 0.88 : 0.76, winner.line.text, "found", { imageIndex: winner.line.imageIndex }) }
-    : { netQuantity: buildField(null, 0), unit: buildField(null, 0) };
+  return { netQuantity: buildField(null, 0), unit: buildField(null, 0) };
 }
 
 function parseBatch(lines) {
-  const labelRe = /\b(?:batch|lot|b\.?\s*no\.?)\b/i;
   for (const line of lines) {
-    if (!labelRe.test(line.text)) continue;
-    const inline = line.text.match(/\b(?:batch|lot|b\.?\s*no\.?)\s*[:#\-]?\s*([A-Za-z0-9][A-Za-z0-9./_-]{1,40})/i);
-    if (inline) return buildField(inline[1], 0.82, line.text, "found", { imageIndex: line.imageIndex });
-    const valueLine = findNearbyValue(lines, line, (text) => /^[A-Za-z0-9][A-Za-z0-9./_-]{1,40}$/.test(text.trim()));
-    if (valueLine) return buildField(valueLine.text, 0.66, `${line.text} ${valueLine.text}`, "found", { imageIndex: valueLine.imageIndex });
+    if (!/\b(?:batch|batch\s*no|lot|lot\s*no)\b/i.test(line.text)) continue;
+    const value = line.text.replace(/^.*?\b(?:batch|batch\s*no|lot|lot\s*no)\b\s*[:#\-]?\s*/i, "").trim();
+    if (value && value !== line.text) return buildField(value, 0.84, line.text, "found", { imageIndex: line.imageIndex });
+    const nearby = findNearbyValue(lines, line, (text) => !/\b(?:batch|lot|mfd|mfg|expiry|exp|mrp|maximum\s+retail\s+price)\b/i.test(text) && /^[A-Za-z0-9./_-]{3,30}$/.test(text.trim()));
+    if (nearby) return buildField(nearby.text, 0.76, `${line.text} ${nearby.text}`, "found", { imageIndex: nearby.imageIndex });
   }
   return buildField(null, 0);
 }
@@ -494,6 +478,9 @@ export function interpretOcrFields({ detections = [], rawText = "" } = {}) {
       innerPackReference,
       rawTextPreserved: true,
       noExternalModel: true,
+    },
+    candidateEvidence: {
+      identity: identity.candidates,
     },
     rawText: textOf(rawText),
   };
