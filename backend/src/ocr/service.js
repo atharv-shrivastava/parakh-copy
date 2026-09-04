@@ -71,7 +71,7 @@ export async function analyzePackage(images, config) {
   const prompt = buildPrompt();
   try {
     const contents = [...images.map(({ base64, mediaType }) => ({ inlineData: { mimeType: mediaType, data: base64 } })), { text: prompt }];
-    const response = await ai.models.generateContent({ model: config.model, contents, config: { systemInstruction: prompt, responseMimeType: "application/json", responseSchema: buildResponseSchema(), temperature: 0.1, maxOutputTokens: 4096, httpOptions: { timeout: config.timeoutMs } });
+    const response = await ai.models.generateContent({ model: config.model, contents, config: { systemInstruction: prompt, responseMimeType: "application/json", responseSchema: buildResponseSchema(), temperature: 0.1, maxOutputTokens: 4096, httpOptions: { timeout: config.timeoutMs } } });
     const text = response.text;
     if (!text) { const error = new Error("Gemini returned no text response"); error.code = "OCR_EMPTY_RESPONSE"; error.statusCode = 502; throw error; }
     let parsed;
