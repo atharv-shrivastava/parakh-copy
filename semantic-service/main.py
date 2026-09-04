@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 try:
-    from gliner2 import GLiNER2
+    from gliner2 import AutoExtractor
 except ImportError as exc:
     raise RuntimeError('gliner2 is not installed. Run: pip install "gliner2[local]"') from exc
 
@@ -16,9 +16,9 @@ async def lifespan(_app):
     yield
 
 app = FastAPI(title="PARAKH Local Semantic Mapper", lifespan=lifespan)
-MODEL_NAME = os.getenv("GLINER_MODEL", "fastino/gliner2-base-v1")
+MODEL_NAME = os.getenv("GLINER_MODEL", "fastino/gliner2.5-small-v1")
 USE_CUDA = os.getenv("GLINER_DEVICE", "auto").lower() == "cuda"
-BATCH_SIZE = max(1, int(os.getenv("GLINER_BATCH_SIZE", "8")))
+BATCH_SIZE = max(1, int(os.getenv("GLINER_BATCH_SIZE", "1")))
 
 LABELS = {
     "PRODUCT_NAME": "actual product name, product title, model name, or named food/product sold in the package",
@@ -60,7 +60,7 @@ def get_model():
         kwargs: dict[str, Any] = {}
         if USE_CUDA:
             kwargs["map_location"] = "cuda"
-        model = GLiNER2.from_pretrained(MODEL_NAME, **kwargs)
+        model = AutoExtractor.from_pretrained(MODEL_NAME, **kwargs)
     return model
 
 
@@ -120,7 +120,7 @@ def map_candidates(request: MapRequest):
                 "confidence": "HIGH" if confidence >= 0.82 else "MEDIUM" if confidence >= 0.62 else "LOW",
                 "confidenceValue": confidence,
                 "boundingBox": candidate.boundingBox,
-                "source": "GLINER2",
+                "source": "GLINER2.5-SMALL",
             })
         return {"mappings": mappings, "provider": "gliner2-local", "model": MODEL_NAME}
     except Exception as exc:
