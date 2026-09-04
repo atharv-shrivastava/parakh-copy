@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch, getUser } from "../lib/auth";
 import "../styles/products.css";
+import "../styles/product-controls.css";
 
 const API_URL = "http://localhost:5000/api";
 
@@ -14,10 +15,7 @@ function Products() {
   async function load() {
     setLoading(true); setMessage("");
     try {
-      const [categoryResponse, productResponse] = await Promise.all([
-        apiFetch(`${API_URL}/categories?sourceType=${encodeURIComponent(sourceType)}`),
-        apiFetch(`${API_URL}/products?sourceType=${encodeURIComponent(sourceType)}`),
-      ]);
+      const [categoryResponse, productResponse] = await Promise.all([apiFetch(`${API_URL}/categories?sourceType=${encodeURIComponent(sourceType)}`), apiFetch(`${API_URL}/products?sourceType=${encodeURIComponent(sourceType)}`)]);
       const categoryData = await categoryResponse.json().catch(() => []); const productData = await productResponse.json().catch(() => []);
       if (!categoryResponse.ok) throw new Error(categoryData?.error || "Could not load categories");
       if (!productResponse.ok) throw new Error(productData?.error || "Could not load products");
@@ -25,61 +23,21 @@ function Products() {
     } catch (error) { setMessage(error?.message || "Could not load products"); }
     finally { setLoading(false); }
   }
-
   useEffect(() => { load(); }, [sourceType]);
-
-  const shownProducts = useMemo(() => products.filter((product) => {
-    const haystack = [product.productName, product.brandName, product.category?.name, product.barcode, product.sourceWebsiteName].filter(Boolean).join(" ").toLowerCase();
-    return (!query.trim() || haystack.includes(query.trim().toLowerCase())) && (status === "ALL" || product.complianceStatus === status);
-  }), [products, query, status]);
+  const shownProducts = products.filter((product) => { const haystack = [product.productName, product.brandName, product.category?.name, product.barcode, product.sourceWebsiteName].filter(Boolean).join(" ").toLowerCase(); return (!query.trim() || haystack.includes(query.trim().toLowerCase())) && (status === "ALL" || product.complianceStatus === status); });
   const allSelected = shownProducts.length > 0 && shownProducts.every((product) => selected.includes(product.id));
-
-  async function add() {
-    const categoryName = name.trim(); if (!categoryName || creating) return; setCreating(true); setMessage("");
-    try {
-      const r = await apiFetch(`${API_URL}/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: categoryName, isFinal: final, sourceType, global: false }) });
-      const d = await r.json().catch(() => null); if (!r.ok) throw new Error(d?.error || "Could not add private category");
-      setName(""); setFinal(false); setMessage("Private category created for this account only."); await load();
-    } catch (error) { setMessage(error?.message || "Could not add private category"); }
-    finally { setCreating(false); }
-  }
-
-  async function delCategory(c) {
-    if (c.isSystem || !window.confirm(`Delete ${c.name}? Registered products will be moved to an Uncategorized category.`)) return;
-    const r = await apiFetch(`${API_URL}/categories/${c.id}`, { method: "DELETE" }); const d = await r.json().catch(() => null);
-    setMessage(r.ok ? (d?.message || "Category deleted") : (d?.error || "Delete failed")); if (r.ok) await load();
-  }
-
+  async function add() { const categoryName = name.trim(); if (!categoryName || creating) return; setCreating(true); setMessage(""); try { const r = await apiFetch(`${API_URL}/categories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: categoryName, isFinal: final, sourceType, global: false }) }); const d = await r.json().catch(() => null); if (!r.ok) throw new Error(d?.error || "Could not add private category"); setName(""); setFinal(false); setMessage("Private category created for this account only."); await load(); } catch (error) { setMessage(error?.message || "Could not add private category"); } finally { setCreating(false); } }
+  async function delCategory(c) { if (c.isSystem || !window.confirm(`Delete ${c.name}? Registered products will be moved to an Uncategorized category.`)) return; const r = await apiFetch(`${API_URL}/categories/${c.id}`, { method: "DELETE" }); const d = await r.json().catch(() => null); setMessage(r.ok ? (d?.message || "Category deleted") : (d?.error || "Delete failed")); if (r.ok) await load(); }
   function toggleProduct(id) { setSelected((current) => current.includes(id) ? current.filter((x) => x !== id) : [...current, id]); }
   function toggleAll() { setSelected(allSelected ? [] : shownProducts.map((product) => product.id)); }
-  async function deleteSelected() {
-    if (!selected.length || !window.confirm(`Delete ${selected.length} selected product(s)? Their inspection records will also be removed.`)) return;
-    let failed = 0;
-    for (const id of selected) { try { const r = await apiFetch(`${API_URL}/products/${id}`, { method: "DELETE" }); if (!r.ok) failed += 1; } catch { failed += 1; } }
-    setMessage(failed ? `${failed} product(s) could not be deleted.` : "Selected products deleted successfully."); await load();
-  }
-
+  async function deleteSelected() { if (!selected.length || !window.confirm(`Delete ${selected.length} selected product(s)? Their inspection records will also be removed.`)) return; let failed = 0; for (const id of selected) { try { const r = await apiFetch(`${API_URL}/products/${id}`, { method: "DELETE" }); if (!r.ok) failed += 1; } catch { failed += 1; } } setMessage(failed ? `${failed} product(s) could not be deleted.` : "Selected products deleted successfully."); await load(); }
   const sourceLabel = sourceType === "ECOMMERCE" ? "E-commerce" : "Offline";
-
   return <div className="products-page">
     <div className="page-header"><p className="eyebrow">PRODUCT DATABASE</p><h1>Products & categories</h1><p>{user?.role === "ADMIN" ? "Manage your private categories and registered product records. Global categories are shared and cannot be changed here." : "Global categories are shared. Private categories and registered product records belong to your account."}</p></div>
     {message && <div className="status-message">{message}</div>}
-
-    <section className="product-actions private-category-actions">
-      <div className="private-category-fields"><label><span>Private category name</span><input placeholder="e.g. Festival Snacks" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} disabled={creating} /></label><label><span>Source</span><select value={sourceType} onChange={(e) => setSourceType(e.target.value)} disabled={creating}><option value="OFFLINE">Offline</option><option value="ECOMMERCE">E-commerce</option></select></label><div className="final-control-lock" onContextMenu={(e) => { e.preventDefault(); setAdvancedFinal(true); }} onTouchStart={(e) => { const t = window.setTimeout(() => setAdvancedFinal(true), 800); e.currentTarget.dataset.longPress = t; }} onTouchEnd={(e) => window.clearTimeout(Number(e.currentTarget.dataset.longPress || 0))}>{advancedFinal ? <label className="checkbox-field"><input type="checkbox" checked={final} onChange={(e) => setFinal(e.target.checked)} disabled={creating} /><span>Set as final product category</span></label> : <span className="gesture-hint">Long-press or right-click for advanced final control</span>}</div></div>
-      <div className="product-action-buttons"><button className="primary-button" type="button" onClick={add} disabled={creating || !name.trim()}>{creating ? "Creating..." : `Add private ${sourceLabel} category`}</button><Link className="secondary-action" to="/products/manual-register">Register product manually</Link><Link className="secondary-action" to="/ecommerce-products">E-commerce products</Link></div>
-    </section>
-
+    <section className="product-actions private-category-actions"><div className="private-category-fields"><label><span>Private category name</span><input placeholder="e.g. Festival Snacks" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} disabled={creating} /></label><label><span>Source</span><select value={sourceType} onChange={(e) => setSourceType(e.target.value)} disabled={creating}><option value="OFFLINE">Offline</option><option value="ECOMMERCE">E-commerce</option></select></label><div className="final-control-lock" onContextMenu={(e) => { e.preventDefault(); setAdvancedFinal(true); }} onTouchStart={(e) => { const t = window.setTimeout(() => setAdvancedFinal(true), 800); e.currentTarget.dataset.longPress = t; }} onTouchEnd={(e) => window.clearTimeout(Number(e.currentTarget.dataset.longPress || 0))}>{advancedFinal ? <label className="checkbox-field"><input type="checkbox" checked={final} onChange={(e) => setFinal(e.target.checked)} disabled={creating} /><span>Set as final product category</span></label> : <span className="gesture-hint">Long-press or right-click for advanced final control</span>}</div></div><div className="product-action-buttons"><button className="primary-button" type="button" onClick={add} disabled={creating || !name.trim()}>{creating ? "Creating..." : `Add private ${sourceLabel} category`}</button><Link className="secondary-action" to="/products/manual-register">Register product manually</Link><Link className="secondary-action" to="/ecommerce-products">E-commerce products</Link></div></section>
     <section className="product-categories"><div className="section-heading"><div><h2>{sourceLabel} categories</h2><p>Only {sourceLabel.toLowerCase()} categories are shown. Global categories are shared; private categories remain private to your account.</p></div></div>{loading ? <p>Loading...</p> : <div className="category-grid">{categories.map((c) => <div className="category-item" key={c.id}><Link to={`/products/category/${c.id}`} className="category-card"><h3>{c.name}</h3><p>{c.isSystem ? "Global" : "Private to your account"} · {c.sourceType === "ECOMMERCE" ? "E-commerce" : "Offline"} · {c.isFinalProductType ? "Final category" : "Can contain subcategories"}</p></Link>{!c.isSystem && <button className="delete-category-button" type="button" onClick={() => delCategory(c)}>Delete</button>}</div>)}</div>}{!loading && !categories.length && <p>No {sourceLabel.toLowerCase()} categories available.</p>}</section>
-
-    <section className="product-categories registered-product-section">
-      <div className="section-heading"><div><h2>Registered {sourceLabel} products</h2><p>{shownProducts.length} product record(s) match the current filters.</p></div></div>
-      <div className="product-list-toolbar"><input value={query} onChange={(e) => { setQuery(e.target.value); setSelected([]); }} placeholder="Search product, brand, barcode or category" /><select value={status} onChange={(e) => { setStatus(e.target.value); setSelected([]); }}><option value="ALL">All statuses</option><option value="OKAY">Okay</option><option value="VIOLATION">Violation</option><option value="NEEDS_REVIEW">Needs review</option></select></div>
-      {shownProducts.length > 0 && <div className="bulk-toolbar product-bulk-toolbar"><label><input type="checkbox" checked={allSelected} onChange={toggleAll} /> Select visible</label><span>{selected.length} selected</span><button className="delete-category-button" type="button" disabled={!selected.length} onClick={deleteSelected}>Delete selected</button></div>}
-      {!loading && !shownProducts.length && <div className="status-message">No registered {sourceLabel.toLowerCase()} products match the current filters.</div>}
-      {!loading && shownProducts.length > 0 && <div className="product-list">{shownProducts.map((p) => <div className={`product-row ${selected.includes(p.id) ? "selected" : ""}`} key={p.id}><label className="product-select" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={selected.includes(p.id)} onChange={() => toggleProduct(p.id)} /></label><Link to={`/products/item/${p.id}`}><div><strong>{p.productName}</strong><span>{p.brandName || "Brand not recorded"}</span></div><div><span>{p.netQuantity || "-"} {p.unit || ""}</span><span>{p.sourceWebsiteName || p.inspections?.[0]?.shop?.name || "Source not recorded"}</span></div><span className={`compliance-badge ${(p.complianceStatus || "NEEDS_REVIEW").toLowerCase()}`}>{p.complianceStatus || "NEEDS_REVIEW"}</span></Link></div>)}</div>}
-    </section>
+    <section className="product-categories registered-product-section"><div className="section-heading"><div><h2>Registered {sourceLabel} products</h2><p>{shownProducts.length} product record(s) match the current filters.</p></div></div><div className="product-list-toolbar"><input value={query} onChange={(e) => { setQuery(e.target.value); setSelected([]); }} placeholder="Search product, brand, barcode or category" /><select value={status} onChange={(e) => { setStatus(e.target.value); setSelected([]); }}><option value="ALL">All statuses</option><option value="OKAY">Okay</option><option value="VIOLATION">Violation</option><option value="NEEDS_REVIEW">Needs review</option></select></div>{shownProducts.length > 0 && <div className="bulk-toolbar product-bulk-toolbar"><label><input type="checkbox" checked={allSelected} onChange={toggleAll} /> Select visible</label><span>{selected.length} selected</span><button className="delete-category-button" type="button" disabled={!selected.length} onClick={deleteSelected}>Delete selected</button></div>}{!loading && !shownProducts.length && <div className="status-message">No registered {sourceLabel.toLowerCase()} products match the current filters.</div>}{!loading && shownProducts.length > 0 && <div className="product-list">{shownProducts.map((p) => <div className={`product-row ${selected.includes(p.id) ? "selected" : ""}`} key={p.id}><label className="product-select" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={selected.includes(p.id)} onChange={() => toggleProduct(p.id)} /></label><Link to={`/products/item/${p.id}`}><div><strong>{p.productName}</strong><span>{p.brandName || "Brand not recorded"}</span></div><div><span>{p.netQuantity || "-"} {p.unit || ""}</span><span>{p.sourceWebsiteName || p.inspections?.[0]?.shop?.name || "Source not recorded"}</span></div><span className={`compliance-badge ${(p.complianceStatus || "NEEDS_REVIEW").toLowerCase()}`}>{p.complianceStatus || "NEEDS_REVIEW"}</span></Link></div>)}</div>}</section>
   </div>;
 }
-
 export default Products;
