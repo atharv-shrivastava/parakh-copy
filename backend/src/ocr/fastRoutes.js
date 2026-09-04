@@ -20,6 +20,50 @@ const upload = multer({
 
 function extension(mediaType) { return mediaType === "image/png" ? "png" : mediaType === "image/webp" ? "webp" : "jpg"; }
 
+function rawTextEvidence(rawText, startIndex = 0) {
+  const lines = String(rawText || "")
+    .split(/\r?\n/)
+    .map((text) => text.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const evidence = lines.map((text, index) => ({
+    id: `raw:${index}`,
+    imageIndex: 0,
+    text,
+    confidence: 0.55,
+    boundingBox: null,
+  }));
+
+  const contextualPatterns = [
+    { re: /^(?:mfd\.?|mfg\.?|manufactured)\s+by\s*:?$/i, type: "MANUFACTURER" },
+    { re: /^(?:packed|pkd)\s+by\s*:?$/i, type: "PACKER" },
+    { re: /^marketed\s+by\s*:?$/i, type: "MARKETER" },
+    { re: /^imported\s+by\s*:?$/i, type: "IMPORTER" },
+  ];
+
+  contextualPatterns.forEach(({ re, type }) => {
+    lines.forEach((line, index) => {
+      if (!re.test(line)) return;
+      for (let offset = 1; offset <= 3; offset += 1) {
+        const next = lines[index + offset];
+        if (!next) break;
+        if (/^(?:for|visit us|toll free|e-?mail|made in|store in|for sale|mfg\.? lic\.?|lic\.|www\.)/i.test(next)) break;
+        if (/^\(?[A-Z]\)?\s+/.test(next) || /\b(?:limited|ltd|private|foods|ayurved|herbal|industries|division|centre|centre)\b/i.test(next) || next.length >= 6) {
+          evidence.push({
+            id: `raw-context:${type}:${index}:${offset}`,
+            imageIndex: 0,
+            text: `${line} ${next}`,
+            confidence: 0.62,
+            boundingBox: null,
+          });
+          break;
+        }
+      }
+    });
+  });
+
+  return evidence.slice(startIndex);
+}
+
 async function analyzeWithPaddle(images) {
   const formData = new FormData();
   images.forEach((image, index) => {
@@ -32,7 +76,10 @@ async function analyzeWithPaddle(images) {
   if (!response.ok) throw new Error(data?.error || data?.message || data?.detail || `PaddleOCR failed (${response.status}).`);
   const rawEvidence = Array.isArray(data?.result?.declarationEvidence) ? data.result.declarationEvidence : [];
   const evidence = rawEvidence.map((item, index) => ({ id: String(item?.id ?? `paddle-${Math.max(0, Number(item?.imageIndex || 1) - 1)}:${index}`), imageIndex: Math.max(0, Number(item?.imageIndex || 1) - 1), text: String(item?.text || "").trim(), confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)), boundingBox: item?.boundingBox || null })).filter((item) => item.text);
-  return { provider: "paddleocr", model: data?.model || "PaddleOCR", rawText: String(data?.result?.rawText || evidence.map((item) => item.text).join("\n")), evidence };
+  const rawText = String(data?.result?.rawText || evidence.map((item) => item.text).join("\n"));
+  const missingRawCandidates = rawTextEvidence(rawText);
+  const mergedEvidence = [...evidence, ...missingRawCandidates];
+  return { provider: "paddleocr", model: data?.model || "PaddleOCR", rawText, evidence: mergedEvidence };
 }
 
 async function readImages(files) {
