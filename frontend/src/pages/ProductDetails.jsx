@@ -1,78 +1,36 @@
-import { useEffect, useState } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { apiFetch, getUser } from "../lib/auth";
+import { calculatePenalty, formatINR, OFFENCE_OCCURRENCES, getResponsibilityReference } from "../lib/penalties";
+import { downloadProductPdf } from "../lib/productPdf";
+import { downloadProductRtf } from "../lib/productRtf";
 import "../styles/products.css";
 
 const API_URL = "http://localhost:5000/api";
-
+function parseJson(value, fallback) { if (value == null) return fallback; if (typeof value !== "string") return value; try { return JSON.parse(value); } catch { return fallback; } }
 function ProductDetails() {
-  const { id } = useParams();
-  const location = useLocation();
-  const [product, setProduct] = useState(location.state?.product || null);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadProduct() {
-      try {
-        const response = await fetch(`${API_URL}/products/${id}`);
-        const data = await response.json().catch(() => null);
-        if (!response.ok) throw new Error(data?.error || "Product not found");
-        if (!cancelled) {
-          setProduct(data);
-          setError("");
-        }
-      } catch (err) {
-        if (!cancelled && !location.state?.product) setError(err.message);
-      }
-    }
-
-    loadProduct();
-    return () => { cancelled = true; };
-  }, [id, location.state]);
-
-  if (error) return <div className="products-page"><p>{error}</p></div>;
-  if (!product) return <div className="products-page"><p>Loading product...</p></div>;
-
-  const statusLabel = product.complianceStatus === "VIOLATION" ? "Violation" : product.complianceStatus === "OKAY" ? "Okay" : "Needs review";
-  const latestInspection = product.inspections?.[0];
-
-  return (
-    <div className="products-page">
-      <Link to={`/products/category/${product.categoryId}`} className="back-link">← Back to product type</Link>
-      <div className="page-header">
-        <p className="eyebrow">INSPECTED PRODUCT</p>
-        <h1>{product.productName}</h1>
-        <p>{product.brandName || "Company not recorded"}</p>
-      </div>
-
-      <section className="product-actions">
-        <div className={`compliance-badge ${product.complianceStatus.toLowerCase()}`}>{statusLabel}</div>
-        <h2>Legal Metrology screening</h2>
-        <p>{product.violationReason || "No screening note recorded."}</p>
-      </section>
-
-      <section className="product-categories">
-        <div className="section-heading"><div><h2>Product information</h2></div></div>
-        <div className="product-row">
-          <div><strong>Category</strong><span>{product.category?.name}</span></div>
-          <div><strong>Quantity</strong><span>{product.netQuantity || "Not recorded"} {product.unit || ""}</span></div>
-          <div><strong>MRP</strong><span>{product.mrp === null ? "Not recorded" : `₹${product.mrp}`}</span></div>
-        </div>
-      </section>
-
-      {latestInspection && (
-        <section className="product-categories">
-          <div className="section-heading"><div><h2>Latest inspection</h2></div></div>
-          <div className="product-row">
-            <div><strong>Shop</strong><span>{latestInspection.shop?.name || "Not recorded"}</span></div>
-            <div><strong>Status</strong><span>{latestInspection.status}</span></div>
-            <div><strong>Date</strong><span>{new Date(latestInspection.inspectedAt).toLocaleString()}</span></div>
-          </div>
-        </section>
-      )}
-    </div>
-  );
+  const { id } = useParams(); const navigate = useNavigate(); const location = useLocation();
+  const [product, setProduct] = useState(location.state?.product || null); const [error, setError] = useState(""); const [activeRules, setActiveRules] = useState([]); const [occurrence, setOccurrence] = useState("SECOND");
+  useEffect(() => { let cancelled = false; apiFetch(`${API_URL}/products/${id}`).then(async (r) => { const data = await r.json().catch(() => ({})); if (!r.ok) throw new Error(data.error || "Product not found"); if (!cancelled) { setProduct(data); setError(""); } }).catch((e) => { if (!cancelled && !location.state?.product) setError(e.message); }); return () => { cancelled = true; }; }, [id, location.state]);
+  useEffect(() => { apiFetch(`${API_URL}/rules/active`).then((r) => r.ok ? r.json() : []).then((data) => setActiveRules(Array.isArray(data) ? data : [])).catch(() => setActiveRules([])); }, []);
+  const images = useMemo(() => { if (!product) return []; const value = parseJson(product.imageUrls, []); return Array.isArray(value) && value.length ? value : product.imageUrl ? [product.imageUrl] : []; }, [product]);
+  const stored = useMemo(() => parseJson(product?.ocrData, null), [product]); const ocr = stored?.ocr && typeof stored.ocr === "object" ? stored.ocr : stored; const compliance = stored?.compliance && typeof stored.compliance === "object" ? stored.compliance : null;
+  const allFindings = Array.isArray(compliance?.findings) ? compliance.findings : []; const acceptedFindingIds = Array.isArray(stored?.complianceReview?.acceptedFindingIds) ? new Set(stored.complianceReview.acceptedFindingIds.map(String)) : null;
+  const visibleFindings = allFindings.filter((finding) => { const findingStatus = String(finding?.status || "").toUpperCase(); return findingStatus !== "VIOLATION" || !acceptedFindingIds || acceptedFindingIds.has(String(finding?.findingId)); }); const violations = visibleFindings.filter((finding) => String(finding?.status || "").toUpperCase() === "VIOLATION");
+  const penaltySummary = useMemo(() => calculatePenalty(violations, activeRules, occurrence), [violations, activeRules, occurrence]); const complianceError = stored?.complianceError || null;
+  if (error) return <div className="products-page"><p>{error}</p></div>; if (!product) return <div className="products-page"><p>Loading product...</p></div>;
+  const status = product.complianceStatus || "NEEDS_REVIEW"; const ecommerce = String(product.sourceType || "OFFLINE").toUpperCase() === "ECOMMERCE"; const shop = product.inspections?.[0]?.shop; const sourceName = ecommerce ? (product.sourceWebsiteName || shop?.name || "Website not recorded") : (shop?.name || "Not recorded"); const inspector = product.inspections?.[0]?.worker?.name || product.owner?.name || getUser()?.name || "Unknown"; const path = [product.category?.parent?.parent?.parent, product.category?.parent?.parent, product.category?.parent, product.category].filter(Boolean).map((x) => x.name).join(" → ");
+  function remove() { if (!window.confirm(`Delete ${product.productName}?`)) return; apiFetch(`${API_URL}/products/${id}`, { method: "DELETE" }).then(async (r) => { const data = await r.json(); if (!r.ok) throw new Error(data.error || "Delete failed"); navigate(`/products/category/${product.categoryId}`); }).catch((e) => setError(e.message)); }
+  function downloadPdf() { downloadProductPdf({ product, user: getUser(), violations, penaltySummary }); } function downloadEditableReport() { downloadProductRtf({ product, user: getUser(), violations, penaltySummary }); }
+  return <div className="products-page"><Link to={ecommerce ? `/ecommerce-products/category/${product.categoryId}` : `/products/category/${product.categoryId}`} className="back-link">← Back to {product.category?.name}</Link><div className="page-header"><p className="eyebrow">{ecommerce ? "E-COMMERCE PRODUCT" : "REGISTERED PRODUCT"}</p><h1>{product.productName}</h1><p>{product.brandName || "Company not recorded"}</p><p>{path}</p></div>
+    {images.length > 0 && <section className="product-categories"><div className="section-heading"><div><h2>{ecommerce ? "Listing images" : "Uploaded package images"}</h2><p>{images.length} retained evidence image(s).</p></div></div><div className="product-image-gallery">{images.map((src, i) => <img key={i} src={src} alt={`${ecommerce ? "Listing" : "Package evidence"} ${i + 1}`} />)}</div></section>}
+    <section className="product-actions"><div className={`compliance-badge ${status.toLowerCase()}`}>{status}</div><h2>Inspection</h2><p>{product.violationReason || "No inspection note recorded."}</p><p><strong>{ecommerce ? "Website:" : "Shop:"}</strong> {sourceName}</p>{ecommerce && product.sourceUrl && <p><strong>Source URL:</strong> <a href={product.sourceUrl} target="_blank" rel="noreferrer">Open listing</a></p>}<p><strong>Inspector/User:</strong> {inspector}</p><p><strong>Date:</strong> {new Date(product.inspections?.[0]?.inspectedAt || product.createdAt).toLocaleString()}</p><button className="secondary-action" onClick={downloadPdf}>Download PDF</button><button className="secondary-action" onClick={downloadEditableReport}>Download Editable</button><button className="delete-category-button" onClick={remove}>Delete product</button></section>
+    <section className="product-categories"><div className="section-heading"><div><h2>Product details</h2></div></div><div className="ocr-details-grid"><div><strong>Final category</strong><span>{path || product.category?.name || "Not recorded"}</span></div><div><strong>Quantity</strong><span>{product.netQuantity || "Not recorded"} {product.unit || ""}</span></div><div><strong>MRP</strong><span>{product.mrp == null ? "Not recorded" : `₹${product.mrp}`}</span></div><div><strong>Barcode</strong><span>{product.barcode || "Not recorded"}</span></div><div><strong>{ecommerce ? "Website" : "Shop"}</strong><span>{sourceName}</span></div><div><strong>Source</strong><span>{ecommerce ? "E-commerce listing" : "Offline inspection"}</span></div>{ecommerce && <div><strong>Listing URL</strong><span className="break-anywhere">{product.sourceUrl || "Not recorded"}</span></div>}<div><strong>User profile</strong><span>{product.owner?.name || inspector}</span></div><div><strong>Registered at</strong><span>{new Date(product.createdAt).toLocaleString()}</span></div></div></section>
+    {compliance && <section className="product-categories"><div className="section-heading"><div><h2>Rules Engine assessment</h2><p>{compliance.engineVersion || "Legal Metrology engine"} · {compliance.ruleSetVersion || "Current rule set"}</p></div></div><div className="ocr-details-grid"><div><strong>Engine rules evaluated</strong><span>{compliance.summary?.totalRulesEvaluated ?? allFindings.length}</span></div><div><strong>Accepted violations</strong><span>{violations.length}</span></div><div><strong>Passed</strong><span>{compliance.summary?.passed ?? 0}</span></div><div><strong>Unable to verify</strong><span>{compliance.summary?.unableToVerify ?? 0}</span></div><div><strong>Audit hash</strong><span className="break-anywhere">{compliance.auditHash || "Not available"}</span></div></div>{visibleFindings.length > 0 && <div className="rules-findings">{visibleFindings.map((finding) => <div className={`finding-row ${String(finding.status || "").toLowerCase()}`} key={finding.findingId}><strong>{finding.ruleNumber} · {finding.status}</strong><span>{finding.message}</span>{finding.violationReason && <small>{finding.violationReason}</small>}</div>)}</div>}
+      <div className="finding-review penalty-review"><div><strong>Penalty reference</strong><p>Indicative statutory information only. PARAKH does not determine or impose a fine. Actual penalty, compounding amount, notice, prosecution or other enforcement action is decided by the competent Legal Metrology authority under applicable legal procedure.</p></div><div className="ocr-details-grid"><label><strong>Offence occurrence reference</strong><select value={occurrence} onChange={(e) => setOccurrence(e.target.value)}>{OFFENCE_OCCURRENCES.map((item) => <option key={item} value={item}>{item === "FIRST" ? "First offence" : item === "SECOND" ? "Second offence" : "Subsequent offence"}</option>)}</select></label><div><strong>Minimum indicated</strong><span>{penaltySummary.hasUnknown ? "Not fully determinable" : formatINR(penaltySummary.minTotal)}</span></div><div><strong>Maximum indicated</strong><span>{penaltySummary.hasUnknown ? "Not fully determinable" : formatINR(penaltySummary.maxTotal)}</span></div></div>{penaltySummary.rows.length > 0 && <div className="rules-findings">{penaltySummary.rows.map((row, index) => <div className="finding-row" key={`${row.finding?.findingId || "finding"}-${index}`}><strong>{row.finding?.ruleNumber || row.finding?.ruleCode || "Violation"}</strong><span>{row.detail?.label ? `Reference: ${row.detail.label}` : "No penalty provision configured or verified for this finding."}</span>{row.detail?.provision && <small>Legal reference: {row.detail.provision}</small>}<small>{getResponsibilityReference(row.finding)}</small></div>)}</div>}{penaltySummary.hasUnknown && <small>One or more accepted findings have no verified penalty schedule in PARAKH. They are intentionally excluded from the indicated range rather than being assigned a speculative amount.</small>}<small>Responsibility for a violation is not adjudicated by PARAKH. The applicable party may be the manufacturer, packer, importer, retailer/dealer or another responsible person, depending on the provision and findings established during legal proceedings.</small></div>
+    </section>}
+    {complianceError && <div className="status-message">Rules Engine could not be reached during this inspection: {complianceError.message}</div>}
+    {ocr && <section className="product-categories"><div className="section-heading"><div><h2>OCR declarations</h2><p>Structured OCR evidence retained with this registration.</p></div></div><div className="ocr-details-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && value && typeof value === "object" && value.status === "found").map(([key, value]) => <div key={key}><strong>{key.replace(/([A-Z])/g, " $1")}</strong><span>{String(value.value)}</span>{typeof value.confidence === "number" && <small>{Math.round(value.confidence * 100)}% confidence</small>}</div>)}</div>{ocr.rawText && <details><summary>Raw OCR text</summary><pre className="ocr-raw-text">{ocr.rawText}</pre></details>}</section>}
+  </div>;
 }
-
 export default ProductDetails;
