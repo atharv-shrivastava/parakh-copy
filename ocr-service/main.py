@@ -2,6 +2,7 @@ import io
 import os
 from typing import Any
 
+import numpy as np
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
@@ -114,7 +115,12 @@ async def analyze(images: list[UploadFile] = File(...)):
             raise HTTPException(status_code=400, detail=f"Invalid image {image_index + 1}: {exc}") from exc
 
         width, height = pil_image.size
-        result = ocr.predict(pil_image)
+
+        # PaddleOCR 3.x accepts numpy.ndarray or a file path/string, not PIL.Image.
+        # Convert the decoded RGB image to a numpy array before prediction.
+        image_array = np.asarray(pil_image)
+        result = ocr.predict(image_array)
+
         entries = []
         for item in result:
             entries.extend(extract_result(item, image_index, width, height))
