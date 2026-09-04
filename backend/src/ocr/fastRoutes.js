@@ -77,6 +77,45 @@ async function analyzeWithPaddle(images) {
   return { provider: "paddleocr", model: "PaddleOCR", rawText: results.map((item) => item.rawText).filter(Boolean).join("\n"), evidence: results.flatMap((item) => item.evidence) };
 }
 
+function sanitizeSemanticResult(result) {
+  const next = { ...result };
+  const invalidValuePatterns = [
+    /^for\s+batch\s+no\b.*(?:refer|details|inside)/i,
+    /^for\s+mfg\.?\s+unit\s+address\b/i,
+    /^for\s+consumer\s+care\s+contact\b/i,
+    /^for\s+batch\s+no\b/i,
+  ];
+  const labelOnlyPatterns = [
+    /^(?:mfd\.?|mfg\.?|manufactured)\s+by\s*:?[\s]*$/i,
+    /^(?:packed|pkd)\s+by\s*:?[\s]*$/i,
+    /^marketed\s+by\s*:?[\s]*$/i,
+    /^imported\s+by\s*:?[\s]*$/i,
+    /^(?:consumer|customer)\s+care(?:\s+contact)?\s*:?[\s]*$/i,
+  ];
+  const fieldsToValidate = ["manufacturer", "manufacturerAddress", "marketer", "packer", "importer", "expiryDate", "bestBefore", "batchNumber", "consumerCarePhone", "consumerCareEmail", "fssaiLicenseNumber", "mrp"];
+  for (const key of fieldsToValidate) {
+    const field = next[key];
+    const value = String(field?.value ?? "").trim();
+    const raw = String(field?.raw ?? field?.evidence ?? "").trim();
+    if (!field || field.status !== "found") continue;
+    if (!value || labelOnlyPatterns.some((re) => re.test(value)) || invalidValuePatterns.some((re) => re.test(value))) {
+      next[key] = { ...field, value: null, raw: raw || value, status: "absent", confidence: 0, evidence: raw || null };
+    }
+  }
+
+  const declarations = Array.isArray(next.otherDeclarations) ? next.otherDeclarations : [];
+  next.otherDeclarations = declarations
+    .map((item) => typeof item === "string" ? item : item?.text)
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+
+  next.declarationEvidence = Array.isArray(next.declarationEvidence)
+    ? next.declarationEvidence.map((item) => ({ ...item, text: String(item?.text || "").trim() })).filter((item) => item.text)
+    : [];
+
+  return next;
+}
+
 async function readImages(files) {
   return Promise.all(files.map(async (file) => ({ base64: (await fs.readFile(file.path)).toString("base64"), mediaType: file.mimetype })));
 }
@@ -94,9 +133,17 @@ async function handleFastAnalyze(_req, res, files) {
     const heuristic = interpretPackage({ ocrText: paddle.rawText, detections: paddle.evidence });
     const heuristicMs = Date.now() - semanticStartedAt;
     const localStartedAt = Date.now();
-    const semantic = await runSemanticMapper(paddle.evidence, config);
+    const originalGlinerFlag = process.env.GLINER_SEMANTIC_ENABLED;
+    if (originalGlinerFlag === undefined) process.env.GLINER_SEMANTIC_ENABLED = "false";
+    let semantic;
+    try {
+      semantic = await runSemanticMapper(paddle.evidence, config);
+    } finally {
+      if (originalGlinerFlag === undefined) delete process.env.GLINER_SEMANTIC_ENABLED;
+    }
     const localMs = Date.now() - localStartedAt;
-    const merged = { ...semantic };
+    const sanitized = sanitizeSemanticResult(semantic);
+    const merged = { ...sanitized };
     for (const [key, value] of Object.entries(heuristic)) {
       if (["declarationEvidence", "otherDeclarations", "rawText", "warnings", "semanticMetadata"].includes(key)) continue;
       const existing = merged[key];
