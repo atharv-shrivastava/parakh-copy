@@ -7,6 +7,7 @@ import path from "node:path";
 import { authenticate } from "../middleware/auth.js";
 import { getOcrConfig } from "./config.js";
 import { runSemanticMapper } from "./localSemanticMapper.js";
+import { interpretPackage } from "./aiSemanticInterpreter.js";
 
 const router = express.Router();
 const config = getOcrConfig();
@@ -68,6 +69,43 @@ function rawTextEvidence(rawText) {
   return evidence;
 }
 
+function mergeHeuristicFields(semantic, heuristic) {
+  const next = { ...semantic };
+  const fieldKeys = [
+    "productName", "brandName", "mrp", "netQuantity", "unit", "manufacturer", "manufacturerAddress",
+    "marketer", "packer", "importer", "batchNumber", "dateOfManufacture", "dateOfPacking", "bestBefore",
+    "expiryDate", "consumerCarePhone", "consumerCareEmail", "countryOfOrigin", "fssaiLicenseNumber", "barcode",
+  ];
+
+  for (const key of fieldKeys) {
+    const current = next[key];
+    const candidate = heuristic?.[key];
+    if (!candidate?.value) continue;
+    const currentMissing = !current || current.status !== "found" || !current.value;
+    const heuristicUseful = Number(candidate.confidence || 0) >= 0.55;
+    if (!currentMissing || !heuristicUseful) continue;
+    next[key] = {
+      ...candidate,
+      source: "SEMANTIC_HEURISTIC",
+      imageIndex: current?.imageIndex,
+    };
+  }
+
+  const existingEvidence = Array.isArray(next.declarationEvidence) ? next.declarationEvidence : [];
+  const heuristicEvidence = [
+    ["PRODUCT_NAME", heuristic?.productName], ["BRAND", heuristic?.brandName], ["MRP", heuristic?.mrp], ["NET_QUANTITY", heuristic?.netQuantity],
+    ["MANUFACTURER", heuristic?.manufacturer], ["MARKETER", heuristic?.marketer], ["PACKER", heuristic?.packer], ["IMPORTER", heuristic?.importer],
+    ["COUNTRY_OF_ORIGIN", heuristic?.countryOfOrigin], ["CONSUMER_CARE", heuristic?.consumerCarePhone], ["FSSAI_LICENSE", heuristic?.fssaiLicenseNumber], ["BARCODE", heuristic?.barcode],
+  ];
+  for (const [type, item] of heuristicEvidence) {
+    if (!item?.value) continue;
+    const exists = existingEvidence.some((entry) => entry.type === type && String(entry.text || "").toLowerCase() === String(item.evidence || item.value).toLowerCase());
+    if (!exists) existingEvidence.push({ imageIndex: 1, type, text: String(item.evidence || item.value), confidence: Number(item.confidence || 0.55), boundingBox: null, source: "SEMANTIC_HEURISTIC" });
+  }
+  next.declarationEvidence = existingEvidence;
+  return next;
+}
+
 async function analyzeWithPaddle(images) {
   const formData = new FormData();
   images.forEach((image, index) => {
@@ -99,17 +137,22 @@ async function handleFastAnalyze(_req, res, files) {
     const paddle = await analyzeWithPaddle(images);
     const paddleMs = Date.now() - paddleStartedAt;
     const semanticStartedAt = Date.now();
+    const heuristic = interpretPackage({ ocrText: paddle.rawText, detections: paddle.evidence });
+    const heuristicMs = Date.now() - semanticStartedAt;
+    const localStartedAt = Date.now();
     const semantic = await runSemanticMapper(paddle.evidence, config);
-    const semanticMs = Date.now() - semanticStartedAt;
-    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} upload=${uploadMs}ms paddle=${paddleMs}ms semantic=${semanticMs}ms total=${Date.now() - startedAt}ms`);
+    const localMs = Date.now() - localStartedAt;
+    const merged = mergeHeuristicFields(semantic, heuristic);
+    const totalMs = Date.now() - startedAt;
+    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} upload=${uploadMs}ms paddle=${paddleMs}ms heuristic=${heuristicMs}ms semantic=${localMs}ms total=${totalMs}ms`);
     res.json({
-      result: semantic,
-      provider: semantic?.semantic?.provider || "local-rules",
-      model: semantic?.semantic?.provider === "gliner2-local" ? "fastino/gliner2-base-v1" : "local rules",
+      result: merged,
+      provider: merged?.semantic?.provider || "local-rules",
+      model: merged?.semantic?.provider === "gliner2-local" ? "fastino/gliner2-base-v1" : "local rules",
       detectionProvider: "paddleocr",
       detectionProviders: ["paddleocr"],
       rawText: paddle.rawText,
-      semantic: semantic?.semantic || null,
+      semantic: merged?.semantic || null,
       fallbackReason: null,
     });
   } catch (error) {
