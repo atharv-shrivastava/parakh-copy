@@ -13,7 +13,7 @@ const UNIT_REGEX = /\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|gm|gms|gram|grams|kg|kgs|ml|l|
 const MRP_REGEX = /(?:₹|\brs\.?|\binr\b|\bm\.?r\.?p\.?\b)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i;
 const PHONE_REGEX = /\+?\d[\d\-\s]{7,14}\d/g;
 const EMAIL_REGEX = /[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}/g;
-const BARCODE_REGEX = /\b\d{8,14}\b/g;
+const BARCODE_REGEX = /\b\d{8,18}\b/g;
 const DATE_REGEX = /\b(?:\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{1,2}\s*[A-Za-z]{3,9}\s*\d{2,4}|[A-Za-z]{3,9}\s*\d{4})\b/g;
 
 const FIELD_LABELS = {
@@ -89,6 +89,7 @@ function isNoise(line) {
   if (UNIT_REGEX.test(text) || MRP_REGEX.test(text)) return true;
   if (/^\+?\d[\d\s()\-]{7,}$/.test(text)) return true;
   if (/^\d{6,14}$/.test(text)) return true;
+  if (/^(?:save|offer|free|discount|limited\s+offer|introductory)\b/i.test(text)) return true;
   if (claimScore(text) >= 0.55) return true;
   return false;
 }
@@ -137,26 +138,56 @@ function rankIdentityCandidates(lines, prominence) {
     .sort((a, b) => b.score - a.score);
 }
 
-function pickProductName(candidates) {
-  const top = candidates[0];
-  if (!top || top.score < 0.35) return field(null, 0);
-  const confidence = Math.min(0.93, 0.35 + top.prominence * 0.55 + (top.line.confidence || 0.55) * 0.1 - top.claim * 0.2);
-  return field(top.line.text, confidence, `Largest/prominent non-claim package text; prominence=${top.prominence.toFixed(2)}`);
+function identitySimilarity(a, b) {
+  const left = cleanText(a).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const right = cleanText(b).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (!left || !right) return 0;
+  const rows = Array.from({ length: left.length + 1 }, () => new Array(right.length + 1).fill(0));
+  for (let i = 0; i <= left.length; i += 1) rows[i][0] = i;
+  for (let j = 0; j <= right.length; j += 1) rows[0][j] = j;
+  for (let i = 1; i <= left.length; i += 1) {
+    for (let j = 1; j <= right.length; j += 1) rows[i][j] = Math.min(rows[i - 1][j] + 1, rows[i][j - 1] + 1, rows[i - 1][j - 1] + (left[i - 1] === right[j - 1] ? 0 : 1));
+  }
+  return 1 - rows[left.length][right.length] / Math.max(left.length, right.length);
 }
 
-function pickBrandName(candidates, productName) {
+function repeatCount(line, lines) {
+  return lines.reduce((count, item) => count + (norm(item.text) === norm(line.text) ? 1 : 0), 0);
+}
+
+function nearRepeatCount(line, lines) {
+  return lines.reduce((count, item) => count + (norm(item.text) !== norm(line.text) && identitySimilarity(line.text, item.text) >= 0.82 ? 1 : 0), 0);
+}
+
+function pickProductName(candidates, brandName) {
+  const distinct = candidates.filter((candidate) => !brandName || identitySimilarity(candidate.line.text, brandName.value) < 0.9);
+  const top = distinct[0];
+  if (!top || top.score < 0.35) return field(null, 0);
+  const repeated = repeatCount(top.line, candidates.map((candidate) => candidate.line));
+  const nearRepeated = nearRepeatCount(top.line, candidates.map((candidate) => candidate.line));
+  const confidence = Math.min(0.94, 0.32 + top.prominence * 0.55 + repeated * 0.08 + nearRepeated * 0.05 + (top.line.confidence || 0.55) * 0.08 - top.claim * 0.15);
+  return field(top.line.text, confidence, `Prominent non-promotional identity text; repeats=${repeated + nearRepeated}`);
+}
+
+function pickBrandName(candidates) {
   if (!candidates.length) return field(null, 0);
-  const product = norm(productName?.value);
-  const distinct = candidates.filter((candidate) => norm(candidate.line.text) !== product);
-  if (!distinct.length) return field(null, 0);
-  const top = distinct.find((candidate) => candidate.prominence >= 0.55 && candidate.claim < 0.25) || distinct[0];
-  const confidence = Math.min(0.88, 0.35 + top.prominence * 0.45 + (top.line.confidence || 0.55) * 0.1);
-  return field(top.line.text, confidence, `Distinct prominent identity candidate; prominence=${top.prominence.toFixed(2)}`);
+  const scored = candidates.map((candidate) => {
+    const lines = candidates.map((item) => item.line);
+    const repeated = repeatCount(candidate.line, lines);
+    const nearRepeated = nearRepeatCount(candidate.line, lines);
+    return { candidate, repeated, nearRepeated, score: candidate.score + Math.min(0.36, repeated * 0.14 + nearRepeated * 0.08) };
+  }).sort((a, b) => b.score - a.score);
+  const top = scored[0];
+  if (!top) return field(null, 0);
+  const cluster = scored.filter((item) => identitySimilarity(item.candidate.line.text, top.candidate.line.text) >= 0.82).sort((a, b) => (b.repeated * 2 + b.nearRepeated + b.candidate.score) - (a.repeated * 2 + a.nearRepeated + a.candidate.score));
+  const representative = cluster[0] || top;
+  const confidence = Math.min(0.92, 0.34 + representative.candidate.prominence * 0.44 + representative.repeated * 0.1 + representative.nearRepeated * 0.05 + (representative.candidate.line.confidence || 0.55) * 0.08);
+  return field(representative.candidate.line.text, confidence, `Identity consensus; repeats=${representative.repeated + representative.nearRepeated}`);
 }
 
 function extractMRP(lines) {
   for (const line of lines) {
-    if (/\bsave\b/i.test(line.text)) continue;
+    if (/\bsave\b/i.test(line.text) || /\bdiscount\b/i.test(line.text)) continue;
     const match = line.text.match(MRP_REGEX);
     if (match) return field(Number(match[1].replace(/,/g, "")), 0.84, line.text);
   }
@@ -212,17 +243,35 @@ function extractContact(lines) {
   return { phone, email };
 }
 
+function isValidGtIn(value) {
+  const digits = cleanText(value).replace(/\D/g, "");
+  if (![8, 12, 13, 14].includes(digits.length)) return false;
+  const check = Number(digits[digits.length - 1]);
+  let sum = 0;
+  let weight = 3;
+  for (let index = digits.length - 2; index >= 0; index -= 1) {
+    sum += Number(digits[index]) * weight;
+    weight = weight === 3 ? 1 : 3;
+  }
+  return (10 - (sum % 10)) % 10 === check;
+}
+
 function extractLicenseAndBarcode(lines) {
   let fssai = field(null, 0);
-  let barcode = field(null, 0);
+  const barcodeCandidates = [];
   for (const line of lines) {
     const numbers = line.text.match(BARCODE_REGEX) || [];
     for (const value of numbers) {
       if (value.length === 14 && !fssai.value && /fssai|licen[cs]e/i.test(line.text)) fssai = field(value, 0.78, line.text);
-      else if (!barcode.value && value.length >= 8 && value.length <= 14 && !/phone|mobile|toll|licen[cs]e|batch/i.test(line.text)) barcode = field(value, 0.68, line.text);
+      const context = `${line.text} ${value}`;
+      if (isValidGtIn(value) && !/(phone|mobile|toll|consumer\s+care|licen[cs]e|batch|lot)/i.test(context)) {
+        barcodeCandidates.push({ value, score: value.length === 13 ? 1 : 0.9, evidence: line.text });
+      }
     }
   }
-  return { fssai, barcode };
+  barcodeCandidates.sort((a, b) => b.score - a.score);
+  const winner = barcodeCandidates[0];
+  return { fssai, barcode: winner ? field(winner.value, 0.9, winner.evidence) : field(null, 0) };
 }
 
 function extractDates(lines) {
@@ -242,8 +291,8 @@ export function interpretPackage({ ocrText = "", detections = [] } = {}) {
   const lines = buildLines(ocrText, detections);
   const prominence = prominenceScores(lines);
   const candidates = rankIdentityCandidates(lines, prominence);
-  const productName = pickProductName(candidates);
-  const brandName = pickBrandName(candidates, productName);
+  const brandName = pickBrandName(candidates);
+  const productName = pickProductName(candidates, brandName);
   const { netQuantity, unit } = extractQuantity(lines);
   const contacts = extractContact(lines);
   const extra = extractLicenseAndBarcode(lines);
