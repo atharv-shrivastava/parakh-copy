@@ -238,9 +238,7 @@ export default function ScanV2() {
       window.dispatchEvent(new CustomEvent("parakh:declaration-evidence", { detail: extracted.declarationEvidence || [] }));
       const visualInspection = readVisualInspection();
       setProviderInfo(info);
-      const semanticLabel = info.semantic?.provider === "gliner2-local"
-        ? "GLiNER2 local semantic mapper"
-        : "Local declaration mapper";
+      const semanticLabel = info.semantic?.model || "fastino/gliner2.5-small-v1";
       const detectionLabel = info.detectionProviders?.length
         ? info.detectionProviders.join(" + ")
         : info.detectionProvider || "PaddleOCR";
@@ -375,7 +373,7 @@ export default function ScanV2() {
 
     {images.length > 0 && <ScanVisualCheck />}
 
-    {providerInfo && <section className="ocr-status-grid"><div><strong>Semantic mapper</strong><span>{providerInfo.semantic?.provider === "gemini" ? `${providerInfo.model || "Gemini"}` : providerInfo.semantic?.provider === "openai" ? `${providerInfo.model || "OpenAI"}` : providerInfo.semantic?.provider === "local" ? "Local declaration mapper" : providerInfo.provider || "fallback"}</span></div><div><strong>Text detection</strong><span>{providerInfo.detectionProviders?.length ? providerInfo.detectionProviders.join(" + ") : providerInfo.detectionProvider || "Unavailable"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}/{violations.length}</span></div></section>}
+    {providerInfo && <section className="ocr-status-grid"><div><strong>Semantic mapper</strong><span>{providerInfo.semantic?.model || providerInfo.model || "fastino/gliner2.5-small-v1"}</span></div><div><strong>Text detection</strong><span>{providerInfo.detectionProviders?.length ? providerInfo.detectionProviders.join(" + ") : providerInfo.detectionProvider || "Unavailable"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}/{violations.length}</span></div></section>}
 
     {ocr && <section className="scan-review">
       <div className="section-heading"><div><h2>OCR extraction and rule review</h2><p>Edit the extracted OCR values here, review the Rules Engine findings, then explicitly choose whether to use the extracted details for registration.</p></div></div>
