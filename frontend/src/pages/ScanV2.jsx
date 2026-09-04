@@ -21,6 +21,44 @@ function fieldValue(result, key) {
   return field?.status === "found" && field.value != null ? String(field.value) : "";
 }
 
+function formFromOcr(result) {
+  if (!result) return { ...EMPTY_FORM };
+  const detailLines = [
+    ["Manufacturer", fieldValue(result, "manufacturer")],
+    ["Manufacturer address", fieldValue(result, "manufacturerAddress")],
+    ["Marketer", fieldValue(result, "marketer")],
+    ["Packer", fieldValue(result, "packer")],
+    ["Packer address", fieldValue(result, "packerAddress")],
+    ["Importer", fieldValue(result, "importer")],
+    ["Importer address", fieldValue(result, "importerAddress")],
+    ["Currency", fieldValue(result, "currency")],
+    ["Manufacturing date", fieldValue(result, "dateOfManufacture")],
+    ["Packing date", fieldValue(result, "dateOfPacking")],
+    ["Best before", fieldValue(result, "bestBefore")],
+    ["Expiry date", fieldValue(result, "expiryDate")],
+    ["Batch / lot number", fieldValue(result, "batchNumber")],
+    ["Consumer care phone", fieldValue(result, "consumerCarePhone")],
+    ["Consumer care email", fieldValue(result, "consumerCareEmail")],
+    ["Country of origin", fieldValue(result, "countryOfOrigin")],
+    ["FSSAI license number", fieldValue(result, "fssaiLicenseNumber")],
+  ].filter(([, value]) => value);
+  const declarations = Array.isArray(result.otherDeclarations) ? result.otherDeclarations.filter(Boolean) : [];
+  return {
+    brandName: fieldValue(result, "brandName") || fieldValue(result, "manufacturer"),
+    productName: fieldValue(result, "productName"),
+    netQuantity: fieldValue(result, "netQuantity"),
+    unit: fieldValue(result, "unit"),
+    mrp: fieldValue(result, "mrp").replace(/[^0-9.]/g, ""),
+    barcode: fieldValue(result, "barcode"),
+    description: [...detailLines.map(([label, value]) => `${label}: ${value}`), ...declarations].join("\n"),
+    shopName: "",
+    shopAddress: "",
+    shopCity: "",
+    shopState: "",
+    notes: "",
+  };
+}
+
 function readVisualInspection() {
   try {
     const parsed = JSON.parse(window.sessionStorage.getItem("parakhVisualInspection") || "null");
@@ -82,6 +120,7 @@ export default function ScanV2() {
   const [analyzing, setAnalyzing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showRegistration, setShowRegistration] = useState(false);
+  const [useExtractedData, setUseExtractedData] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -117,6 +156,9 @@ export default function ScanV2() {
     setAcceptedFindingIds([]);
     setProviderInfo(null);
     setSelectedCategoryId("");
+    setShowRegistration(false);
+    setUseExtractedData(false);
+    setForm(EMPTY_FORM);
     window.sessionStorage.removeItem("parakhDeclarationEvidence");
     setMessage("Images ready for analysis.");
   }
@@ -170,6 +212,9 @@ export default function ScanV2() {
     setAcceptedFindingIds([]);
     setProviderInfo(null);
     setSelectedCategoryId("");
+    setShowRegistration(false);
+    setUseExtractedData(false);
+    setForm(EMPTY_FORM);
   }
 
   async function analyze() {
@@ -221,24 +266,35 @@ export default function ScanV2() {
       setCompliance(data.compliance || null);
       setComplianceError(data.complianceError || null);
       setAcceptedFindingIds((data.compliance?.findings || []).filter((finding) => finding.status === "VIOLATION").map((finding) => finding.findingId));
-      setForm((current) => ({
-        ...current,
-        brandName: fieldValue(extracted, "brandName") || fieldValue(extracted, "manufacturer"),
-        productName: fieldValue(extracted, "productName"),
-        netQuantity: fieldValue(extracted, "netQuantity"),
-        unit: fieldValue(extracted, "unit"),
-        mrp: fieldValue(extracted, "mrp"),
-        barcode: fieldValue(extracted, "barcode"),
-        description: [extracted.rawText, ...(extracted.otherDeclarations || [])].filter(Boolean).join("\n"),
-      }));
+      setForm(EMPTY_FORM);
       setSelectedCategoryId("");
-      setShowRegistration(true);
-      setMessage(info.fallbackReason ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} ${info.fallbackReason}` : "Local OCR and Rules Engine evaluation complete. Select an offline category before registration.");
+      setShowRegistration(false);
+      setUseExtractedData(false);
+      setMessage(info.fallbackReason ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} ${info.fallbackReason}` : "Local OCR and Rules Engine evaluation complete. Review the extracted fields, then choose how to register the product.");
     } catch (error) {
       setMessage(error.message || "OCR analysis failed.");
     } finally {
       setAnalyzing(false);
     }
+  }
+
+  function updateOcrField(key, value) {
+    setOcr((current) => current ? { ...current, [key]: { ...current[key], value, status: "found" } } : current);
+  }
+
+  function applyExtractedData() {
+    if (!ocr) return;
+    setForm(formFromOcr(ocr));
+    setUseExtractedData(true);
+    setShowRegistration(true);
+    setMessage("Extracted details applied to the registration form. The values remain editable before registration.");
+  }
+
+  function openManualRegistration() {
+    setForm(EMPTY_FORM);
+    setUseExtractedData(false);
+    setShowRegistration(true);
+    setMessage("Manual registration opened. Enter the final product details yourself.");
   }
 
   function toggle(id) {
@@ -307,11 +363,25 @@ export default function ScanV2() {
 
     {providerInfo && <section className="ocr-status-grid"><div><strong>Semantic mapper</strong><span>{providerInfo.semantic?.provider === "gemini" ? `${providerInfo.model || "Gemini"}` : providerInfo.semantic?.provider === "openai" ? `${providerInfo.model || "OpenAI"}` : providerInfo.semantic?.provider === "local" ? "Local declaration mapper" : providerInfo.provider || "fallback"}</span></div><div><strong>Text detection</strong><span>{providerInfo.detectionProviders?.length ? providerInfo.detectionProviders.join(" + ") : providerInfo.detectionProvider || "Unavailable"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}/{violations.length}</span></div></section>}
 
-    {ocr && <section className="scan-review"><div className="section-heading"><div><h2>OCR extraction and rule review</h2><p>Correct OCR values and deselect false-positive violations before registration.</p></div></div><div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && key !== "semantic" && value && typeof value === "object" && value.status === "found").map(([key, value]) => <div key={key}><strong>{key.replace(/([A-Z])/g, " $1")}</strong><span>{String(value.value)}</span><small>{Math.round(Number(value.confidence || 0) * 100)}% confidence</small></div>)}</div>{complianceError && <div className="status-message">Rules Engine: {complianceError.message || complianceError}</div>}{compliance?.summary && <div className="ocr-summary">Rules: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}{violations.length > 0 && <div className="rule-review-panel"><div className="section-heading"><div><h3>Inspector review</h3><p>Uncheck a false positive. The original engine finding remains in the audit record.</p></div></div>{violations.map((finding) => <label className="rule-review-row" key={finding.findingId}><input type="checkbox" checked={acceptedFindingIds.includes(finding.findingId)} onChange={() => toggle(finding.findingId)} /><span><strong>{finding.ruleCode || finding.ruleNumber}</strong><small>{finding.ruleNumber ? `Rule ${finding.ruleNumber} · ` : ""}{finding.severity || "REVIEW"}</small><em>{finding.message || finding.violationReason || "Violation detected"}</em></span></label>)}<div className="ocr-summary">Accepted violations: <strong>{accepted.length}</strong> of {violations.length}</div></div>}</section>}
+    {ocr && <section className="scan-review">
+      <div className="section-heading"><div><h2>OCR extraction and rule review</h2><p>Edit the extracted OCR values here, review the Rules Engine findings, then explicitly choose whether to use the extracted details for registration.</p></div></div>
+      <div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && key !== "semantic" && value && typeof value === "object" && ["found", "absent", "unreadable", "ambiguous"].includes(value.status)).map(([key, value]) => <label key={key} className="ocr-edit-field"><strong>{key.replace(/([A-Z])/g, " $1")}</strong><input value={value.value ?? ""} placeholder={value.status === "found" ? "Review value" : value.status} onChange={(event) => updateOcrField(key, event.target.value)} /><small>{value.status === "found" ? `${Math.round(Number(value.confidence || 0) * 100)}% confidence` : value.status}</small></label>)}</div>
+      {complianceError && <div className="status-message">Rules Engine: {complianceError.message || complianceError}</div>}
+      {compliance?.summary && <div className="ocr-summary">Rules: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}
+      {violations.length > 0 && <div className="rule-review-panel"><div className="section-heading"><div><h3>Inspector review</h3><p>Uncheck a false positive. The original engine finding remains in the audit record.</p></div></div>{violations.map((finding) => <label className="rule-review-row" key={finding.findingId}><input type="checkbox" checked={acceptedFindingIds.includes(finding.findingId)} onChange={() => toggle(finding.findingId)} /><span><strong>{finding.ruleCode || finding.ruleNumber}</strong><small>{finding.ruleNumber ? `Rule ${finding.ruleNumber} · ` : ""}{finding.severity || "REVIEW"}</small><em>{finding.message || finding.violationReason || "Violation detected"}</em></span></label>)}<div className="ocr-summary">Accepted violations: <strong>{accepted.length}</strong> of {violations.length}</div></div>}
+      <label>Raw OCR<textarea value={ocr.rawText || ""} onChange={(event) => setOcr((current) => ({ ...current, rawText: event.target.value }))} /></label>
+      <div className="extracted-action-panel"><div><strong>Registration actions</strong><span>Use the reviewed OCR details to prefill the final editable registration form, or register manually.</span></div><div className="scan-upload-actions"><button type="button" className="primary-button" onClick={applyExtractedData}>Use extracted details</button><button type="button" className="secondary-button" onClick={openManualRegistration}>Register manually</button></div></div>
+    </section>}
 
-    {!showRegistration && <section className="scan-review registration-form"><div className="section-heading"><div><h2>Register product</h2><p>Manual registration still retains images but skips OCR.</p></div></div><button type="button" className="primary-button" onClick={() => setShowRegistration(true)}>Register Manually</button></section>}
+    {!showRegistration && !ocr && <section className="scan-review registration-form"><div className="section-heading"><div><h2>Register product</h2><p>Manual registration retains the package images but skips OCR.</p></div></div><button type="button" className="primary-button" onClick={openManualRegistration}>Register Manually</button></section>}
 
-    {showRegistration && <form className="scan-review registration-form" onSubmit={save}><div className="section-heading"><div><h2>Register offline product</h2><p>Select from your available offline categories, review the extracted data, then save.</p></div></div><div className="registration-grid"><label>Product name<input value={form.productName} onChange={(event) => update("productName", event.target.value)} required /></label><label>Brand / manufacturer<input value={form.brandName} onChange={(event) => update("brandName", event.target.value)} /></label><label>Net quantity<input value={form.netQuantity} onChange={(event) => update("netQuantity", event.target.value)} /></label><label>Unit<input value={form.unit} onChange={(event) => update("unit", event.target.value)} /></label><label>MRP<input type="number" min="0" step="0.01" value={form.mrp} onChange={(event) => update("mrp", event.target.value)} /></label><label>Barcode<input value={form.barcode} onChange={(event) => update("barcode", event.target.value)} /></label><label>Offline final category<select value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} required><option value="">Select an offline final category</option>{finalCategories.map((category) => <option value={category.id} key={category.id}>{category.path.map((item) => item.name).join(" → ")}</option>)}</select></label><label>Shop name<input value={form.shopName} onChange={(event) => update("shopName", event.target.value)} required /></label><label>Shop address<input value={form.shopAddress} onChange={(event) => update("shopAddress", event.target.value)} /></label><label>City<input value={form.shopCity} onChange={(event) => update("shopCity", event.target.value)} /></label><label>State<input value={form.shopState} onChange={(event) => update("shopState", event.target.value)} /></label><label className="span-2">Description<textarea value={form.description} onChange={(event) => update("description", event.target.value)} /></label><label className="span-2">Inspector notes<textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></label></div><div className="ocr-status-grid"><div><strong>Final status</strong><span>{accepted.length ? "VIOLATION" : compliance?.summary?.unableToVerify || ocr?.needsReview ? "NEEDS_REVIEW" : "OKAY"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}</span></div><div><strong>Images retained</strong><span>{images.length}</span></div></div><div className="scan-upload-actions"><button type="submit" className="primary-button" disabled={saving}>{saving ? "Saving..." : "Register Offline Product"}</button><button type="button" className="secondary-button" onClick={() => setShowRegistration(false)}>Back</button></div></form>}
+    {showRegistration && <form className="scan-review registration-form" onSubmit={save}>
+      <div className="section-heading"><div><h2>Register offline product</h2><p>{useExtractedData ? "Extracted details have been applied. Edit any value below before registering." : "Manual registration. Enter the final product details below."}</p></div></div>
+      {ocr && <div className="extracted-action-panel compact"><div><strong>Extracted details</strong><span>{useExtractedData ? "Applied to this form. All fields remain editable." : "Not applied yet."}</span></div><button type="button" className="secondary-button" onClick={applyExtractedData}>Use extracted details</button></div>}
+      <div className="registration-grid"><label>Product name<input value={form.productName} onChange={(event) => update("productName", event.target.value)} required /></label><label>Brand / manufacturer<input value={form.brandName} onChange={(event) => update("brandName", event.target.value)} /></label><label>Net quantity<input value={form.netQuantity} onChange={(event) => update("netQuantity", event.target.value)} /></label><label>Unit<input value={form.unit} onChange={(event) => update("unit", event.target.value)} /></label><label>MRP<input type="number" min="0" step="0.01" value={form.mrp} onChange={(event) => update("mrp", event.target.value)} /></label><label>Barcode<input value={form.barcode} onChange={(event) => update("barcode", event.target.value)} /></label><label>Offline final category<select value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} required><option value="">Select an offline final category</option>{finalCategories.map((category) => <option value={category.id} key={category.id}>{category.path.map((item) => item.name).join(" → ")}</option>)}</select></label><label>Shop name<input value={form.shopName} onChange={(event) => update("shopName", event.target.value)} required /></label><label>Shop address<input value={form.shopAddress} onChange={(event) => update("shopAddress", event.target.value)} /></label><label>City<input value={form.shopCity} onChange={(event) => update("shopCity", event.target.value)} /></label><label>State<input value={form.shopState} onChange={(event) => update("shopState", event.target.value)} /></label><label className="span-2">Description<textarea value={form.description} onChange={(event) => update("description", event.target.value)} /></label><label className="span-2">Inspector notes<textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></label></div>
+      <div className="ocr-status-grid"><div><strong>Final status</strong><span>{accepted.length ? "VIOLATION" : compliance?.summary?.unableToVerify || ocr?.needsReview ? "NEEDS_REVIEW" : "OKAY"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}</span></div><div><strong>Images retained</strong><span>{images.length}</span></div></div>
+      <div className="scan-upload-actions"><button type="submit" className="primary-button" disabled={saving}>{saving ? "Saving..." : "Register Offline Product"}</button><button type="button" className="secondary-button" onClick={() => setShowRegistration(false)}>Back</button></div>
+    </form>}
 
     {message && <div className="status-message">{message}</div>}
   </div>;
