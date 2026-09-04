@@ -149,6 +149,20 @@ export default function ScanV2() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function resetScan() {
+    if (videoRef.current?.srcObject) videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraOpen(false);
+    setCameraError("");
+    setImages((current) => {
+      current.forEach((item) => URL.revokeObjectURL(item.url));
+      return [];
+    });
+    setEditingImageIndex(null);
+    resetAnalysisState();
+    setMessage("Scan reset. Add new package images to begin again.");
+  }
+
   function resetAnalysisState() {
     setOcr(null);
     setCompliance(null);
@@ -361,6 +375,7 @@ export default function ScanV2() {
         <button type="button" className="primary-button" onClick={openCamera}>Open Camera</button>
         <label className="secondary-button scan-file-button">Upload Images<input type="file" accept="image/*" multiple onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} hidden /></label>
       </div>
+      <div className="scan-upload-actions scan-reset-actions"><button type="button" className="secondary-button" onClick={resetScan} disabled={analyzing || saving}>Stop & Reset Scan</button></div>
       <p className="scan-limit">{images.length}/{MAX_IMAGES} images selected</p>
       {cameraError && <div className="status-message">{cameraError}</div>}
     </section>
