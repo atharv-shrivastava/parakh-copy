@@ -96,9 +96,9 @@ async function runOcr(files, signal) {
   if (!data.result) throw new Error("Local OCR returned no structured result.");
   return {
     result: data.result,
-    provider: data.provider || "local-rules",
-    model: data.model || "local declaration mapper",
-    semantic: data.semantic || data.result.semantic || null,
+    provider: data.provider || "paddleocr",
+    model: data.model || "PaddleOCR",
+    semantic: null,
     detectionProvider: data.detectionProvider || "paddleocr",
     detectionProviders: data.detectionProviders || ["paddleocr"],
     fallbackReason: data.fallbackReason || null,
@@ -249,7 +249,7 @@ export default function ScanV2() {
   async function analyze() {
     if (!images.length) return setMessage("Add at least one package image first.");
     setAnalyzing(true);
-    setMessage("Running local PaddleOCR + declaration mapping...");
+    setMessage("Running PaddleOCR + deterministic field mapping...");
     const controller = new AbortController();
     controllerRef.current?.abort();
     controllerRef.current = controller;
@@ -260,7 +260,7 @@ export default function ScanV2() {
       window.dispatchEvent(new CustomEvent("parakh:declaration-evidence", { detail: extracted.declarationEvidence || [] }));
       const visualInspection = readVisualInspection();
       setProviderInfo(info);
-      const semanticLabel = info.semantic?.model || "fastino/gliner2.5-small-v1";
+      const semanticLabel = "PaddleOCR";
       const detectionLabel = info.detectionProviders?.length
         ? info.detectionProviders.join(" + ")
         : info.detectionProvider || "PaddleOCR";
@@ -301,7 +301,7 @@ export default function ScanV2() {
       setSelectedCategoryId("");
       setShowRegistration(false);
       setUseExtractedData(false);
-      setMessage(info.fallbackReason ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} ${info.fallbackReason}` : "Local OCR and Rules Engine evaluation complete. Review the extracted fields, then choose how to register the product.");
+      setMessage(info.fallbackReason ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} ${info.fallbackReason}` : "PaddleOCR and Rules Engine evaluation complete. Review the extracted fields, then choose how to register the product.");
     } catch (error) {
       if (error?.name === "AbortError") return;
       setMessage(error.message || "OCR analysis failed.");
@@ -385,8 +385,8 @@ export default function ScanV2() {
       <div className="scan-upload-actions">
         <button type="button" className="primary-button" onClick={openCamera}>Open Camera</button>
         <label className="secondary-button scan-file-button">Upload Images<input type="file" accept="image/*" multiple onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} hidden /></label>
+        <button type="button" className="secondary-button" onClick={resetScan}>Stop & Reset Scan</button>
       </div>
-      <div className="scan-upload-actions scan-reset-actions"><button type="button" className="secondary-button" onClick={resetScan}>Stop & Reset Scan</button></div>
       <p className="scan-limit">{images.length}/{MAX_IMAGES} images selected</p>
       {cameraError && <div className="status-message">{cameraError}</div>}
     </section>
@@ -399,7 +399,7 @@ export default function ScanV2() {
 
     {images.length > 0 && <ScanVisualCheck />}
 
-    {providerInfo && <section className="ocr-status-grid"><div><strong>Semantic mapper</strong><span>{providerInfo.semantic?.model || providerInfo.model || "fastino/gliner2.5-small-v1"}</span></div><div><strong>Text detection</strong><span>{providerInfo.detectionProviders?.length ? providerInfo.detectionProviders.join(" + ") : providerInfo.detectionProvider || "Unavailable"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}/{violations.length}</span></div></section>}
+    {providerInfo && <section className="ocr-status-grid"><div><strong>OCR / field mapper</strong><span>PaddleOCR + local deterministic mapping</span></div><div><strong>Text detection</strong><span>{providerInfo.detectionProviders?.length ? providerInfo.detectionProviders.join(" + ") : providerInfo.detectionProvider || "PaddleOCR"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}/{violations.length}</span></div></section>}
 
     {ocr && <section className="scan-review">
       <div className="section-heading"><div><h2>OCR extraction and rule review</h2><p>Edit the extracted OCR values here, review the Rules Engine findings, then explicitly choose whether to use the extracted details for registration.</p></div></div>
