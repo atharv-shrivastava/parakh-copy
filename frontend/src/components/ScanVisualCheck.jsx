@@ -139,14 +139,34 @@ function normalizeBoundingBox(box) {
   const width = Number(box.width ?? box.w);
   const height = Number(box.height ?? box.h);
   if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
-  const scale = [left, top, width, height].some((value) => value > 1) ? 0.01 : 1;
-  const normalized = { left: left * scale, top: top * scale, width: width * scale, height: height * scale };
-  if (normalized.left < 0 || normalized.top < 0 || normalized.width <= 0 || normalized.height <= 0) return null;
+
+  // PaddleOCR returns normalized coordinates in the 0..1 range.
+  // Never divide by 100 here: doing so shifts valid boxes into the top-left corner.
+  if ([left, top, width, height].every((value) => value >= 0 && value <= 1)) {
+    const safeLeft = Math.min(1, left);
+    const safeTop = Math.min(1, top);
+    return {
+      left: safeLeft,
+      top: safeTop,
+      width: Math.min(1 - safeLeft, width),
+      height: Math.min(1 - safeTop, height),
+    };
+  }
+
+  // Legacy pixel-coordinate evidence cannot be converted reliably without the
+  // source image dimensions, so do not render a fabricated position.
+  return null;
+}
+
+function declarationLabelStyle(box) {
+  const nearTop = box.top < 0.08;
+  const nearRight = box.left + box.width > 0.72;
   return {
-    left: Math.min(1, normalized.left),
-    top: Math.min(1, normalized.top),
-    width: Math.min(1 - Math.min(1, normalized.left), normalized.width),
-    height: Math.min(1 - Math.min(1, normalized.top), normalized.height),
+    top: nearTop ? "calc(100% + 4px)" : "-22px",
+    bottom: "auto",
+    left: nearRight ? "auto" : "-2px",
+    right: nearRight ? "-2px" : "auto",
+    transform: nearRight ? "translateX(0)" : "none",
   };
 }
 
@@ -387,7 +407,19 @@ export default function ScanVisualCheck() {
             return <div className="visual-declaration-card is-single">
               <div className="visual-declaration-canvas">
                 <img src={image} alt={`Declaration map for package image ${imageIndex + 1}`} />
-                {imageDeclarations.map((item, index) => item.boundingBox && <div className="visual-declaration-box" key={`${item.type}-${item._index ?? index}`} style={{ left: `${item.boundingBox.left * 100}%`, top: `${item.boundingBox.top * 100}%`, width: `${item.boundingBox.width * 100}%`, height: `${item.boundingBox.height * 100}%` }} title={item.text ? `${item.type.replaceAll("_", " ")} · ${item.text}` : item.type.replaceAll("_", " ")}><span>{item.type.replaceAll("_", " ")}</span></div>)}
+                {imageDeclarations.map((item, index) => item.boundingBox && <div
+  className="visual-declaration-box"
+  key={`${item.type}-${item._index ?? index}`}
+  style={{
+    left: `${item.boundingBox.left * 100}%`,
+    top: `${item.boundingBox.top * 100}%`,
+    width: `${item.boundingBox.width * 100}%`,
+    height: `${item.boundingBox.height * 100}%`,
+  }}
+  title={item.text ? `${item.type.replaceAll("_", " ")} · ${item.text}` : item.type.replaceAll("_", " ")}
+>
+  <span style={declarationLabelStyle(item.boundingBox)}>{item.type.replaceAll("_", " ")}</span>
+</div>)}
               </div>
               <div className="visual-declaration-list">
                 {imageDeclarations.length ? imageDeclarations.map((item, index) => <div key={`${item.type}-${item._index ?? index}`}><strong>{item.type.replaceAll("_", " ")}</strong><span>{item.text || "Declaration detected"}</span><small>{item.boundingBox ? "localized" : "location uncertain"}</small></div>) : <div className="visual-declaration-empty"><strong>No semantic declaration evidence for this image.</strong><span>Physical OCR text is kept as evidence, but unclassified OCR lines are not presented as declarations.</span></div>}
