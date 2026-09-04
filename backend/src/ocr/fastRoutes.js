@@ -2,18 +2,7 @@ import "dotenv/config";
 import express from "express";
 import multer from "multer";
 import { authenticate } from "../middleware/auth.js";
-
-const router=express.Router();
-const upload=multer({storage:multer.memoryStorage(),limits:{files:Number(process.env.OCR_MAX_IMAGES_PER_REQUEST||6),fileSize:Number(process.env.OCR_MAX_IMAGE_SIZE_BYTES||8388608)}});
-
-router.post("/analyze",authenticate,upload.array("images",Number(process.env.OCR_MAX_IMAGES_PER_REQUEST||6)),async(req,res)=>{
-  try{
-    const files=req.files||[]; if(!files.length)return res.status(400).json({error:"At least one image is required."});
-    const target=String(process.env.PADDLE_OCR_URL||"http://localhost:8081").replace(/\/$/,"");
-    const fd=new FormData(); for(const f of files)fd.append("images",new Blob([f.buffer],{type:f.mimetype}),f.originalname||"image.jpg");
-    const response=await fetch(`${target}/api/ocr/analyze`,{method:"POST",body:fd,signal:AbortSignal.timeout(Number(process.env.OCR_TIMEOUT_MS||45000))});
-    const data=await response.json().catch(()=>({})); if(!response.ok)return res.status(502).json({error:data?.error||data?.detail||`PaddleOCR service failed (${response.status})`});
-    res.json({result:data.result||data,provider:data.provider||"paddleocr",model:data.model||"PaddleOCR",semantic:data.semantic||null,detectionProvider:data.detectionProvider||"paddleocr",detectionProviders:data.detectionProviders||["paddleocr"],fallbackReason:data.fallbackReason||null});
-  }catch(e){res.status(e?.name==="TimeoutError"?504:502).json({error:e?.message||"OCR service unavailable"});}
-});
-export default router;
+const router=express.Router();const upload=multer({storage:multer.memoryStorage(),limits:{files:Number(process.env.OCR_MAX_IMAGES_PER_REQUEST||6),fileSize:Number(process.env.OCR_MAX_IMAGE_SIZE_BYTES||8388608)}});
+function found(value,confidence=.72){return value?{status:"found",value:String(value).trim(),confidence}: {status:"absent",value:"",confidence:0};}
+function mapText(raw){const t=String(raw||"");const pick=(re)=>t.match(re)?.[1]?.trim()||"";const result={rawText:t};const product=pick(/(?:product(?: name)?|item)\s*[:\-]\s*([^\n]+)/i);const brand=pick(/(?:brand|manufactured by|mfd by)\s*[:\-]?\s*([^\n]+)/i);const qty=pick(/(?:net(?: weight| quantity| wt\.?)?)\s*[:\-]?\s*([0-9.]+\s*(?:mg|g|kg|ml|l|pcs|m))/i);const mrp=pick(/(?:m\.?r\.?p\.?|maximum retail price)\s*[:\-]?\s*(?:₹|rs\.?|inr)?\s*([0-9]+(?:\.[0-9]{1,2})?)/i);const barcode=pick(/\b([0-9]{8,14})\b/);result.productName=found(product);result.brandName=found(brand);result.netQuantity=found(qty?qty.replace(/\s+/g," "):"");result.unit=found(qty?.match(/(mg|kg|ml|g|l|pcs|m)\b/i)?.[1]||"");result.mrp=found(mrp);result.barcode=found(barcode);return result;}
+router.post("/analyze",authenticate,upload.array("images",Number(process.env.OCR_MAX_IMAGES_PER_REQUEST||6)),async(req,res)=>{try{const files=req.files||[];if(!files.length)return res.status(400).json({error:"At least one image is required."});const target=String(process.env.PADDLE_OCR_URL||"http://localhost:8081").replace(/\/$/,"");const fd=new FormData();files.forEach(f=>fd.append("images",new Blob([f.buffer],{type:f.mimetype}),f.originalname||"image.jpg"));const paddle=await fetch(`${target}/api/ocr/analyze`,{method:"POST",body:fd,signal:AbortSignal.timeout(Number(process.env.OCR_TIMEOUT_MS||45000))});const pd=await paddle.json().catch(()=>({}));if(!paddle.ok)return res.status(502).json({error:pd?.error||pd?.detail||`PaddleOCR service failed (${paddle.status})`});const result=mapText(pd?.result?.rawText||"");result.declarationEvidence=pd?.result?.declarationEvidence||[];let semantic=null;try{const gliner=String(process.env.GLINER_SERVICE_URL||"http://localhost:8091").replace(/\/$/,"");const sr=await fetch(`${gliner}/map`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({evidence:result.declarationEvidence}),signal:AbortSignal.timeout(Number(process.env.OCR_SEMANTIC_TIMEOUT_MS||10000))});semantic=await sr.json().catch(()=>null);}catch(e){semantic={provider:"gliner2-unavailable",error:e.message};}result.semantic=semantic;res.json({result,provider:"local-rules",model:"PaddleOCR + GLiNER2",semantic,detectionProvider:"paddleocr",detectionProviders:["paddleocr"],fallbackReason:null});}catch(e){res.status(e?.name==="TimeoutError"?504:502).json({error:e?.message||"OCR service unavailable"});}});export default router;
