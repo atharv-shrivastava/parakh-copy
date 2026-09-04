@@ -1,2 +1,61 @@
 import { useEffect, useState } from "react";
-export default function ScanVisualCheck(){const [state,setState]=useState(null);useEffect(()=>{const load=()=>{try{const d=JSON.parse(sessionStorage.getItem("parakhVisualInspection")||"null");if(d)setState(d);}catch{}};load();window.addEventListener("parakh:visual-inspection",load);return()=>window.removeEventListener("parakh:visual-inspection",load)},[]);if(!state)return null;return <section className="scan-review visual-check"><div className="section-heading"><div><h2>Visual package check</h2><p>Basic readability and placement screening for inspection support.</p></div></div><div className="ocr-status-grid"><div><strong>Readable</strong><span>{state.readable===false?"No":"Yes"}</span></div><div><strong>Text detected</strong><span>{state.textDetected===false?"No":"Yes"}</span></div><div><strong>Placement review</strong><span>{state.placementReview||"Screened"}</span></div><div><strong>Estimated text height</strong><span>{state.estimatedTextHeightMm?`${state.estimatedTextHeightMm} mm":"Not calibrated"}</span></div></div></section>}
+
+export default function ScanVisualCheck() {
+  const [state, setState] = useState(null);
+
+  useEffect(() => {
+    const load = () => {
+      try {
+        const data = JSON.parse(sessionStorage.getItem("parakhVisualInspection") || "null");
+        if (data) setState(data);
+      } catch {
+        setState(null);
+      }
+    };
+
+    load();
+    window.addEventListener("parakh:visual-inspection", load);
+    window.addEventListener("parakh:visual-analysis", load);
+
+    return () => {
+      window.removeEventListener("parakh:visual-inspection", load);
+      window.removeEventListener("parakh:visual-analysis", load);
+    };
+  }, []);
+
+  if (!state) return null;
+
+  return (
+    <section className="scan-review visual-check">
+      <div className="section-heading">
+        <div>
+          <h2>Visual package check</h2>
+          <p>Basic readability and placement screening for inspection support.</p>
+        </div>
+      </div>
+
+      <div className="ocr-status-grid">
+        <div>
+          <strong>Readable</strong>
+          <span>{state.readable === false ? "No" : "Yes"}</span>
+        </div>
+        <div>
+          <strong>Text detected</strong>
+          <span>{state.textDetected === false ? "No" : "Yes"}</span>
+        </div>
+        <div>
+          <strong>Placement review</strong>
+          <span>{state.placementReview ? "Review" : "Screened"}</span>
+        </div>
+        <div>
+          <strong>Estimated text height</strong>
+          <span>
+            {state.estimatedTextHeightMm != null
+              ? `${state.estimatedTextHeightMm} mm`
+              : "Not calibrated"}
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
