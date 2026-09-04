@@ -50,6 +50,26 @@ function ruleScore(text, rule) {
   return hits.length ? rule.priority + Math.min(12, Math.max(...hits.map((pattern) => String(pattern).length / 8))) : 0;
 }
 
+const RELEVANCE_PATTERNS = [
+  /\\b(?:mrp|m\\.?r\\.?p|maximum retail price|net (?:qty|quantity|weight|volume)|batch|lot|mfd|mfg|manufactur(?:ed|er|ing)|packed|pkd|packer|marketed|marketer|imported|importer|best before|use by|expiry|exp\\.?|consumer care|customer care|helpline|country of origin|made in|fssai|license|barcode|ean|upc|gtin|brand|product)\\b/i,
+  /(?:₹|rs\\.?|inr)\\s*[0-9oOlI]{1,6}/i,
+  /\\b[0-9]{8,14}\\b/,
+  /\\b[0-9]{1,6}\\s*(?:mg|g|kg|ml|l|cl|oz|lb)\\b/i,
+  /\\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\s+[0-9]{2,4}\\b/i,
+];
+
+function isRelevantSemanticCandidate(candidate) {
+  const text = normalizeText(candidate.text);
+  if (!text) return false;
+  if (RELEVANCE_PATTERNS.some((pattern) => pattern.test(text))) return true;
+  const words = text.split(/\\s+/).filter(Boolean);
+  if (words.length >= 1 && words.length <= 6 && text.length <= 80) {
+    const alphaWords = words.filter((word) => /[A-Za-z]/.test(word) && !STOPWORDS.has(word.toLowerCase()));
+    return alphaWords.length >= 1;
+  }
+  return false;
+}
+
 function extractValue(type, text) {
   const source = normalizeText(text);
   if (type === "MRP") return source.match(/(?:₹|rs\.?|inr)?\s*([0-9][0-9,]*(?:[.,][0-9]{1,2})?)/i)?.[1]?.replace(/,/g, "") || source;
@@ -102,7 +122,7 @@ function buildFields(mappings) {
 
 async function glinerMap(candidates) {
   const url = process.env.GLINER_SERVICE_URL || "http://localhost:8091";
-  const response = await fetch(`${url}/map`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(Number(process.env.GLINER_TIMEOUT_MS || "8000")), body: JSON.stringify({ candidates }) });
+  const response = await fetch(`${url}/map`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(Number(process.env.GLINER_TIMEOUT_MS || "45000")), body: JSON.stringify({ candidates }) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.detail || data?.error || `GLiNER2 failed (${response.status})`);
   const parsed = GlinerResponseSchema.safeParse(data);
@@ -116,14 +136,23 @@ export async function runSemanticMapper(evidence) {
   const unresolved = [];
   for (const candidate of candidates) {
     const local = localClassification(candidate);
-    if (local) localMappings.push(makeMapping(candidate, local.type, "LOCAL_RULES", local.value, local.confidence, local.confidenceValue));
-    else unresolved.push(candidate);
+    if (local) {
+      localMappings.push(makeMapping(candidate, local.type, "LOCAL_RULES", local.value, local.confidence, local.confidenceValue));
+    } else if (isRelevantSemanticCandidate(candidate)) {
+      unresolved.push(candidate);
+    }
   }
+
+  // GLiNER2 is the semantic fallback, not a classifier for every printed word.
+  // Keep the request bounded so package artwork/text-heavy images cannot stall the scan.
+  const semanticCandidates = Array.from(
+    new Map(unresolved.map((item) => [`${item.imageIndex}:${normalizeText(item.text).toLowerCase()}`, item])).values()
+  ).slice(0, Number(process.env.GLINER_MAX_CANDIDATES || "64"));
 
   let glinerMappings = [];
   let glinerError = null;
-  if (unresolved.length) {
-    try { glinerMappings = await glinerMap(unresolved); } catch (error) { glinerError = error.message; }
+  if (semanticCandidates.length) {
+    try { glinerMappings = await glinerMap(semanticCandidates); } catch (error) { glinerError = error.message; }
   }
 
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
@@ -144,7 +173,7 @@ export async function runSemanticMapper(evidence) {
     rawText: candidates.map((item) => `[IMAGE ${item.imageIndex + 1}] ${item.text}`).join("\n"),
     warnings: glinerError ? [`Local GLiNER2 unavailable: ${glinerError}`] : [],
     unreadableFields: [],
-    needsReview: Boolean(glinerError && unresolved.length),
-    semantic: { provider: acceptedGliner.length ? "gliner2-local" : "local-rules", localMapped: localMappings.length, glinerCandidates: unresolved.length, glinerUsed: acceptedGliner.length, glinerError },
+    needsReview: Boolean(glinerError && semanticCandidates.length),
+    semantic: { provider: acceptedGliner.length ? "gliner2-local" : "local-rules", localMapped: localMappings.length, glinerCandidates: semanticCandidates.length, glinerUsed: acceptedGliner.length, glinerError },
   };
 }
