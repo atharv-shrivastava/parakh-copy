@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useLocation } from "react-router-dom";
 import "../styles/products.css";
 
 const API_URL = "http://localhost:5000/api";
@@ -10,6 +10,7 @@ function createSlug(name) {
 
 function CategoryPage() {
   const { categoryId } = useParams();
+  const location = useLocation();
   const [category, setCategory] = useState(null);
   const [filters, setFilters] = useState({
     status: "ALL",
@@ -189,7 +190,7 @@ function CategoryPage() {
           {filteredProducts.length === 0 ? <p>No products match these filters.</p> : (
             <div className="product-list">
               {filteredProducts.map((product) => (
-                <Link key={product.id} to={`/products/item/${product.id}`} className="product-row">
+                <Link key={product.id} to={`/products/item/${product.id}`} state={{ product }} className="product-row">
                   <div><strong>{product.productName}</strong><span>{product.brandName || "Company not recorded"}</span></div>
                   <div><span>{product.netQuantity || "Quantity not recorded"} {product.unit || ""}</span><span>{product.inspections?.[0]?.shop?.name || "Shop not recorded"}</span></div>
                   <span className={`compliance-badge ${product.complianceStatus.toLowerCase()}`}>{product.complianceStatus}</span>
