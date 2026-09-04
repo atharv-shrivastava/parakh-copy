@@ -31,7 +31,7 @@ const DATE_LABELS = {
 };
 
 const INNER_PACK_RE = /\b(?:see|refer|check)\b[^\n]{0,120}\b(?:under\s+the\s+seal|individual\s+pack|inner\s+pack|inside)\b|\b(?:under\s+the\s+seal|individual\s+pack(?:et)?|inner\s+pack(?:et)?)\b[^\n]{0,120}\b(?:batch|lot|mfg|manufactur|expiry|exp\.?|mrp|price|date|details)\b/i;
-const PROMO_RE = /\b(?:save|discount|offer|cashback|buy\s+\d+|buy\s+one|get\s+one|free|flat|limited\s+offer|sale|prize|lucky\s+draw|scratch)\b/i;
+const PROMO_RE = /^(?:save\s*\d+|save\s+up\s+to|offer|special\s+offer|discount|cashback|buy\s+\d+|buy\s+one|get\s+one|free|flat|limited\s+offer|sale|prize|lucky\s+draw|scratch)\b|\b(?:save|discount|off)\s*\d+/i;
 const CLAIM_RE = /\b(?:tightens?|fights?|protects?|prevents?|removes?|reduces?|controls?|treats?|helps?|improves?|strengthens?|whitens?|freshens?|cleans?|purifies?|restores?|supports?|boosts?|enhances?|nourishes?|repairs?|relieves?|cures?|heals?|soothes?|kills?|gives?|long\s+life|healthy\s+gums?|fresh\s+breath|germ\s+protection)\b/i;
 const ADMIN_RE = /^(?:for|visit|toll|e-?mail|made\s+in|store\s+in|for\s+sale|marketed|manufactured|mfd|mfg|packed|pkd|imported|consumer|customer|country|address|ingredients?|nutrition|net|best|use|mrp|batch|barcode|license|manager|regd|registered|division|office|helpline|complaint)\b/i;
 const DATE_RE = /\b(?:\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{1,2}\s*[A-Za-z]{3,9}\s*\d{2,4}|[A-Za-z]{3,9}\s+\d{4}|\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2})\b/;
@@ -181,7 +181,7 @@ function prominenceScore(detection, detections) {
   if (!detection.boundingBox || !valid.length) return 0.35;
   const area = detection.boundingBox.width * detection.boundingBox.height;
   const maxArea = Math.max(1, ...valid.map((item) => item.boundingBox.width * item.boundingBox.height));
-  const maxHeight = Math.max(1, ...valid.map((item) => item.boundingBox.height));
+  const maxHeight = Math.max(1, ...valid.map((item) => Number(item.boundingBox.height) || 0));
   const areaScore = area / maxArea;
   const heightScore = detection.boundingBox.height / maxHeight;
   return Math.min(1, areaScore * 0.55 + heightScore * 0.45);
@@ -213,12 +213,11 @@ function pickIdentityPair(detections) {
     return { productName: buildField(null, 0), brandName: buildField(null, 0), candidates: [] };
   }
 
-  const brand = candidates.find((candidate) => {
-    const words = candidate.detection.text.split(/\s+/).filter(Boolean).length;
-    return words <= 4 && !/\b(?:manager|division|office|registered|license|address)\b/i.test(candidate.detection.text);
-  }) || candidates[0];
+  const brandPool = candidates.filter((candidate) => candidate.detection.text.split(/\s+/).filter(Boolean).length <= 3);
+  const brand = (brandPool.length ? brandPool : candidates)[0];
 
-  const product = candidates.find((candidate) => candidate.detection.id !== brand.detection.id && levenshteinSimilarity(candidate.detection.text, brand.detection.text) < 0.86) || brand;
+  const productPool = candidates.filter((candidate) => candidate.detection.id !== brand.detection.id && candidate.detection.text.split(/\s+/).filter(Boolean).length >= 2);
+  const product = productPool[0] || candidates.find((candidate) => candidate.detection.id !== brand.detection.id) || brand;
 
   const productConfidence = Math.min(0.94, 0.32 + product.score * 0.65 + (product.repetition || 0));
   const brandConfidence = Math.min(0.92, 0.30 + brand.score * 0.60 + (brand.repetition || 0));
@@ -274,7 +273,12 @@ function parseBatch(lines) {
   for (const line of lines) {
     if (!/\b(?:batch|batch\s*no|lot|lot\s*no)\b/i.test(line.text)) continue;
     const value = line.text.replace(/^.*?\b(?:batch|batch\s*no|lot|lot\s*no)\b\s*[:#\-]?\s*/i, "").trim();
-    if (value && value !== line.text) return buildField(value, 0.84, line.text, "found", { imageIndex: line.imageIndex });
+    if (value && value !== line.text) {
+      if (/(?:see\s+below|refer|individual\s+pack|inner\s+pack|under\s+the\s+seal|inside|other\s+details)/i.test(value)) {
+        return buildField(null, 0, line.text, "referenced_inner_pack", { imageIndex: line.imageIndex });
+      }
+      return buildField(value, 0.84, line.text, "found", { imageIndex: line.imageIndex });
+    }
     const nearby = findNearbyValue(lines, line, (text) => !/\b(?:batch|lot|mfd|mfg|expiry|exp|mrp|maximum\s+retail\s+price)\b/i.test(text) && /^[A-Za-z0-9./_-]{3,30}$/.test(text.trim()));
     if (nearby) return buildField(nearby.text, 0.76, `${line.text} ${nearby.text}`, "found", { imageIndex: nearby.imageIndex });
   }
@@ -357,16 +361,24 @@ function parseBarcode(lines) {
   for (const line of lines) {
     const rawNumbers = line.text.match(/\b\d{8,18}\b/g) || [];
     for (const raw of rawNumbers) {
-      if (!gtinChecksum(raw)) continue;
-      if (FSSAI_LABEL_RE.test(line.text) || /\b(?:license|lic\.?|batch|lot|phone|mobile|toll\s*free)\b/i.test(line.text)) continue;
-      const contextBoost = BARCODE_CONTEXT_RE.test(line.text) ? 0.10 : 0;
-      const lengthBoost = raw.length === 13 ? 0.04 : 0;
-      candidates.push({ raw, line, score: 0.86 + contextBoost + lengthBoost });
+      const hasBarcodeContext = BARCODE_CONTEXT_RE.test(line.text);
+      const prohibitedContext = FSSAI_LABEL_RE.test(line.text) || /\b(?:license|lic\.?|batch|lot|phone|mobile|toll\s*free|consumer\s+care)\b/i.test(line.text);
+      if (prohibitedContext) continue;
+      if (gtinChecksum(raw)) {
+        const contextBoost = hasBarcodeContext ? 0.10 : 0;
+        const lengthBoost = raw.length === 13 ? 0.04 : 0;
+        candidates.push({ raw, line, score: 0.86 + contextBoost + lengthBoost, verified: true });
+      } else if (hasBarcodeContext || /^\d{8,18}$/.test(line.text.trim())) {
+        candidates.push({ raw, line, score: hasBarcodeContext ? 0.78 : 0.58, verified: false });
+      }
     }
   }
   candidates.sort((a, b) => b.score - a.score);
   const winner = candidates[0];
-  return winner ? buildField(winner.raw, winner.score, `Checksum-valid GTIN candidate from: ${winner.line.text}`, "found", { imageIndex: winner.line.imageIndex }) : buildField(null, 0);
+  if (!winner) return buildField(null, 0);
+  return winner.verified
+    ? buildField(winner.raw, winner.score, `Checksum-valid GTIN candidate from: ${winner.line.text}`, "found", { imageIndex: winner.line.imageIndex })
+    : buildField(winner.raw, winner.score, `Barcode candidate recovered from OCR: ${winner.line.text}; checksum not verified`, "found", { imageIndex: winner.line.imageIndex, validation: "unverified" });
 }
 
 function extractLabeledEntity(lines, key) {
