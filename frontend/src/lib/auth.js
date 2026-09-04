@@ -1,5 +1,6 @@
 const TOKEN_KEY = "parakh_token";
 const USER_KEY = "parakh_user";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 export function getToken() { return localStorage.getItem(TOKEN_KEY); }
 export function getUser() { try { return JSON.parse(localStorage.getItem(USER_KEY) || "null"); } catch { return null; } }
@@ -37,8 +38,12 @@ async function optimizeOcrBody(body) {
 }
 
 export async function apiFetch(url, options = {}) {
-  const body = String(url).includes("/api/ocr/analyze") ? await optimizeOcrBody(options.body) : options.body;
-  const response = await fetch(url, { ...options, body, headers: { ...authHeaders(Boolean(body && typeof body === "string")), ...(options.headers || {}) } });
+  const rawUrl = String(url);
+  const resolvedUrl = rawUrl.startsWith("http://localhost:5000/api")
+    ? rawUrl.replace("http://localhost:5000/api", API_URL)
+    : rawUrl;
+  const body = resolvedUrl.includes("/api/ocr/analyze") ? await optimizeOcrBody(options.body) : options.body;
+  const response = await fetch(resolvedUrl, { ...options, body, headers: { ...authHeaders(Boolean(body && typeof body === "string")), ...(options.headers || {}) } });
   if (response.status === 401) clearSession();
   return response;
 }
