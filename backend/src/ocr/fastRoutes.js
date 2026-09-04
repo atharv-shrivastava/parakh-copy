@@ -29,6 +29,7 @@ function rawTextEvidence(rawText, imageIndex = 0) {
     { re: /^(?:packed|pkd)\s+by\s*:?$/i, type: "PACKER" },
     { re: /^marketed\s+by\s*:?$/i, type: "MARKETER" },
     { re: /^imported\s+by\s*:?$/i, type: "IMPORTER" },
+    { re: /^(?:m\.?r\.?p\.?|maximum\s+retail\s+price)\s*[:\-]?$/i, type: "MRP" },
   ];
   contextualPatterns.forEach(({ re, type }) => {
     lines.forEach((line, index) => {
@@ -38,10 +39,11 @@ function rawTextEvidence(rawText, imageIndex = 0) {
         if (!next) break;
         if (/^(?:for|visit us|toll free|e-?mail|made in|store in|for sale|mfg\.? lic\.?|lic\.|www\.)/i.test(next)) break;
         if (/^(?:[0-9]{1,3}|[#*]+|[A-Z]{1,3})$/.test(next)) continue;
+        if (type === "MRP" && !/(?:₹|rs\.?|inr)?\s*\d{1,6}(?:[.,]\d{1,2})?/i.test(next)) continue;
         const looksLikeCompany = /\b(?:limited|ltd|private|foods|food|ayurved|herbal|industr(?:y|ies)|division|park|company|pvt)\b/i.test(next);
         const looksLikeLabeledValue = /^\(?[A-Z]\)?[.)]?\s+.{5,}/.test(next);
-        if (looksLikeCompany || looksLikeLabeledValue || next.length >= 8) {
-          evidence.push({ id: `raw-context:${imageIndex}:${type}:${index}:${offset}`, imageIndex, text: `${line} ${next}`, confidence: 0.62, boundingBox: null });
+        if (type === "MRP" || looksLikeCompany || looksLikeLabeledValue || next.length >= 8) {
+          evidence.push({ id: `raw-context:${imageIndex}:${type}:${index}:${offset}`, imageIndex, text: `${line} ${next}`, confidence: type === "MRP" ? 0.8 : 0.62, boundingBox: null });
           break;
         }
       }
@@ -98,21 +100,17 @@ function sanitizeSemanticResult(result) {
     const value = String(field?.value ?? "").trim();
     const raw = String(field?.raw ?? field?.evidence ?? "").trim();
     if (!field || field.status !== "found") continue;
-    if (!value || labelOnlyPatterns.some((re) => re.test(value)) || invalidValuePatterns.some((re) => re.test(value))) {
-      next[key] = { ...field, value: null, raw: raw || value, status: "absent", confidence: 0, evidence: raw || null };
-    }
+    if (!value || labelOnlyPatterns.some((re) => re.test(value)) || invalidValuePatterns.some((re) => re.test(value))) next[key] = { ...field, value: null, raw: raw || value, status: "absent", confidence: 0, evidence: raw || null };
   }
-
+  if (next.mrp?.status === "found") {
+    const raw = String(next.mrp.value ?? next.mrp.raw ?? next.mrp.evidence ?? "");
+    const match = raw.match(/(?:₹|rs\.?|inr|mrp|maximum\s+retail\s+price)\s*[:\-]?\s*(\d{1,6}(?:[.,]\d{1,2})?)/i);
+    if (match) next.mrp = { ...next.mrp, value: Number(match[1].replace(/,/g, "")) };
+    else if (!/\bmrp\b|maximum\s+retail\s+price|₹|\brs\.?\b|\binr\b/i.test(raw)) next.mrp = { ...next.mrp, value: null, status: "absent", confidence: 0 };
+  }
   const declarations = Array.isArray(next.otherDeclarations) ? next.otherDeclarations : [];
-  next.otherDeclarations = declarations
-    .map((item) => typeof item === "string" ? item : item?.text)
-    .map((item) => String(item || "").trim())
-    .filter(Boolean);
-
-  next.declarationEvidence = Array.isArray(next.declarationEvidence)
-    ? next.declarationEvidence.map((item) => ({ ...item, text: String(item?.text || "").trim() })).filter((item) => item.text)
-    : [];
-
+  next.otherDeclarations = declarations.map((item) => typeof item === "string" ? item : item?.text).map((item) => String(item || "").trim()).filter(Boolean);
+  next.declarationEvidence = Array.isArray(next.declarationEvidence) ? next.declarationEvidence.map((item) => ({ ...item, text: String(item?.text || "").trim() })).filter((item) => item.text) : [];
   return next;
 }
 
@@ -136,18 +134,20 @@ async function handleFastAnalyze(_req, res, files) {
     const originalGlinerFlag = process.env.GLINER_SEMANTIC_ENABLED;
     if (originalGlinerFlag === undefined) process.env.GLINER_SEMANTIC_ENABLED = "false";
     let semantic;
-    try {
-      semantic = await runSemanticMapper(paddle.evidence, config);
-    } finally {
-      if (originalGlinerFlag === undefined) delete process.env.GLINER_SEMANTIC_ENABLED;
-    }
+    try { semantic = await runSemanticMapper(paddle.evidence, config); }
+    finally { if (originalGlinerFlag === undefined) delete process.env.GLINER_SEMANTIC_ENABLED; }
     const localMs = Date.now() - localStartedAt;
     const sanitized = sanitizeSemanticResult(semantic);
     const merged = { ...sanitized };
     for (const [key, value] of Object.entries(heuristic)) {
       if (["declarationEvidence", "otherDeclarations", "rawText", "warnings", "semanticMetadata"].includes(key)) continue;
       const existing = merged[key];
-      if ((!existing || existing.status !== "found" || !existing.value) && value?.status === "found" && value.value != null) merged[key] = { ...value, source: "SEMANTIC_HEURISTIC" };
+      const candidateConfidence = Number(value?.confidence || 0);
+      const existingConfidence = Number(existing?.confidence || 0);
+      const identityField = key === "productName" || key === "brandName";
+      const shouldFill = (!existing || existing.status !== "found" || !existing.value) && value?.status === "found" && value.value != null;
+      const shouldUpgradeIdentity = identityField && value?.status === "found" && value.value != null && candidateConfidence > existingConfidence + 0.08;
+      if (shouldFill || shouldUpgradeIdentity) merged[key] = { ...value, source: "SEMANTIC_HEURISTIC" };
     }
     const totalMs = Date.now() - startedAt;
     console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} upload=${uploadMs}ms paddle=${paddleMs}ms heuristic=${heuristicMs}ms semantic=${localMs}ms total=${totalMs}ms`);
