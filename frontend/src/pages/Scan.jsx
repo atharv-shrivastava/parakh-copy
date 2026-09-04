@@ -22,6 +22,43 @@ function fieldValue(result, key) {
   return field?.status === "found" && field.value !== null && field.value !== undefined ? String(field.value) : "";
 }
 
+function formFromOcr(result) {
+  if (!result) return { ...emptyForm };
+  const details = [
+    ["Manufacturer", fieldValue(result, "manufacturer")],
+    ["Manufacturer address", fieldValue(result, "manufacturerAddress")],
+    ["Packer", fieldValue(result, "packer")],
+    ["Packer address", fieldValue(result, "packerAddress")],
+    ["Importer", fieldValue(result, "importer")],
+    ["Importer address", fieldValue(result, "importerAddress")],
+    ["Currency", fieldValue(result, "currency")],
+    ["Manufacturing date", fieldValue(result, "dateOfManufacture")],
+    ["Packing date", fieldValue(result, "dateOfPacking")],
+    ["Best before", fieldValue(result, "bestBefore")],
+    ["Expiry date", fieldValue(result, "expiryDate")],
+    ["Batch / lot number", fieldValue(result, "batchNumber")],
+    ["Consumer care phone", fieldValue(result, "consumerCarePhone")],
+    ["Consumer care email", fieldValue(result, "consumerCareEmail")],
+    ["Country of origin", fieldValue(result, "countryOfOrigin")],
+    ["FSSAI license number", fieldValue(result, "fssaiLicenseNumber")],
+  ].filter(([, value]) => value);
+  const declarations = Array.isArray(result.otherDeclarations) ? result.otherDeclarations.filter(Boolean) : [];
+  return {
+    brandName: fieldValue(result, "brandName") || fieldValue(result, "manufacturer"),
+    productName: fieldValue(result, "productName"),
+    netQuantity: fieldValue(result, "netQuantity"),
+    unit: fieldValue(result, "unit"),
+    mrp: fieldValue(result, "mrp").replace(/[^0-9.]/g, ""),
+    barcode: fieldValue(result, "barcode"),
+    description: [...details.map(([label, value]) => `${label}: ${value}`), ...declarations].join("\n"),
+    shopName: "",
+    shopAddress: "",
+    shopCity: "",
+    shopState: "",
+    notes: "",
+  };
+}
+
 async function fileToDataUrl(file) {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));
@@ -164,6 +201,7 @@ function Scan() {
   const [analyzing, setAnalyzing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showRegistration, setShowRegistration] = useState(false);
+  const [useExtractedData, setUseExtractedData] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -219,6 +257,9 @@ function Scan() {
     setCompliance(null);
     setAcceptedFindingIds([]);
     setComplianceError(null);
+    setShowRegistration(false);
+    setUseExtractedData(false);
+    setForm(emptyForm);
     setMessage("Images ready for analysis.");
   }
 
@@ -281,6 +322,10 @@ function Scan() {
     setOcr(null);
     setCompliance(null);
     setAcceptedFindingIds([]);
+    setComplianceError(null);
+    setShowRegistration(false);
+    setUseExtractedData(false);
+    setForm(emptyForm);
   }
 
   async function analyzeImages() {
@@ -313,23 +358,34 @@ function Scan() {
       setOcr(extracted);
       setCompliance(data.compliance || null);
       setComplianceError(data.complianceError || null);
-      setForm((current) => ({
-        ...current,
-        brandName: fieldValue(extracted, "brandName") || fieldValue(extracted, "manufacturer"),
-        productName: fieldValue(extracted, "productName"),
-        netQuantity: fieldValue(extracted, "netQuantity"),
-        unit: fieldValue(extracted, "unit"),
-        mrp: fieldValue(extracted, "mrp"),
-        barcode: fieldValue(extracted, "barcode"),
-        description: [extracted.rawText, ...(extracted.otherDeclarations || [])].filter(Boolean).join("\n"),
-      }));
-      setShowRegistration(true);
-      setMessage(data.complianceError ? `OCR complete. Rules Engine unavailable: ${data.complianceError.message}` : "Puter OCR and Rules Engine analysis complete.");
+      setForm(emptyForm);
+      setShowRegistration(false);
+      setUseExtractedData(false);
+      setMessage(data.complianceError ? `OCR complete. Rules Engine unavailable: ${data.complianceError.message}` : "Puter OCR and Rules Engine analysis complete. Review the extracted data, then register the product.");
     } catch (e) {
       setMessage(e.message || "Puter OCR analysis failed.");
     } finally {
       setAnalyzing(false);
     }
+  }
+
+  function updateOcrField(key, value) {
+    setOcr((current) => current ? { ...current, [key]: { ...current[key], value } } : current);
+  }
+
+  function applyExtractedData() {
+    if (!ocr) return;
+    setForm(formFromOcr(ocr));
+    setUseExtractedData(true);
+    setShowRegistration(true);
+    setMessage("Extracted data applied to the registration form. Review and edit the fields before registering.");
+  }
+
+  function openRegistration() {
+    setShowRegistration(true);
+    setUseExtractedData(false);
+    setForm(emptyForm);
+    setMessage(ocr ? "Registration opened. Choose Use extracted data to populate the form, or enter everything manually." : "Manual registration opened.");
   }
 
   function toggleFinding(finding, index) {
@@ -376,9 +432,9 @@ function Scan() {
     <section className="scan-area"><div className="scan-icon">⌁</div><h2>Capture or upload package images</h2><p>Use the camera or choose up to {MAX_IMAGES} images showing different sides of the package.</p><div className="scan-upload-actions"><button type="button" className="primary-button" onClick={openCamera}>Open Camera</button><label className="secondary-button scan-file-button">Upload Images<input type="file" accept="image/*" multiple onChange={handleImages} hidden /></label></div><p className="scan-limit">{images.length}/{MAX_IMAGES} images selected</p>{cameraError && <div className="status-message">{cameraError}</div>}</section>
     {cameraOpen && <div className="camera-overlay" role="dialog" aria-modal="true"><div className="camera-modal"><div className="camera-header"><h2>Capture package image</h2><button type="button" onClick={closeCamera}>Close</button></div><video ref={videoRef} className="camera-video" autoPlay playsInline muted /><div className="camera-actions"><button type="button" className="primary-button" onClick={capturePhoto}>Capture Photo</button><button type="button" className="secondary-button" onClick={closeCamera}>Cancel</button></div></div></div>}
     {images.length > 0 && <section className="scan-review"><div className="section-heading"><div><h2>Evidence images</h2><p>All selected images will be retained on the registered product.</p></div></div><div className="scan-image-grid">{images.map(({ url, file }, i) => <div className="scan-image-card" key={`${file.name}-${i}`}><img src={url} alt={`Package evidence ${i + 1}`} /><button type="button" onClick={() => removeImage(i)}>Remove</button><span>{file.name}</span></div>)}</div><button type="button" className="primary-button" onClick={analyzeImages} disabled={analyzing}>{analyzing ? "Analyzing..." : "Analyze Images"}</button></section>}
-    {ocr && <section className="scan-review"><div className="section-heading"><div><h2>OCR extraction and Rules Engine result</h2><p>Correct any OCR mistake before registration.</p></div></div><div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && value && typeof value === "object" && value.status === "found").map(([key, value]) => <div key={key}><strong>{key.replace(/([A-Z])/g, " $1")}</strong><span>{String(value.value)}</span>{typeof value.confidence === "number" && <small>{Math.round(value.confidence * 100)}% confidence</small>}</div>)}</div><div className="ocr-status-grid"><div><strong>Rules Engine</strong><span>{compliance?.overallStatus || "Not evaluated"}</span></div><div><strong>OCR confidence</strong><span>{ocr.needsReview ? "Review required" : "Confident"}</span></div><div><strong>Unreadable fields</strong><span>{ocr.unreadableFields?.length || 0}</span></div></div>{complianceError && <div className="status-message">Rules Engine: {complianceError.message}</div>}{compliance?.summary && <div className="ocr-summary">Rules: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}{violationFindings.length > 0 && <div className="finding-review"><strong>Inspector review of detected violations</strong><p>Checked findings will be accepted into the final inspection. Unchecked findings remain in the audit record as rejected by the inspector.</p>{violationFindings.map((v, i) => <label key={`${v.findingId || v.ruleId || "finding"}-${i}`} className="finding-review-item"><input type="checkbox" checked={isFindingAccepted(v, i)} onChange={() => toggleFinding(v, i)} /><span>{v.message || v.reason || JSON.stringify(v)}</span></label>)}<small>{acceptedFindingIds.length} of {violationFindings.length} detected violations accepted</small></div>}<label>Raw OCR<textarea value={ocr.rawText || ""} onChange={(e) => setOcr((c) => ({ ...c, rawText: e.target.value }))} /></label>{suggestedCategory && <div className="scan-suggestion"><span>Suggested final category: <strong>{suggestedCategory.path.map((x) => x.name).join(" → ")}</strong></span><button type="button" className="secondary-button" onClick={() => setSelectedCategoryId(suggestedCategory.id)}>Use suggestion</button></div>}</section>}
-    {!showRegistration && <section className="scan-review registration-form"><div className="section-heading"><div><h2>Register product</h2><p>Use OCR-extracted details after analysis, or start with a completely manual registration.</p></div></div><div className="scan-upload-actions"><button type="button" className="primary-button" onClick={() => setShowRegistration(true)}> {ocr ? "Continue to Registration" : "Register Manually"}</button></div></section>}
-    {showRegistration && <form className="scan-review registration-form" onSubmit={saveProduct}><div className="section-heading"><div><h2>Register product</h2><p>{ocr ? "OCR fills these fields, but manual correction is allowed." : "Manual registration: package images are retained, but OCR is skipped."}</p></div></div><div className="form-grid"><label>Brand / Manufacturer<input value={form.brandName} onChange={(e) => updateForm("brandName", e.target.value)} /></label><label>Product name *<input required value={form.productName} onChange={(e) => updateForm("productName", e.target.value)} /></label><label>Quantity / volume / pieces<input value={form.netQuantity} onChange={(e) => updateForm("netQuantity", e.target.value)} /></label><label>Unit<select value={form.unit} onChange={(e) => updateForm("unit", e.target.value)}><option value="">Select</option><option value="mg">mg</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="pcs">pcs</option><option value="dozen">dozen</option><option value="m">m</option></select></label><label>MRP<input type="number" min="0" step="0.01" value={form.mrp} onChange={(e) => updateForm("mrp", e.target.value)} /></label><label>Barcode<input value={form.barcode} onChange={(e) => updateForm("barcode", e.target.value)} /></label><label className="full-width">Final category *<select required value={selectedCategoryId} onChange={(e) => setSelectedCategoryId(e.target.value)}><option value="">Select a final category</option>{finalCategories.map((c) => <option key={c.id} value={c.id}>{c.path.map((x) => x.name).join(" → ")}</option>)}</select></label><label>Shop name *<input required value={form.shopName} onChange={(e) => updateForm("shopName", e.target.value)} /></label><label>Shop address<input value={form.shopAddress} onChange={(e) => updateForm("shopAddress", e.target.value)} /></label><label>City<input value={form.shopCity} onChange={(e) => updateForm("shopCity", e.target.value)} /></label><label>State<input value={form.shopState} onChange={(e) => updateForm("shopState", e.target.value)} /></label><label className="full-width">Notes<textarea value={form.notes} onChange={(e) => updateForm("notes", e.target.value)} /></label></div><button className="primary-button" disabled={saving}>{saving ? "Registering..." : "Register Product"}</button></form>}
+    {ocr && <section className="scan-review"><div className="section-heading"><div><h2>OCR extraction and Rules Engine result</h2><p>Edit the extracted values here if OCR needs correction. These edits can be carried into registration with Use extracted data.</p></div></div><div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && value && typeof value === "object" && ["found","absent","unreadable","ambiguous"].includes(value.status)).map(([key, value]) => <label key={key} className="ocr-edit-field"><strong>{key.replace(/([A-Z])/g, " $1")}</strong><input value={value.value ?? ""} placeholder={value.status === "found" ? "Review value" : value.status} onChange={(e) => updateOcrField(key, e.target.value)} /><small>{value.status === "found" ? `${Math.round((value.confidence || 0) * 100)}% confidence` : value.status}</small></label>)}</div><div className="ocr-status-grid"><div><strong>Rules Engine</strong><span>{compliance?.overallStatus || "Not evaluated"}</span></div><div><strong>OCR confidence</strong><span>{ocr.needsReview ? "Review required" : "Confident"}</span></div><div><strong>Unreadable fields</strong><span>{ocr.unreadableFields?.length || 0}</span></div></div>{complianceError && <div className="status-message">Rules Engine: {complianceError.message}</div>}{compliance?.summary && <div className="ocr-summary">Rules: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}{violationFindings.length > 0 && <div className="finding-review"><strong>Inspector review of detected violations</strong><p>Checked findings will be accepted into the final inspection. Unchecked findings remain in the audit record as rejected by the inspector.</p>{violationFindings.map((v, i) => <label key={`${v.findingId || v.ruleId || "finding"}-${i}`} className="finding-review-item"><input type="checkbox" checked={isFindingAccepted(v, i)} onChange={() => toggleFinding(v, i)} /><span>{v.message || v.reason || JSON.stringify(v)}</span></label>)}<small>{acceptedFindingIds.length} of {violationFindings.length} detected violations accepted</small></div>}<label>Raw OCR<textarea value={ocr.rawText || ""} onChange={(e) => setOcr((c) => ({ ...c, rawText: e.target.value }))} /></label>{suggestedCategory && <div className="scan-suggestion"><span>Suggested final category: <strong>{suggestedCategory.path.map((x) => x.name).join(" → ")}</strong></span><button type="button" className="secondary-button" onClick={() => setSelectedCategoryId(suggestedCategory.id)}>Use suggestion</button></div>}<div className="scan-upload-actions register-after-ocr"><button type="button" className="primary-button" onClick={openRegistration}>Register Product</button></div></section>}
+    {!showRegistration && <section className="scan-review registration-form"><div className="section-heading"><div><h2>Register product</h2><p>Register manually, or after OCR use the extracted result to prefill the registration form.</p></div></div><div className="scan-upload-actions"><button type="button" className="primary-button" onClick={openRegistration}>{ocr ? "Open Registration" : "Register Manually"}</button></div></section>}
+    {showRegistration && <form className="scan-review registration-form" onSubmit={saveProduct}><div className="section-heading"><div><h2>Register product</h2><p>{ocr ? "Use extracted data to populate this form, then edit the final values before registering." : "Manual registration: package images are retained, but OCR is skipped."}</p></div></div>{ocr && <div className="scan-upload-actions extracted-data-actions"><button type="button" className="secondary-button" onClick={applyExtractedData}>Use extracted data</button>{useExtractedData && <span>Extracted data applied. All fields remain editable.</span>}</div>}<div className="form-grid"><label>Brand / Manufacturer<input value={form.brandName} onChange={(e) => updateForm("brandName", e.target.value)} /></label><label>Product name *<input required value={form.productName} onChange={(e) => updateForm("productName", e.target.value)} /></label><label>Quantity / volume / pieces<input value={form.netQuantity} onChange={(e) => updateForm("netQuantity", e.target.value)} /></label><label>Unit<select value={form.unit} onChange={(e) => updateForm("unit", e.target.value)}><option value="">Select</option><option value="mg">mg</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="pcs">pcs</option><option value="dozen">dozen</option><option value="m">m</option></select></label><label>MRP<input type="number" min="0" step="0.01" value={form.mrp} onChange={(e) => updateForm("mrp", e.target.value)} /></label><label>Barcode<input value={form.barcode} onChange={(e) => updateForm("barcode", e.target.value)} /></label><label className="full-width">Final category *<select required value={selectedCategoryId} onChange={(e) => setSelectedCategoryId(e.target.value)}><option value="">Select a final category</option>{finalCategories.map((c) => <option key={c.id} value={c.id}>{c.path.map((x) => x.name).join(" → ")}</option>)}</select></label><label>Shop name *<input required value={form.shopName} onChange={(e) => updateForm("shopName", e.target.value)} /></label><label>Shop address<input value={form.shopAddress} onChange={(e) => updateForm("shopAddress", e.target.value)} /></label><label>City<input value={form.shopCity} onChange={(e) => updateForm("shopCity", e.target.value)} /></label><label>State<input value={form.shopState} onChange={(e) => updateForm("shopState", e.target.value)} /></label><label className="full-width">Notes<textarea value={form.notes} onChange={(e) => updateForm("notes", e.target.value)} /></label></div><button className="primary-button" disabled={saving}>{saving ? "Registering..." : "Register Product"}</button></form>}
     {message && <div className="status-message">{message}</div>}<Link className="back-link" to="/history">View inspection history →</Link>
   </div>;
 }
