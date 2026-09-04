@@ -1,26 +1,35 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import "../styles/products.css";
 
 const API_URL = "http://localhost:5000/api";
 
 function ProductDetails() {
   const { id } = useParams();
-  const [product, setProduct] = useState(null);
+  const location = useLocation();
+  const [product, setProduct] = useState(location.state?.product || null);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    let cancelled = false;
+
     async function loadProduct() {
       try {
         const response = await fetch(`${API_URL}/products/${id}`);
-        if (!response.ok) throw new Error("Product not found");
-        setProduct(await response.json());
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.error || "Product not found");
+        if (!cancelled) {
+          setProduct(data);
+          setError("");
+        }
       } catch (err) {
-        setError(err.message);
+        if (!cancelled && !location.state?.product) setError(err.message);
       }
     }
+
     loadProduct();
-  }, [id]);
+    return () => { cancelled = true; };
+  }, [id, location.state]);
 
   if (error) return <div className="products-page"><p>{error}</p></div>;
   if (!product) return <div className="products-page"><p>Loading product...</p></div>;
