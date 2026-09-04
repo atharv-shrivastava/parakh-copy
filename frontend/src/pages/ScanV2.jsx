@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/auth";
 import ScanVisualCheck from "../components/ScanVisualCheck";
+import ImageEditor from "../components/ImageEditor";
 import "../styles/scan.css";
 
 const API_URL = "http://localhost:5000/api";
@@ -121,6 +122,7 @@ export default function ScanV2() {
   const [saving, setSaving] = useState(false);
   const [showRegistration, setShowRegistration] = useState(false);
   const [useExtractedData, setUseExtractedData] = useState(false);
+  const [editingImageIndex, setEditingImageIndex] = useState(null);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -147,9 +149,7 @@ export default function ScanV2() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  function addFiles(input) {
-    const files = Array.from(input || []).filter((file) => file instanceof File && file.type.startsWith("image/"));
-    setImages((current) => [...current, ...files.slice(0, MAX_IMAGES - current.length).map((file) => ({ file, url: URL.createObjectURL(file) }))]);
+  function resetAnalysisState() {
     setOcr(null);
     setCompliance(null);
     setComplianceError(null);
@@ -160,7 +160,24 @@ export default function ScanV2() {
     setUseExtractedData(false);
     setForm(EMPTY_FORM);
     window.sessionStorage.removeItem("parakhDeclarationEvidence");
-    setMessage("Images ready for analysis.");
+  }
+
+  function addFiles(input) {
+    const files = Array.from(input || []).filter((file) => file instanceof File && file.type.startsWith("image/"));
+    setImages((current) => [...current, ...files.slice(0, MAX_IMAGES - current.length).map((file) => ({ file, url: URL.createObjectURL(file) }))]);
+    resetAnalysisState();
+    setMessage("Images ready. Use Edit on any image to rotate or crop before analysis.");
+  }
+
+  function applyEditedImage(index, file) {
+    setImages((current) => current.map((item, imageIndex) => {
+      if (imageIndex !== index) return item;
+      URL.revokeObjectURL(item.url);
+      return { file, url: URL.createObjectURL(file) };
+    }));
+    setEditingImageIndex(null);
+    resetAnalysisState();
+    setMessage("Edited image applied. Analyze again to use the corrected orientation/crop.");
   }
 
   async function openCamera() {
@@ -207,14 +224,7 @@ export default function ScanV2() {
       if (i === index) URL.revokeObjectURL(item.url);
       return i !== index;
     }));
-    setOcr(null);
-    setCompliance(null);
-    setAcceptedFindingIds([]);
-    setProviderInfo(null);
-    setSelectedCategoryId("");
-    setShowRegistration(false);
-    setUseExtractedData(false);
-    setForm(EMPTY_FORM);
+    resetAnalysisState();
   }
 
   async function analyze() {
@@ -336,11 +346,13 @@ export default function ScanV2() {
     }
   }
 
+  const editingImage = editingImageIndex == null ? null : images[editingImageIndex];
+
   return <div className="scan-page">
     <div className="page-header">
       <p className="eyebrow">PRODUCT INSPECTION</p>
       <h1>Scan Product</h1>
-      <p>Capture or upload package images, detect printed text with local PaddleOCR and map only relevant declarations with the local semantic layer, review Rules Engine findings, then register the inspection.</p>
+      <p>Capture or upload package images, prepare their orientation/crop, detect printed text with local PaddleOCR and map declarations before registration.</p>
     </div>
 
     <section className="scan-area">
@@ -357,7 +369,9 @@ export default function ScanV2() {
 
     {cameraOpen && <div className="camera-overlay" role="dialog" aria-modal="true"><div className="camera-modal"><div className="camera-header"><h2>Capture package image</h2><button type="button" onClick={closeCamera}>Close</button></div><video ref={videoRef} className="camera-video" autoPlay playsInline muted /><div className="camera-actions"><button type="button" className="primary-button" onClick={capture}>Capture Photo</button><button type="button" className="secondary-button" onClick={closeCamera}>Cancel</button></div></div></div>}
 
-    {images.length > 0 && <section className="scan-review"><div className="section-heading"><div><h2>Evidence images</h2><p>All selected images are retained with the registered product.</p></div></div><div className="scan-image-grid">{images.map(({ url, file }, index) => <div className="scan-image-card" key={`${file.name}-${index}`}><img src={url} alt={`Package evidence ${index + 1}`} /><button type="button" onClick={() => remove(index)}>Remove</button><span>{file.name}</span></div>)}</div><button type="button" className="primary-button" onClick={analyze} disabled={analyzing}>{analyzing ? "Analyzing..." : "Analyze Images"}</button></section>}
+    {editingImage && <ImageEditor file={editingImage.file} url={editingImage.url} onApply={(file) => applyEditedImage(editingImageIndex, file)} onClose={() => setEditingImageIndex(null)} />}
+
+    {images.length > 0 && <section className="scan-review"><div className="section-heading"><div><h2>Evidence images</h2><p>Rotate or crop any image before OCR. Edited images are the ones sent to OCR and retained with the registered product.</p></div></div><div className="scan-image-grid">{images.map(({ url, file }, index) => <div className="scan-image-card" key={`${file.name}-${index}`}><img src={url} alt={`Package evidence ${index + 1}`} /><div className="scan-image-card-actions"><button type="button" onClick={() => setEditingImageIndex(index)}>Edit crop / rotate</button><button type="button" onClick={() => remove(index)}>Remove</button></div><span>{file.name}</span></div>)}</div><button type="button" className="primary-button" onClick={analyze} disabled={analyzing}>{analyzing ? "Analyzing..." : "Analyze Images"}</button></section>}
 
     {images.length > 0 && <ScanVisualCheck />}
 
