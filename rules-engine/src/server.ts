@@ -3,7 +3,7 @@ import { evaluateInspectionCompleteWithCurrentRules } from './engine/complete-ev
 import type { InspectionRequest } from '../domain/types.js';
 import { loadActiveRules } from './store/rules-store.js';
 
-const PORT = Number(process.env.RULES_ENGINE_PORT ?? 8090);
+const PORT = Number(process.env.PORT ?? process.env.RULES_ENGINE_PORT ?? 8090);
 
 function json(res: import('node:http').ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
@@ -35,4 +35,4 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`PARAKH rules engine listening on http://localhost:${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`PARAKH rules engine listening on port ${PORT}`));
