@@ -1,4 +1,4 @@
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 pydantic>=2.9,<3
-gliner2[local]>=0.2,<1
+gliner2[local]>=2,<3
