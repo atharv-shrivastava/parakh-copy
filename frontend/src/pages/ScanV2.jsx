@@ -4,7 +4,7 @@ import ScanVisualCheck from "../components/ScanVisualCheck";
 import "../styles/scan.css";
 
 const API_URL = "http://localhost:5000/api";
-const OCR_URL = "http://localhost:8080";
+const OCR_URL = "http://localhost:5000";
 const PADDLE_OCR_URL = "http://localhost:8081";
 const MAX_IMAGES = 4;
 const MAX_PUTER_IMAGE_SIZE = 10 * 1024 * 1024;
@@ -95,9 +95,16 @@ async function runGemini(files) {
   files.forEach((file) => fd.append("images", file));
   const response = await apiFetch(`${OCR_URL}/api/ocr/analyze`, { method: "POST", body: fd });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || data.message || "Gemini OCR service unavailable.");
-  if (!data.result) throw new Error("Gemini OCR returned no structured result.");
-  return { result: data.result, provider: data.provider || "gemini", model: data.model || "Gemini 3 Flash" };
+  if (!response.ok) throw new Error(data.error?.message || data.error || data.message || "Hybrid OCR service unavailable.");
+  if (!data.result) throw new Error("Hybrid OCR returned no structured result.");
+  return {
+    result: data.result,
+    provider: data.provider || "local",
+    model: data.model || "local declaration mapper",
+    semantic: data.semantic || data.result.semantic || null,
+    detectionProvider: data.detectionProvider || data.detectionProviders?.[0] || null,
+    detectionProviders: data.detectionProviders || [],
+  };
 }
 
 async function runPaddle(files) {
@@ -139,8 +146,10 @@ function enrichDeclarationEvidence(extracted, paddleResult) {
     usedPaddle.add(bestIndex);
     return { ...item, boundingBox: paddleEvidence[bestIndex].boundingBox };
   });
-  const unmatched = paddleEvidence.filter((_item, index) => !usedPaddle.has(index)).map((item) => ({ ...item, type: item.type || "OCR_TEXT" }));
-  return { ...extracted, declarationEvidence: [...merged, ...unmatched], rawText: extracted?.rawText || paddleResult?.rawText || "" };
+  // Do not turn every OCR line into a semantic declaration. Unmatched physical OCR
+  // stays available through rawText/OCR evidence, while the Declaration Map contains
+  // only recognized declaration types.
+  return { ...extracted, declarationEvidence: merged, rawText: extracted?.rawText || paddleResult?.rawText || "" };
 }
 
 async function runPuter(files) {
@@ -179,16 +188,19 @@ async function runPuter(files) {
 }
 
 async function runOcr(files) {
-  const [geminiAttempt, paddleAttempt] = await Promise.allSettled([runGemini(files), runPaddle(files)]);
+  // Backend now handles Cloud Vision + local semantic mapping + Gemini/OpenAI.
+  // Paddle remains in parallel as an independent physical OCR/bounding-box source.
+  const [hybridAttempt, paddleAttempt] = await Promise.allSettled([runGemini(files), runPaddle(files)]);
   const paddle = paddleAttempt.status === "fulfilled" ? paddleAttempt.value : null;
-  const gemini = geminiAttempt.status === "fulfilled" ? geminiAttempt.value : null;
+  const hybrid = hybridAttempt.status === "fulfilled" ? hybridAttempt.value : null;
 
-  if (gemini) {
-    const result = enrichDeclarationEvidence(gemini.result, paddle?.result);
+  if (hybrid) {
+    const result = enrichDeclarationEvidence(hybrid.result, paddle?.result);
     return {
-      ...gemini,
+      ...hybrid,
       result,
-      detectionProvider: paddle ? "paddleocr" : null,
+      detectionProvider: paddle ? [hybrid.detectionProvider, "paddleocr"].filter(Boolean).join(" + ") : hybrid.detectionProvider,
+      detectionProviders: Array.from(new Set([...(hybrid.detectionProviders || []), ...(paddle ? ["paddleocr"] : [])].filter(Boolean))),
       fallbackReason: paddle ? null : `PaddleOCR unavailable: ${paddleAttempt.reason?.message || "unknown error"}`,
     };
   }
@@ -200,7 +212,7 @@ async function runOcr(files) {
       ...fallback,
       result,
       detectionProvider: paddle ? "paddleocr" : null,
-      fallbackReason: `Gemini unavailable: ${geminiAttempt.reason?.message || "unknown error"}`,
+      fallbackReason: `Hybrid backend unavailable: ${hybridAttempt.reason?.message || "unknown error"}`,
     };
   } catch (puterError) {
     if (paddle) {
@@ -209,10 +221,11 @@ async function runOcr(files) {
         model: "PaddleOCR",
         result: paddle.result,
         detectionProvider: "paddleocr",
-        fallbackReason: `Gemini and Puter.js unavailable. PaddleOCR was used as the final OCR fallback. Gemini: ${geminiAttempt.reason?.message || "unknown error"}; Puter: ${puterError.message}`,
+        detectionProviders: ["paddleocr"],
+        fallbackReason: `Hybrid backend and Puter.js unavailable. PaddleOCR was used as the final OCR fallback. Hybrid: ${hybridAttempt.reason?.message || "unknown error"}; Puter: ${puterError.message}`,
       };
     }
-    throw new Error(`All OCR providers failed. Gemini: ${geminiAttempt.reason?.message || "unknown error"}; Puter: ${puterError.message}`);
+    throw new Error(`All OCR providers failed. Hybrid: ${hybridAttempt.reason?.message || "unknown error"}; Puter: ${puterError.message}`);
   }
 }
 
@@ -325,7 +338,7 @@ export default function ScanV2() {
   async function analyze() {
     if (!images.length) return setMessage("Add at least one package image first.");
     setAnalyzing(true);
-    setMessage("Running Gemini + PaddleOCR in parallel, with Puter.js as fallback...");
+    setMessage("Running PaddleOCR + Cloud Vision, with local declaration mapping and Gemini/OpenAI fallback...");
     try {
       const info = await runOcr(images.map((item) => item.file));
       const extracted = info.result;
@@ -333,11 +346,17 @@ export default function ScanV2() {
       window.dispatchEvent(new CustomEvent("parakh:declaration-evidence", { detail: extracted.declarationEvidence || [] }));
       const visualInspection = readVisualInspection();
       setProviderInfo(info);
-      const providerMessage = info.provider === "gemini"
-        ? `OCR completed with Gemini 3 Flash + PaddleOCR${info.detectionProvider ? " detection" : ""}. Running Rules Engine...`
-        : info.provider === "puter-js"
-          ? `Gemini was unavailable. Puter.js completed OCR${info.detectionProvider ? " with PaddleOCR detection" : ""}. Running Rules Engine...`
-          : "Gemini and Puter.js were unavailable. PaddleOCR completed the final OCR fallback. Running Rules Engine...";
+      const semanticLabel = info.semantic?.provider === "gemini"
+        ? `Gemini ${info.model || "semantic mapper"}`
+        : info.semantic?.provider === "openai"
+          ? `OpenAI ${info.model || "semantic mapper"}`
+          : info.semantic?.provider === "local"
+            ? "Local semantic mapper"
+            : info.provider === "puter-js"
+              ? "Puter.js fallback"
+              : "OCR fallback";
+      const detectionLabel = info.detectionProviders?.length ? info.detectionProviders.join(" + ") : info.detectionProvider || "OCR";
+      const providerMessage = `Hybrid analysis completed with ${semanticLabel} + ${detectionLabel}. Running Rules Engine...`;
       setMessage(providerMessage);
       const response = await apiFetch(`${OCR_URL}/api/ocr/evaluate-structured`, {
         method: "POST",
@@ -381,7 +400,7 @@ export default function ScanV2() {
       }));
       setSelectedCategoryId("");
       setShowRegistration(true);
-      setMessage(info.fallbackReason ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} ${info.fallbackReason}` : "Gemini/PaddleOCR analysis and Rules Engine evaluation complete. Select an offline category before registration.");
+      setMessage(info.fallbackReason ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} ${info.fallbackReason}` : "Hybrid OCR and Rules Engine evaluation complete. Select an offline category before registration.");
     } catch (error) {
       setMessage(error.message || "OCR analysis failed.");
     } finally {
@@ -432,7 +451,7 @@ export default function ScanV2() {
     <div className="page-header">
       <p className="eyebrow">PRODUCT INSPECTION</p>
       <h1>Scan Product</h1>
-      <p>Capture or upload package images, extract declarations with Gemini 3 Flash + PaddleOCR, review Rules Engine findings, then register the inspection.</p>
+      <p>Capture or upload package images, detect printed text with PaddleOCR and Cloud Vision, map only relevant declarations with the hybrid semantic layer, review Rules Engine findings, then register the inspection.</p>
     </div>
 
     <section className="scan-area">
@@ -453,9 +472,9 @@ export default function ScanV2() {
 
     {images.length > 0 && <ScanVisualCheck />}
 
-    {providerInfo && <section className="ocr-status-grid"><div><strong>Semantic OCR</strong><span>{providerInfo.provider === "gemini" ? "Gemini 3 Flash" : providerInfo.provider === "puter-js" ? "Puter.js fallback" : "PaddleOCR final fallback"}</span></div><div><strong>Text detection</strong><span>{providerInfo.detectionProvider === "paddleocr" ? "PaddleOCR" : "Unavailable"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}/{violations.length}</span></div></section>}
+    {providerInfo && <section className="ocr-status-grid"><div><strong>Semantic mapper</strong><span>{providerInfo.semantic?.provider === "gemini" ? `${providerInfo.model || "Gemini"}` : providerInfo.semantic?.provider === "openai" ? `${providerInfo.model || "OpenAI"}` : providerInfo.semantic?.provider === "local" ? "Local declaration mapper" : providerInfo.provider || "fallback"}</span></div><div><strong>Text detection</strong><span>{providerInfo.detectionProviders?.length ? providerInfo.detectionProviders.join(" + ") : providerInfo.detectionProvider || "Unavailable"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}/{violations.length}</span></div></section>}
 
-    {ocr && <section className="scan-review"><div className="section-heading"><div><h2>OCR extraction and rule review</h2><p>Correct OCR values and deselect false-positive violations before registration.</p></div></div><div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && value && typeof value === "object" && value.status === "found").map(([key, value]) => <div key={key}><strong>{key.replace(/([A-Z])/g, " $1")}</strong><span>{String(value.value)}</span><small>{Math.round(Number(value.confidence || 0) * 100)}% confidence</small></div>)}</div>{complianceError && <div className="status-message">Rules Engine: {complianceError.message || complianceError}</div>}{compliance?.summary && <div className="ocr-summary">Rules: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}{violations.length > 0 && <div className="rule-review-panel"><div className="section-heading"><div><h3>Inspector review</h3><p>Uncheck a false positive. The original engine finding remains in the audit record.</p></div></div>{violations.map((finding) => <label className="rule-review-row" key={finding.findingId}><input type="checkbox" checked={acceptedFindingIds.includes(finding.findingId)} onChange={() => toggle(finding.findingId)} /><span><strong>{finding.ruleCode || finding.ruleNumber}</strong><small>{finding.ruleNumber ? `Rule ${finding.ruleNumber} · ` : ""}{finding.severity || "REVIEW"}</small><em>{finding.message || finding.violationReason || "Violation detected"}</em></span></label>)}<div className="ocr-summary">Accepted violations: <strong>{accepted.length}</strong> of {violations.length}</div></div>}</section>}
+    {ocr && <section className="scan-review"><div className="section-heading"><div><h2>OCR extraction and rule review</h2><p>Correct OCR values and deselect false-positive violations before registration.</p></div></div><div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && key !== "semantic" && value && typeof value === "object" && value.status === "found").map(([key, value]) => <div key={key}><strong>{key.replace(/([A-Z])/g, " $1")}</strong><span>{String(value.value)}</span><small>{Math.round(Number(value.confidence || 0) * 100)}% confidence</small></div>)}</div>{complianceError && <div className="status-message">Rules Engine: {complianceError.message || complianceError}</div>}{compliance?.summary && <div className="ocr-summary">Rules: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}{violations.length > 0 && <div className="rule-review-panel"><div className="section-heading"><div><h3>Inspector review</h3><p>Uncheck a false positive. The original engine finding remains in the audit record.</p></div></div>{violations.map((finding) => <label className="rule-review-row" key={finding.findingId}><input type="checkbox" checked={acceptedFindingIds.includes(finding.findingId)} onChange={() => toggle(finding.findingId)} /><span><strong>{finding.ruleCode || finding.ruleNumber}</strong><small>{finding.ruleNumber ? `Rule ${finding.ruleNumber} · ` : ""}{finding.severity || "REVIEW"}</small><em>{finding.message || finding.violationReason || "Violation detected"}</em></span></label>)}<div className="ocr-summary">Accepted violations: <strong>{accepted.length}</strong> of {violations.length}</div></div>}</section>}
 
     {!showRegistration && <section className="scan-review registration-form"><div className="section-heading"><div><h2>Register product</h2><p>Manual registration still retains images but skips OCR.</p></div></div><button type="button" className="primary-button" onClick={() => setShowRegistration(true)}>Register Manually</button></section>}
 
