@@ -2,6 +2,11 @@ import io
 import os
 from typing import Any
 
+# PaddleX can enable oneDNN by default on CPU. On some Windows/PaddlePaddle 3.x
+# combinations this triggers the PIR/oneDNN runtime conversion error during OCR.
+os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
+os.environ.setdefault("FLAGS_use_mkldnn", "0")
+
 import numpy as np
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +37,8 @@ ocr = PaddleOCR(
     use_doc_orientation_classify=_use_doc_orientation,
     use_doc_unwarping=_use_doc_unwarping,
     use_textline_orientation=_use_textline_orientation,
+    # Avoid the Windows/CPU PIR + oneDNN runtime conversion crash.
+    enable_mkldnn=False,
 )
 
 
