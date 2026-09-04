@@ -4,15 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node scripts/prepare-scan-local.mjs && vite",
+    "build": "node scripts/prepare-scan-local.mjs && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.3"
+    "react-router-dom": "^7.18.3",
+    "jspdf": "^4.2.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
