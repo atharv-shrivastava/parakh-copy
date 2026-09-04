@@ -12,12 +12,21 @@ import { runSemanticMapper } from "./semanticMapper.js";
 const router = express.Router();
 const config = getOcrConfig();
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
-const storage = multer.diskStorage({ destination: (_req, _file, cb) => cb(null, config.tempDir), filename: (_req, file, cb) => cb(null, `parakh-ocr-${crypto.randomUUID()}${path.extname(file.originalname)}`) });
-const upload = multer({ storage, fileFilter: (_req, file, cb) => allowedTypes.has(file.mimetype) ? cb(null, true) : cb(Object.assign(new Error("Only JPEG, PNG and WebP images are supported."), { code: "OCR_UNSUPPORTED_FORMAT", statusCode: 415 })), limits: { files: config.maxImages, fileSize: config.maxImageSizeBytes } });
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, config.tempDir),
+  filename: (_req, file, cb) => cb(null, `parakh-ocr-${crypto.randomUUID()}${path.extname(file.originalname)}`),
+});
+const upload = multer({
+  storage,
+  fileFilter: (_req, file, cb) => allowedTypes.has(file.mimetype)
+    ? cb(null, true)
+    : cb(Object.assign(new Error("Only JPEG, PNG and WebP images are supported."), { code: "OCR_UNSUPPORTED_FORMAT", statusCode: 415 })),
+  limits: { files: config.maxImages, fileSize: config.maxImageSizeBytes },
+});
 
 function detectFormat(buffer) {
   if (buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return "image/jpeg";
-  if (buffer.subarray(0, 8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]))) return "image/png";
+  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
   if (buffer.subarray(0, 4).toString() === "RIFF" && buffer.subarray(8, 12).toString() === "WEBP") return "image/webp";
   return null;
 }
@@ -76,17 +85,89 @@ async function readUploadedImages(files, providedDimensions = []) {
       throw error;
     }
     const parsedDimensions = imageDimensions(buffer, mediaType) || providedDimensions[index] || null;
-    images.push({ base64: buffer.toString("base64"), mediaType, imageWidth: Number(parsedDimensions?.width) || 0, imageHeight: Number(parsedDimensions?.height) || 0 });
+    images.push({
+      base64: buffer.toString("base64"),
+      mediaType,
+      imageWidth: Number(parsedDimensions?.width) || 0,
+      imageHeight: Number(parsedDimensions?.height) || 0,
+    });
   }
   return images;
 }
 
+function paddleExtension(mediaType) {
+  if (mediaType === "image/png") return "png";
+  if (mediaType === "image/webp") return "webp";
+  return "jpg";
+}
+
+async function analyzeWithPaddleOcr(images) {
+  const formData = new FormData();
+  images.forEach((image, index) => {
+    const bytes = Buffer.from(image.base64, "base64");
+    formData.append(
+      "images",
+      new Blob([bytes], { type: image.mediaType }),
+      `parakh-ocr-${index + 1}.${paddleExtension(image.mediaType)}`,
+    );
+  });
+
+  const paddleUrl = process.env.PADDLE_OCR_URL || "http://localhost:8081";
+  const response = await fetch(`${paddleUrl}/api/ocr/analyze`, {
+    method: "POST",
+    body: formData,
+    signal: AbortSignal.timeout(Number(process.env.OCR_PADDLE_TIMEOUT_MS || "30000")),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error || data?.message || `PaddleOCR failed (${response.status}).`);
+
+  const rawEvidence = Array.isArray(data?.result?.declarationEvidence) ? data.result.declarationEvidence : [];
+  const evidence = rawEvidence.map((item, index) => ({
+    id: String(item.id ?? `paddle-${Number(item?.imageIndex || 1) - 1}:${index}`),
+    imageIndex: Math.max(0, Number(item?.imageIndex || 1) - 1),
+    text: String(item?.text || "").trim(),
+    confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
+    boundingBox: item?.boundingBox || null,
+  })).filter((item) => item.text);
+
+  return {
+    provider: "paddleocr",
+    model: data?.model || "PaddleOCR",
+    rawText: String(data?.result?.rawText || evidence.map((item) => item.text).join("\n")),
+    evidence,
+  };
+}
+
 async function runHybrid(images) {
-  const [visionAttempt] = await Promise.allSettled([analyzeWithCloudVision(images, config)]);
-  if (visionAttempt.status !== "fulfilled") throw visionAttempt.reason;
-  const vision = visionAttempt.value;
-  const semantic = await runSemanticMapper(vision.evidence, config);
-  return { vision, semantic };
+  const [visionAttempt, paddleAttempt] = await Promise.allSettled([
+    analyzeWithCloudVision(images, config),
+    analyzeWithPaddleOcr(images),
+  ]);
+
+  const vision = visionAttempt.status === "fulfilled" ? visionAttempt.value : null;
+  const paddle = paddleAttempt.status === "fulfilled" ? paddleAttempt.value : null;
+  const baseEvidence = vision?.evidence?.length ? vision.evidence : (paddle?.evidence || []);
+
+  if (!baseEvidence.length) {
+    const error = visionAttempt.reason || paddleAttempt.reason || new Error("No OCR evidence was produced.");
+    throw error;
+  }
+
+  const semantic = await runSemanticMapper(baseEvidence, config);
+  const detectionProviders = [vision ? "cloud-vision" : null, paddle ? "paddleocr" : null].filter(Boolean);
+  const fallbackReason = vision ? null : (visionAttempt.reason?.message || "Cloud Vision unavailable; PaddleOCR used.");
+
+  return {
+    vision: vision || {
+      provider: "paddleocr",
+      rawText: paddle?.rawText || "",
+      evidence: paddle?.evidence || [],
+    },
+    paddle,
+    semantic,
+    detectionProviders,
+    fallbackReason,
+  };
 }
 
 function fieldSource(fieldName) {
@@ -154,15 +235,16 @@ async function handleAnalyze(req, res, files, routeName) {
   try {
     if (!files.length) return res.status(400).json({ error: { code: "OCR_NO_IMAGES", message: "Upload at least one package image." } });
     const images = await readUploadedImages(files, safeDimensions(req.body?.dimensions));
-    const { vision, semantic } = await runHybrid(images);
+    const { vision, paddle, semantic, detectionProviders, fallbackReason } = await runHybrid(images);
     res.json({
       result: semantic,
       provider: semantic.semantic?.provider || "local",
       model: semantic.semantic?.provider === "openai" ? config.openaiSemanticModel : semantic.semantic?.provider === "gemini" ? config.geminiModel : "local declaration mapper",
-      detectionProvider: vision.provider,
-      detectionProviders: [vision.provider],
-      rawText: vision.rawText,
+      detectionProvider: detectionProviders.join(" + ") || vision.provider,
+      detectionProviders,
+      rawText: vision.rawText || paddle?.rawText || "",
       semantic: semantic.semantic,
+      fallbackReason,
     });
   } catch (error) {
     console.error(`[${routeName}]`, error);
