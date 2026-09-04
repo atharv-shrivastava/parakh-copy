@@ -113,7 +113,10 @@ async function analyzeWithPaddle(images) {
     formData.append("images", new Blob([bytes], { type: image.mediaType }), `parakh-${index + 1}.${extension(image.mediaType)}`);
   });
   const paddleUrl = process.env.PADDLE_OCR_URL || "http://localhost:8081";
-  const response = await fetch(`${paddleUrl}/api/ocr/analyze`, { method: "POST", body: formData, signal: AbortSignal.timeout(Number(process.env.OCR_PADDLE_TIMEOUT_MS || "30000")) });
+  const perImageTimeoutMs = Number(process.env.OCR_PADDLE_PER_IMAGE_TIMEOUT_MS || "20000");
+  const maxPaddleTimeoutMs = Number(process.env.OCR_PADDLE_MAX_TIMEOUT_MS || "90000");
+  const timeoutMs = Math.min(maxPaddleTimeoutMs, Math.max(Number(process.env.OCR_PADDLE_TIMEOUT_MS || "30000"), perImageTimeoutMs * Math.max(1, images.length)));
+  const response = await fetch(`${paddleUrl}/api/ocr/analyze`, { method: "POST", body: formData, signal: AbortSignal.timeout(timeoutMs) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.error || data?.message || data?.detail || `PaddleOCR failed (${response.status}).`);
   const rawEvidence = Array.isArray(data?.result?.declarationEvidence) ? data.result.declarationEvidence : [];
