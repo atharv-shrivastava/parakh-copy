@@ -100,7 +100,7 @@ async function analyzeWithPaddleAndGliner(images) {
   return { paddle, semantic, heuristic, paddleMs, semanticMs, heuristicMs };
 }
 
-const PROMOTIONAL_TEXT = /^(?:save|save\s+up\s+to|offer|special\s+offer|discount|free|buy\s+\d+|upto|up\s+to|limited\s+offer|new|introductory)\b|\b(?:save|discount|off)\s*\d+/i;
+const PROMOTIONAL_TEXT = /^(?:save\s*\d+|save\s+up\s+to|offer|special\s+offer|discount|free|buy\s+\d+|upto|up\s+to|limited\s+offer|new|introductory)\b|\b(?:save|discount|off)\s*\d+/i;
 const IDENTITY_NOISE = /^(?:for|visit|toll|e-?mail|made\s+in|store\s+in|for\s+sale|marketed|manufactured|mfd|mfg|packed|pkd|imported|consumer|customer|country|address|ingredients?|nutrition|net|best|use|mrp|batch|barcode|license|manager|regd|registered|division|office)\b/i;
 const CLAIM_TEXT = /\b(?:tightens?|fights?|gives?|protects?|prevents?|removes?|reduces?|controls?|treats?|helps?|improves?|strengthens?|whitens?|freshens?|cleans?|purifies?|repels?|restores?|supports?|boosts?|enhances?|long\s+life|healthy\s+gums?|fresh\s+breath)\b/i;
 const INNER_PACK_REFERENCE = /\b(?:refer|see|check)\b.{0,80}\b(?:individual|inner|inside|pack)\b|\b(?:individual|inner)\s+pack\b.{0,80}\b(?:batch|mfg|manufactur|exp|expiry|mrp|price|details)\b/i;
@@ -334,13 +334,15 @@ async function handleFastAnalyze(_req, res, files) {
       existingFields: merged,
     });
     Object.assign(merged, reconciliation.fields);
+    const postReconciliation = sanitizeIdentityFields(merged, paddle.rawText);
+    Object.assign(merged, postReconciliation);
     merged.semanticReconciliation = reconciliation.metadata;
     merged.candidateEvidence = {
       ...(merged.candidateEvidence || {}),
-      geometryIdentityCandidates: reconciliation.candidateEvidence.identity,
+      geometryIdentityCandidates: reconciliation?.candidateEvidence?.identity || [],
     };
 
-    const innerPackReference = detectInnerPackReference(paddle.rawText) || reconciliation.innerPackReference.detected;
+    const innerPackReference = detectInnerPackReference(paddle.rawText) || Boolean(reconciliation?.innerPackReference);
     if (innerPackReference) {
       merged.innerPackReference = true;
       merged.warnings = Array.from(new Set([...(Array.isArray(merged.warnings) ? merged.warnings : []), "Package text refers to an individual/inner pack for additional batch, date, price, or related details."]));
