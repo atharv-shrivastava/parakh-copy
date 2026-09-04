@@ -85,10 +85,10 @@ async function fileToDataUrl(file) {
   return canvas.toDataURL("image/jpeg", 0.72);
 }
 
-async function runOcr(files) {
+async function runOcr(files, signal) {
   const fd = new FormData();
   files.forEach((file) => fd.append("images", file));
-  const response = await apiFetch(`${OCR_URL}/api/ocr/analyze`, { method: "POST", body: fd });
+  const response = await apiFetch(`${OCR_URL}/api/ocr/analyze`, { method: "POST", body: fd, signal });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.error?.message || data.error || data.message || "Local OCR service unavailable.");
@@ -107,6 +107,7 @@ async function runOcr(files) {
 
 export default function ScanV2() {
   const videoRef = useRef(null);
+  const controllerRef = useRef(null);
   const [categories, setCategories] = useState([]);
   const [images, setImages] = useState([]);
   const [ocr, setOcr] = useState(null);
@@ -150,6 +151,8 @@ export default function ScanV2() {
   }
 
   function resetScan() {
+    controllerRef.current?.abort();
+    controllerRef.current = null;
     if (videoRef.current?.srcObject) videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
     if (videoRef.current) videoRef.current.srcObject = null;
     setCameraOpen(false);
@@ -160,6 +163,8 @@ export default function ScanV2() {
     });
     setEditingImageIndex(null);
     resetAnalysisState();
+    setAnalyzing(false);
+    setSaving(false);
     setMessage("Scan reset. Add new package images to begin again.");
   }
 
@@ -245,8 +250,11 @@ export default function ScanV2() {
     if (!images.length) return setMessage("Add at least one package image first.");
     setAnalyzing(true);
     setMessage("Running local PaddleOCR + declaration mapping...");
+    const controller = new AbortController();
+    controllerRef.current?.abort();
+    controllerRef.current = controller;
     try {
-      const info = await runOcr(images.map((item) => item.file));
+      const info = await runOcr(images.map((item) => item.file), controller.signal);
       const extracted = info.result;
       window.sessionStorage.setItem("parakhDeclarationEvidence", JSON.stringify(extracted.declarationEvidence || []));
       window.dispatchEvent(new CustomEvent("parakh:declaration-evidence", { detail: extracted.declarationEvidence || [] }));
@@ -281,6 +289,7 @@ export default function ScanV2() {
           isImported: false,
           packageType: "retail",
         }),
+        signal: controller.signal,
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Rules Engine evaluation failed");
@@ -294,8 +303,10 @@ export default function ScanV2() {
       setUseExtractedData(false);
       setMessage(info.fallbackReason ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} ${info.fallbackReason}` : "Local OCR and Rules Engine evaluation complete. Review the extracted fields, then choose how to register the product.");
     } catch (error) {
+      if (error?.name === "AbortError") return;
       setMessage(error.message || "OCR analysis failed.");
     } finally {
+      if (controllerRef.current === controller) controllerRef.current = null;
       setAnalyzing(false);
     }
   }
@@ -375,7 +386,7 @@ export default function ScanV2() {
         <button type="button" className="primary-button" onClick={openCamera}>Open Camera</button>
         <label className="secondary-button scan-file-button">Upload Images<input type="file" accept="image/*" multiple onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} hidden /></label>
       </div>
-      <div className="scan-upload-actions scan-reset-actions"><button type="button" className="secondary-button" onClick={resetScan} disabled={analyzing || saving}>Stop & Reset Scan</button></div>
+      <div className="scan-upload-actions scan-reset-actions"><button type="button" className="secondary-button" onClick={resetScan}>Stop & Reset Scan</button></div>
       <p className="scan-limit">{images.length}/{MAX_IMAGES} images selected</p>
       {cameraError && <div className="status-message">{cameraError}</div>}
     </section>
