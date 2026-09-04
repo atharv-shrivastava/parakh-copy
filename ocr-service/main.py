@@ -16,6 +16,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 from paddleocr import PaddleOCR
 
+try:
+    from rapidocr import RapidOCR
+except ImportError:
+    RapidOCR = None
+
 app = FastAPI(title="PARAKH PaddleOCR Service")
 
 app.add_middleware(
@@ -39,13 +44,9 @@ _max_ocr_side = max(800, int(os.getenv("PADDLEOCR_MAX_SIDE", "1200")))
 _cache_ttl = max(5, int(os.getenv("PADDLEOCR_CACHE_TTL_SECONDS", "30")))
 _cache_limit = max(1, int(os.getenv("PADDLEOCR_CACHE_ITEMS", "8")))
 
-ocr = PaddleOCR(
-    lang=_lang,
-    use_doc_orientation_classify=_use_doc_orientation,
-    use_doc_unwarping=_use_doc_unwarping,
-    use_textline_orientation=_use_textline_orientation,
-    enable_mkldnn=False,
-)
+_engine_name = os.getenv("OCR_ENGINE", "rapidocr").lower()
+_paddle_ocr = None
+_rapid_ocr = None
 
 _result_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _inflight: dict[str, asyncio.Task] = {}
@@ -110,6 +111,79 @@ def extract_result(result: Any, image_index: int, width: int, height: int):
     return entries
 
 
+def _get_rapidocr():
+    global _rapid_ocr
+    if _rapid_ocr is None:
+        if RapidOCR is None:
+            raise RuntimeError("RapidOCR is not installed. Run: pip install rapidocr onnxruntime")
+        _rapid_ocr = RapidOCR(params={"Global.use_cls": False, "Det.lang_type": "en", "Rec.lang_type": "en"})
+    return _rapid_ocr
+
+
+def _get_paddleocr():
+    global _paddle_ocr
+    if _paddle_ocr is None:
+        _paddle_ocr = PaddleOCR(
+            lang=_lang,
+            use_doc_orientation_classify=_use_doc_orientation,
+            use_doc_unwarping=_use_doc_unwarping,
+            use_textline_orientation=_use_textline_orientation,
+            enable_mkldnn=False,
+        )
+    return _paddle_ocr
+
+
+def extract_rapid_result(result: Any, image_index: int, width: int, height: int):
+    boxes = getattr(result, "boxes", None)
+    texts = getattr(result, "txts", None)
+    scores = getattr(result, "scores", None)
+    if boxes is None or texts is None:
+        return []
+
+    entries = []
+    for index, text in enumerate(texts):
+        text_value = str(text or "").strip()
+        if not text_value:
+            continue
+        score = to_float(scores[index], 0.0) if scores is not None and index < len(scores) else 0.0
+        points = boxes[index].tolist() if index < len(boxes) and hasattr(boxes[index], "tolist") else boxes[index] if index < len(boxes) else None
+        box = normalize_box(points, width, height)
+        entries.append({
+            "imageIndex": image_index + 1,
+            "type": "OCR_TEXT",
+            "text": text_value,
+            "confidence": max(0.0, min(1.0, score)),
+            "boundingBox": box,
+            "source": "rapidocr",
+        })
+    return entries
+
+
+async def _run_ocr_engine(image_array: np.ndarray, image_index: int, width: int, height: int):
+    if _engine_name == "paddleocr":
+        result = _get_paddleocr().predict(image_array)
+        entries = []
+        for item in result:
+            entries.extend(extract_result(item, image_index, width, height))
+        return entries, "paddleocr"
+
+    if _engine_name != "rapidocr":
+        raise RuntimeError(f"Unsupported OCR_ENGINE '{_engine_name}'. Use rapidocr or paddleocr.")
+
+    engine = _get_rapidocr()
+    result = await asyncio.to_thread(engine, image_array, use_cls=False)
+    entries = extract_rapid_result(result, image_index, width, height)
+    if entries:
+        return entries, "rapidocr"
+
+    # Keep PaddleOCR as a recovery engine, never as the normal hot path.
+    paddle_entries = []
+    result = await asyncio.to_thread(_get_paddleocr().predict, image_array)
+    for item in result:
+        paddle_entries.extend(extract_result(item, image_index, width, height))
+    return paddle_entries, "paddleocr-fallback"
+
+
 def _cache_key(items: list[tuple[bytes, str]]) -> str:
     digest = hashlib.sha256()
     for content, media_type in items:
@@ -160,18 +234,14 @@ async def _analyze_contents(items: list[tuple[bytes, str]]):
 
         width, height = pil_image.size
         image_array = np.asarray(pil_image)
-        result = ocr.predict(image_array)
-
-        entries = []
-        for item in result:
-            entries.extend(extract_result(item, image_index, width, height))
+        entries, engine_used = await _run_ocr_engine(image_array, image_index, width, height)
 
         all_entries.extend(entries)
         raw_text_parts.append("\n".join(entry["text"] for entry in entries))
 
     return {
-        "provider": "paddleocr",
-        "model": "PaddleOCR",
+        "provider": engine_used if "engine_used" in locals() else _engine_name,
+        "model": "RapidOCR" if engine_used == "rapidocr" else "PaddleOCR",
         "result": {
             "declarationEvidence": all_entries,
             "rawText": "\n\n".join(part for part in raw_text_parts if part).strip(),
