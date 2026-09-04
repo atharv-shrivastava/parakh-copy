@@ -1,4 +1,5 @@
 import express from "express";
+import sharp from "sharp";
 import { authenticate } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -11,6 +12,20 @@ function isPrivateHost(hostname) {
     /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
 }
 
+function isSupportedNativeType(contentType) {
+  return ["image/jpeg", "image/png", "image/webp"].includes(String(contentType || "").split(";")[0].trim().toLowerCase());
+}
+
+async function normalizeImage(buffer, contentType) {
+  const normalizedType = String(contentType || "").split(";")[0].trim().toLowerCase();
+  if (isSupportedNativeType(normalizedType)) {
+    return { buffer, mediaType: normalizedType, extension: normalizedType === "image/png" ? "png" : normalizedType === "image/webp" ? "webp" : "jpg" };
+  }
+
+  const converted = await sharp(buffer, { failOn: "none" }).rotate().jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+  return { buffer: converted, mediaType: "image/jpeg", extension: "jpg" };
+}
+
 router.post("/images", async (req, res) => {
   try {
     const imageUrls = Array.isArray(req.body?.imageUrls) ? req.body.imageUrls.slice(0, 6) : [];
@@ -18,27 +33,49 @@ router.post("/images", async (req, res) => {
 
     const formData = new FormData();
     let added = 0;
+    const skipped = [];
+
     for (const rawValue of imageUrls) {
       try {
         const imageUrl = new URL(String(rawValue || ""));
-        if (!["http:", "https:"].includes(imageUrl.protocol) || isPrivateHost(imageUrl.hostname)) continue;
+        if (!["http:", "https:"].includes(imageUrl.protocol) || isPrivateHost(imageUrl.hostname)) {
+          skipped.push("private-or-invalid-url");
+          continue;
+        }
+
         const response = await fetch(imageUrl.href, {
           headers: {
             "user-agent": "PARAKH Compliance Inspection/1.0",
-            accept: "image/jpeg,image/png,image/webp,image/*",
+            accept: "image/avif,image/webp,image/jpeg,image/png,image/*,*/*;q=0.8",
           },
           signal: AbortSignal.timeout(10000),
         });
-        const contentType = response.headers.get("content-type") || "";
-        if (!response.ok || !contentType.startsWith("image/")) continue;
+        if (!response.ok) {
+          skipped.push(`http-${response.status}`);
+          continue;
+        }
+
+        const contentType = response.headers.get("content-type") || "application/octet-stream";
         const buffer = Buffer.from(await response.arrayBuffer());
-        if (!buffer.length || buffer.length > 12 * 1024 * 1024) continue;
-        formData.append("images", new Blob([buffer], { type: contentType }), `ecommerce-${added + 1}.jpg`);
+        if (!buffer.length || buffer.length > 16 * 1024 * 1024) {
+          skipped.push("empty-or-too-large");
+          continue;
+        }
+
+        const normalized = await normalizeImage(buffer, contentType);
+        formData.append("images", new Blob([normalized.buffer], { type: normalized.mediaType }), `ecommerce-${added + 1}.${normalized.extension}`);
         added += 1;
-      } catch {}
+      } catch (error) {
+        skipped.push(error?.message || "download-or-conversion-failed");
+      }
     }
 
-    if (!added) return res.status(422).json({ error: "No downloadable public product images were available for OCR." });
+    if (!added) {
+      return res.status(422).json({
+        error: "No usable public product images were available for OCR. The source images may be blocked, unsupported, or invalid.",
+        skipped,
+      });
+    }
 
     const baseUrl = String(process.env.INTERNAL_BASE_URL || `http://127.0.0.1:${Number(process.env.PORT || 5000)}`).replace(/\/$/, "");
     const response = await fetch(`${baseUrl}/api/ocr/analyze`, {
@@ -60,6 +97,7 @@ router.post("/images", async (req, res) => {
       fallbackReason: data.fallbackReason || null,
       engine: "parakh-fast-ocr",
       imageCount: added,
+      skipped,
     });
   } catch (error) {
     console.error("[ecommerce:ocr]", error);
