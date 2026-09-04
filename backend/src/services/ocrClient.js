@@ -1,17 +1,15 @@
 import fs from "node:fs/promises";
-import FormData from "form-data";
-import fetch from "node-fetch";
 
 const OCR_ENGINE_URL = process.env.OCR_ENGINE_URL || "http://localhost:8081";
 
 export async function runPaddleOCR(filePath) {
+  const bytes = await fs.readFile(filePath);
   const form = new FormData();
-  form.append("file", await fs.readFile(filePath), { filename: filePath });
+  form.append("file", new Blob([bytes]), filePath.split(/[\\/]/).pop());
 
   const response = await fetch(`${OCR_ENGINE_URL}/ocr`, {
     method: "POST",
     body: form,
-    headers: form.getHeaders(),
   });
 
   if (!response.ok) {
