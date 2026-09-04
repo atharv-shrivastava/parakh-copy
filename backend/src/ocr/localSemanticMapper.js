@@ -36,7 +36,7 @@ const LOCAL_RULES = [
 
 const STOPWORDS = new Set(["and", "or", "the", "with", "for", "from", "this", "that", "pack", "quality", "premium", "since", "www", "com"]);
 const BRAND_NOISE = new Set(["india", "indian", "foods", "food", "limited", "ltd", "pvt", "private", "company", "companies", "products", "product", "industries", "industry", "corporation", "corp", "manufacturing", "manufacturer", "marketed", "packaged"]);
-const PRODUCT_HINTS = /\b(?:biscuits?|cookies?|namkeen|chips?|snacks?|noodles?|atta|flour|rice|dal|pulses?|spices?|masala|tea|coffee|juice|drink|beverage|soap|shampoo|detergent|oil|ghee|butter|milk|curd|yogurt|chocolate|candy|toffee|salt|sugar|sauce|ketchup|paste|powder|cream|paste|wafer|wafers)\b/i;
+const PRODUCT_HINTS = /\b(?:biscuits?|cookies?|namkeen|chips?|snacks?|noodles?|atta|flour|rice|dal|pulses?|spices?|masala|tea|coffee|juice|drink|beverage|soap|shampoo|detergent|oil|ghee|butter|milk|curd|yogurt|chocolate|candy|toffee|salt|sugar|sauce|ketchup|paste|powder|cream|wafer|wafers?|toothpaste|tooth\s*powder|dental|dentifrice|gum|gums|ayurvedic)\b/i;
 
 function normalizeText(value) {
   return String(value || "").replace(/[\u00a0\t]+/g, " ").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, " ").trim();
