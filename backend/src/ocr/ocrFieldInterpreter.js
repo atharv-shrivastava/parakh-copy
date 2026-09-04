@@ -71,6 +71,7 @@ function normalizeBox(box) {
 }
 
 function center(box) {
+  if (!box || typeof box !== "object") return null;
   return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
 }
 
@@ -91,6 +92,7 @@ function horizontalOverlap(a, b) {
 function distance(a, b) {
   const ca = center(a);
   const cb = center(b);
+  if (!ca || !cb) return Number.POSITIVE_INFINITY;
   return Math.hypot(ca.x - cb.x, ca.y - cb.y);
 }
 
@@ -142,196 +144,106 @@ function uniqueDetections(detections) {
   }).filter(Boolean);
 }
 
-function allLines(detections, rawText) {
-  const dets = uniqueDetections(detections);
-  const seen = new Set(dets.map((d) => `${d.imageIndex}|${d.normalized}`));
-  const raw = textOf(rawText);
-  if (raw) {
-    raw.split(/\r?\n/).map(textOf).filter(Boolean).forEach((line, index) => {
-      const key = `0|${norm(line)}`;
-      if (seen.has(key)) return;
-      dets.push({ id: `raw-${index}`, text: line, normalized: norm(line), confidence: 0.55, boundingBox: null, imageIndex: 0, index: dets.length });
-    });
-  }
-  return dets;
-}
-
-function sortReadingOrder(items) {
-  return [...items].sort((a, b) => {
-    if (a.boundingBox && b.boundingBox) {
-      const dy = a.boundingBox.top - b.boundingBox.top;
-      const threshold = Math.max(a.boundingBox.height, b.boundingBox.height, 8) * 0.55;
-      if (Math.abs(dy) > threshold) return dy;
-      return a.boundingBox.left - b.boundingBox.left;
-    }
-    if (a.boundingBox) return -1;
-    if (b.boundingBox) return 1;
-    return a.index - b.index;
-  });
-}
-
-function buildSpatialLines(detections) {
-  const groups = new Map();
-  for (const d of uniqueDetections(detections)) {
-    const keyImage = d.imageIndex;
-    if (!groups.has(keyImage)) groups.set(keyImage, []);
-    groups.get(keyImage).push(d);
-  }
-  const result = [];
-  for (const [imageIndex, group] of groups) {
-    const ordered = sortReadingOrder(group);
-    const lines = [];
-    for (const item of ordered) {
-      if (!item.boundingBox) {
-        lines.push({ ...item, members: [item] });
-        continue;
-      }
-      let best = null;
-      let bestScore = 0;
-      for (const line of lines) {
-        const last = line.members[line.members.length - 1];
-        if (!last.boundingBox) continue;
-        const overlap = verticalOverlap(item.boundingBox, last.boundingBox);
-        const verticalGap = Math.abs(center(item.boundingBox).y - center(last.boundingBox).y);
-        const maxGap = Math.max(item.boundingBox.height, last.boundingBox.height) * 0.8;
-        if (overlap >= 0.35 && verticalGap <= maxGap) {
-          const score = overlap + (horizontalOverlap(item.boundingBox, last.boundingBox) * 0.2);
-          if (score > bestScore) { best = line; bestScore = score; }
-        }
-      }
-      if (!best) {
-        best = { imageIndex, members: [item] };
-        lines.push(best);
-      } else {
-        best.members.push(item);
-      }
-    }
-    for (const line of lines) {
-      const members = sortReadingOrder(line.members);
-      const boxes = members.map((m) => m.boundingBox).filter(Boolean);
-      const bbox = boxes.length ? {
-        left: Math.min(...boxes.map((b) => b.left)),
-        top: Math.min(...boxes.map((b) => b.top)),
-        width: Math.max(...boxes.map((b) => b.left + b.width)) - Math.min(...boxes.map((b) => b.left)),
-        height: Math.max(...boxes.map((b) => b.top + b.height)) - Math.min(...boxes.map((b) => b.top)),
-      } : null;
-      result.push({
-        id: members.map((m) => m.id).join("+"),
-        imageIndex,
-        text: textOf(members.map((m) => m.text).join(" ")),
-        normalized: norm(members.map((m) => m.text).join(" ")),
-        confidence: members.reduce((sum, m) => sum + m.confidence, 0) / members.length,
-        boundingBox: bbox,
-        members,
-      });
-    }
-  }
-  return result.sort((a, b) => a.imageIndex - b.imageIndex || ((a.boundingBox?.top ?? 0) - (b.boundingBox?.top ?? 0)) || ((a.boundingBox?.left ?? 0) - (b.boundingBox?.left ?? 0)));
-}
-
-function isAddressLike(text) {
-  const value = textOf(text);
-  const n = norm(value);
-  let score = 0;
-  if (ADDRESS_WORD_RE.test(value)) score += 2;
-  if (/\b\d{6}\b/.test(value)) score += 3;
-  if (/\b(?:p\.?o\.?|post|taluka|tehsil|district|dist\.?|state)\b/i.test(value)) score += 2;
-  if (/,/.test(value)) score += 0.5;
-  if (value.length > 35) score += 1;
-  if (ORGANIZATION_RE.test(value)) score += 0.5;
-  return n.length > 8 && score >= 2;
-}
-
-function isAdministrative(text) {
-  const value = textOf(text);
-  if (!value) return true;
-  if (ADMIN_RE.test(value)) return true;
-  if (PROMO_RE.test(value)) return true;
-  if (CLAIM_RE.test(value)) return true;
-  if (MRP_LABEL_RE.test(value)) return true;
-  if (FSSAI_LABEL_RE.test(value)) return true;
-  if (BARCODE_CONTEXT_RE.test(value)) return true;
-  if (EMAIL_RE.test(value)) return true;
-  if (/^\+?\d[\d\s().-]{7,}$/.test(value)) return true;
-  if (/^\d{6,18}$/.test(value.replace(/[\s-]/g, ""))) return true;
-  if (DATE_RE.test(value)) return true;
-  if (QUANTITY_RE.test(value)) return true;
-  return false;
-}
-
-function isIdentityCandidate(line) {
-  const text = textOf(line.text);
-  if (text.length < 2 || text.length > 70) return false;
-  if (isAdministrative(text) || isAddressLike(text)) return false;
-  if (GENERIC_IDENTITY_RE.test(text)) return false;
-  if (/^[^A-Za-z]+$/.test(text)) return false;
-  if (/\b(?:lic\.?\s*no|license|licence)\b/i.test(text)) return false;
-  return true;
-}
-
-function prominence(line, all) {
-  if (!line.boundingBox) return 0.38;
-  const usable = all.filter((x) => x.boundingBox);
-  if (!usable.length) return 0.38;
-  const area = line.boundingBox.width * line.boundingBox.height;
-  const height = line.boundingBox.height;
-  const maxArea = Math.max(1, ...usable.map((x) => x.boundingBox.width * x.boundingBox.height));
-  const maxHeight = Math.max(1, ...usable.map((x) => x.boundingBox.height));
-  const maxWidth = Math.max(1, ...usable.map((x) => x.boundingBox.width));
-  return Math.min(1, area / maxArea * 0.45 + height / maxHeight * 0.4 + line.boundingBox.width / maxWidth * 0.15);
-}
-
-function repetition(line, lines) {
-  const exact = new Set();
-  const near = new Set();
-  for (const other of lines) {
-    if (sameImage(line, other)) continue;
-    const similarity = levenshteinSimilarity(line.text, other.text);
-    if (similarity >= 0.96) exact.add(other.imageIndex);
-    else if (similarity >= 0.84) near.add(other.imageIndex);
-  }
-  return { exact: exact.size, near: near.size };
-}
-
-function identityCandidates(lines) {
-  const usable = lines.filter(isIdentityCandidate);
-  return usable.map((line) => {
-    const rep = repetition(line, usable);
-    const prom = prominence(line, lines);
-    const conf = line.confidence;
-    const words = line.text.split(/\s+/).filter(Boolean);
-    let score = 0.45 * prom + 0.22 * conf + Math.min(0.18, rep.exact * 0.09 + rep.near * 0.045);
-    if (line.text === line.text.toUpperCase() && /[A-Z]/.test(line.text)) score += 0.08;
-    if (words.length <= 5) score += 0.05;
-    if (words.length >= 2) score += 0.04;
-    if (/^[A-Za-z][A-Za-z0-9&'()./ -]+$/.test(line.text)) score += 0.04;
-    if (CLAIM_RE.test(line.text)) score -= 0.4;
-    if (isAddressLike(line.text)) score -= 0.35;
-    return { line, score: Math.max(0, Math.min(1, score)), prominence: prom, repetition: rep };
-  }).sort((a, b) => b.score - a.score);
-}
-
-function buildField(value, score, evidence, status = "found", extra = {}) {
-  const hasValue = value != null && textOf(value) !== "";
+function buildField(value, confidence, evidence = null, status = null, extra = {}) {
+  const hasValue = value !== null && value !== undefined && String(value).trim() !== "";
   return {
     value: hasValue ? value : null,
-    confidence: hasValue ? Math.max(0, Math.min(1, score || 0)) : 0,
-    confidenceLabel: !hasValue ? "LOW" : score >= 0.75 ? "HIGH" : score >= 0.45 ? "MEDIUM" : "LOW",
-    status: hasValue ? status : status === "referenced_inner_pack" ? status : "not_detected",
+    confidence: hasValue ? Math.max(0, Math.min(1, Number(confidence) || 0)) : 0,
+    confidenceLabel: !hasValue ? "LOW" : Number(confidence) >= 0.75 ? "HIGH" : Number(confidence) >= 0.45 ? "MEDIUM" : "LOW",
+    status: status || (hasValue ? "found" : "not_detected"),
     evidence: evidence || null,
-    source: "LOCAL_GEOMETRY_RECONCILER",
+    source: "LOCAL_DETERMINISTIC_RECONCILER",
     ...extra,
   };
 }
 
-function extractRegexFromText(lines, regex, transform = (m) => m[0]) {
-  const results = [];
-  for (const line of lines) {
-    regex.lastIndex = 0;
-    const match = regex.exec(line.text);
-    if (match) results.push({ value: transform(match), line, confidence: line.confidence });
+function candidateLikeIdentity(text) {
+  const value = textOf(text);
+  if (value.length < 2 || value.length > 72) return false;
+  if (/^\d+$/.test(value)) return false;
+  if (EMAIL_RE.test(value) || PHONE_RE.test(value)) return false;
+  EMAIL_RE.lastIndex = 0;
+  PHONE_RE.lastIndex = 0;
+  if (DATE_RE.test(value) || QUANTITY_RE.test(value) || MRP_LABEL_RE.test(value) || MRP_VALUE_RE.test(value)) return false;
+  if (PROMO_RE.test(value) || CLAIM_RE.test(value) || ADMIN_RE.test(value)) return false;
+  if (GENERIC_IDENTITY_RE.test(value)) return false;
+  if (ADDRESS_WORD_RE.test(value) && /\d/.test(value)) return false;
+  return /[A-Za-z]/.test(value);
+}
+
+function repetitionScore(detection, detections) {
+  const same = detections.filter((other) => other.imageIndex !== detection.imageIndex && levenshteinSimilarity(detection.text, other.text) >= 0.88);
+  return Math.min(0.18, same.length * 0.06);
+}
+
+function prominenceScore(detection, detections) {
+  const valid = detections.filter((item) => item.boundingBox);
+  if (!detection.boundingBox || !valid.length) return 0.35;
+  const area = detection.boundingBox.width * detection.boundingBox.height;
+  const maxArea = Math.max(1, ...valid.map((item) => item.boundingBox.width * item.boundingBox.height));
+  const maxHeight = Math.max(1, ...valid.map((item) => item.boundingBox.height));
+  const areaScore = area / maxArea;
+  const heightScore = detection.boundingBox.height / maxHeight;
+  return Math.min(1, areaScore * 0.55 + heightScore * 0.45);
+}
+
+function rankIdentityCandidates(detections) {
+  return detections
+    .filter((item) => candidateLikeIdentity(item.text))
+    .map((item) => {
+      const prominence = prominenceScore(item, detections);
+      const confidence = item.confidence;
+      const repetition = repetitionScore(item, detections);
+      const words = item.text.split(/\s+/).filter(Boolean).length;
+      let score = prominence * 0.56 + confidence * 0.20 + repetition;
+      if (item.text === item.text.toUpperCase()) score += 0.07;
+      if (words <= 5) score += 0.05;
+      if (words >= 8) score -= 0.10;
+      if (CLAIM_RE.test(item.text)) score -= 0.35;
+      if (ORGANIZATION_RE.test(item.text)) score -= 0.10;
+      if (GENERIC_IDENTITY_RE.test(item.text)) score -= 0.25;
+      return { detection: item, score: Math.max(0, Math.min(1, score)), prominence, repetition };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+function pickIdentityPair(detections) {
+  const candidates = rankIdentityCandidates(detections);
+  if (!candidates.length) {
+    return { productName: buildField(null, 0), brandName: buildField(null, 0), candidates: [] };
   }
-  return results;
+
+  const brand = candidates.find((candidate) => {
+    const words = candidate.detection.text.split(/\s+/).filter(Boolean).length;
+    return words <= 4 && !/\b(?:manager|division|office|registered|license|address)\b/i.test(candidate.detection.text);
+  }) || candidates[0];
+
+  const product = candidates.find((candidate) => candidate.detection.id !== brand.detection.id && levenshteinSimilarity(candidate.detection.text, brand.detection.text) < 0.86) || brand;
+
+  const productConfidence = Math.min(0.94, 0.32 + product.score * 0.65 + (product.repetition || 0));
+  const brandConfidence = Math.min(0.92, 0.30 + brand.score * 0.60 + (brand.repetition || 0));
+
+  return {
+    productName: buildField(product.detection.text, productConfidence, `Prominence=${product.prominence.toFixed(2)}; repetition support=${product.repetition.toFixed(2)}`, productConfidence >= 0.50 ? "found" : "needs_review", { imageIndex: product.detection.imageIndex }),
+    brandName: buildField(brand.detection.text, brandConfidence, `Identity candidate score=${brand.score.toFixed(2)}; repetition support=${brand.repetition.toFixed(2)}`, brandConfidence >= 0.50 ? "found" : "needs_review", { imageIndex: brand.detection.imageIndex }),
+    candidates: candidates.slice(0, 8).map((item) => ({ text: item.detection.text, score: Number(item.score.toFixed(3)), imageIndex: item.detection.imageIndex })),
+  };
+}
+
+function findNearbyValue(lines, labelLine, predicate) {
+  if (!labelLine.boundingBox) return null;
+  const candidates = lines
+    .filter((line) => line.id !== labelLine.id && sameImage(line, labelLine) && line.boundingBox)
+    .filter((line) => predicate(line.text))
+    .map((line) => {
+      const dy = line.boundingBox.top - labelLine.boundingBox.top;
+      const vertical = dy >= -Math.max(labelLine.boundingBox.height, 10) && dy <= Math.max(labelLine.boundingBox.height * 8, 160);
+      const horizontal = horizontalOverlap(labelLine.boundingBox, line.boundingBox) >= 0.12;
+      return { line, distance: distance(labelLine.boundingBox, line.boundingBox), dy, vertical, horizontal };
+    })
+    .filter((item) => item.vertical && item.horizontal)
+    .sort((a, b) => a.distance - b.distance);
+  return candidates[0]?.line || null;
 }
 
 function parseMRP(lines) {
@@ -342,17 +254,12 @@ function parseMRP(lines) {
     if (direct && labelled === false && /(?:save|offer|discount)/i.test(line.text)) continue;
     if (direct) candidates.push({ value: Number(direct[1].replace(/,/g, "")), line, score: 0.82 + (labelled ? 0.08 : 0) });
     if (labelled && !direct && line.boundingBox) {
-      for (const valueLine of lines) {
-        if (!sameImage(line, valueLine) || valueLine.id === line.id) continue;
-        const valueMatch = /(?:₹|rs\.?|inr)\s*([0-9][0-9,]*(?:[.,][0-9]{1,2})?)/i.exec(valueLine.text) || (/^\s*\d{1,6}(?:[.,]\d{1,2})?\s*$/.test(valueLine.text) ? [valueLine.text, valueLine.text.trim()] : null);
-        if (!valueMatch || DATE_RE.test(valueLine.text) || QUANTITY_RE.test(valueLine.text)) continue;
+      const valueLine = findNearbyValue(lines, line, (text) => /(?:₹|rs\.?|inr)\s*\d|^\s*\d{1,6}(?:[.,]\d{1,2})?\s*$/.test(text));
+      if (valueLine && !DATE_RE.test(valueLine.text) && !QUANTITY_RE.test(valueLine.text)) {
+        const match = /(?:₹|rs\.?|inr)\s*([0-9][0-9,]*(?:[.,][0-9]{1,2})?)/i.exec(valueLine.text) || [, valueLine.text.trim()];
         const dist = distance(line.boundingBox, valueLine.boundingBox);
         const maxDist = Math.max(60, line.boundingBox.height * 8);
-        const dy = valueLine.boundingBox.top - line.boundingBox.top;
-        const aligned = horizontalOverlap(line.boundingBox, valueLine.boundingBox) >= 0.2;
-        if (dy >= -line.boundingBox.height && dy <= maxDist && aligned && dist <= maxDist * 1.4) {
-          candidates.push({ value: Number(String(valueMatch[1]).replace(/,/g, "")), line: valueLine, score: 0.66 });
-        }
+        if (Number.isFinite(dist) && dist <= maxDist * 1.5) candidates.push({ value: Number(String(match[1]).replace(/,/g, "")), line: valueLine, score: 0.66 });
       }
     }
   }
@@ -368,120 +275,88 @@ function parseQuantity(lines) {
     const matches = [...line.text.matchAll(/\b(\d+(?:[.,]\d+)?)\s*(mg|mcg|g|gm|gms|gram|grams|kg|kgs|ml|l|ltr|ltrs|litre|litres|liter|liters|cl|oz|lb|pcs|pieces|piece|nos)\b/gi)];
     for (const match of matches) {
       const value = Number(match[1].replace(/,/g, ""));
-      let score = 0.6 + line.confidence * 0.2;
-      if (/\bnet\s*(?:qty|quantity|weight|volume)\b/i.test(line.text)) score += 0.12;
-      candidates.push({ value, unit: match[2], line, score });
+      candidates.push({ value, unit: match[2], line, labelled: /\bnet\s*(?:qty|quantity|weight|volume)\b/i.test(line.text) });
     }
   }
-  candidates.sort((a, b) => b.score - a.score);
+  candidates.sort((a, b) => Number(b.labelled) - Number(a.labelled));
   const winner = candidates[0];
-  if (!winner) return { netQuantity: buildField(null, 0, null), unit: buildField(null, 0, null) };
-  return {
-    netQuantity: buildField(winner.value, Math.min(0.95, winner.score), winner.line.text, "found", { imageIndex: winner.line.imageIndex }),
-    unit: buildField(winner.unit, Math.min(0.95, winner.score), winner.line.text, "found", { imageIndex: winner.line.imageIndex }),
-  };
-}
-
-function nearbyValue(labelLine, lines, matcher, stopRegex) {
-  const candidates = [];
-  for (const line of lines) {
-    if (line.id === labelLine.id || !sameImage(line, labelLine)) continue;
-    const match = matcher.exec(line.text);
-    if (!match) continue;
-    if (stopRegex?.test(line.text)) continue;
-    if (labelLine.boundingBox && line.boundingBox) {
-      const dy = line.boundingBox.top - labelLine.boundingBox.top;
-      const xOverlap = horizontalOverlap(labelLine.boundingBox, line.boundingBox);
-      const maxDistance = Math.max(80, labelLine.boundingBox.height * 10);
-      const dist = distance(labelLine.boundingBox, line.boundingBox);
-      if (dy < -labelLine.boundingBox.height * 0.75 || dy > maxDistance || dist > maxDistance * 1.5) continue;
-      candidates.push({ line, match, score: 0.52 + xOverlap * 0.18 + (dy >= 0 ? 0.1 : 0) });
-    } else {
-      candidates.push({ line, match, score: 0.48 });
-    }
-  }
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0] || null;
+  return winner
+    ? { netQuantity: buildField(winner.value, winner.labelled ? 0.88 : 0.76, winner.line.text, "found", { imageIndex: winner.line.imageIndex }), unit: buildField(winner.unit, winner.labelled ? 0.88 : 0.76, winner.line.text, "found", { imageIndex: winner.line.imageIndex }) }
+    : { netQuantity: buildField(null, 0), unit: buildField(null, 0) };
 }
 
 function parseBatch(lines) {
-  const candidates = [];
+  const labelRe = /\b(?:batch|lot|b\.?\s*no\.?)\b/i;
   for (const line of lines) {
-    const inline = /\b(?:batch|lot|b\.?\s*no\.?)\b\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9./_-]{1,40})/i.exec(line.text);
-    if (inline && !/^(?:no|number|code)$/i.test(inline[1])) candidates.push({ value: inline[1], line, score: 0.82 });
-    if (/\b(?:batch|lot|b\.?\s*no\.?)\b/i.test(line.text) && !inline) {
-      const next = nearbyValue(line, lines, /[A-Za-z0-9][A-Za-z0-9./_-]{1,40}/, DATE_RE);
-      if (next) candidates.push({ value: textOf(next.match[0]), line: next.line, score: next.score });
-    }
+    if (!labelRe.test(line.text)) continue;
+    const inline = line.text.match(/\b(?:batch|lot|b\.?\s*no\.?)\s*[:#\-]?\s*([A-Za-z0-9][A-Za-z0-9./_-]{1,40})/i);
+    if (inline) return buildField(inline[1], 0.82, line.text, "found", { imageIndex: line.imageIndex });
+    const valueLine = findNearbyValue(lines, line, (text) => /^[A-Za-z0-9][A-Za-z0-9./_-]{1,40}$/.test(text.trim()));
+    if (valueLine) return buildField(valueLine.text, 0.66, `${line.text} ${valueLine.text}`, "found", { imageIndex: valueLine.imageIndex });
   }
-  candidates.sort((a, b) => b.score - a.score);
-  const winner = candidates[0];
-  return winner ? buildField(winner.value, winner.score, winner.line.text, "found", { imageIndex: winner.line.imageIndex }) : buildField(null, 0, null, "not_detected");
+  return buildField(null, 0);
 }
 
 function parseDates(lines) {
-  const output = {};
-  for (const [key, label] of Object.entries(DATE_LABELS)) {
-    const candidates = [];
+  const result = {};
+  for (const [fieldName, pattern] of Object.entries(DATE_LABELS)) {
+    result[fieldName] = buildField(null, 0);
     for (const line of lines) {
-      if (!label.test(line.text)) continue;
-      const inline = DATE_RE.exec(line.text);
-      if (inline) candidates.push({ value: inline[0], line, score: 0.84 });
-      else {
-        const near = nearbyValue(line, lines, DATE_RE, /\b(?:batch|lot|mrp|fssai|license|barcode)\b/i);
-        if (near) candidates.push({ value: near.match[0], line: near.line, score: near.score + 0.1 });
+      if (!pattern.test(line.text)) continue;
+      const direct = line.text.match(DATE_RE);
+      if (direct) {
+        result[fieldName] = buildField(direct[0], 0.82, line.text, "found", { imageIndex: line.imageIndex });
+        break;
+      }
+      const valueLine = findNearbyValue(lines, line, (text) => DATE_RE.test(text));
+      if (valueLine) {
+        result[fieldName] = buildField(valueLine.text.match(DATE_RE)?.[0] || valueLine.text, 0.68, `${line.text} ${valueLine.text}`, "found", { imageIndex: valueLine.imageIndex });
+        break;
       }
     }
-    candidates.sort((a, b) => b.score - a.score);
-    const winner = candidates[0];
-    output[key] = winner ? buildField(winner.value, Math.min(0.95, winner.score), winner.line.text, "found", { imageIndex: winner.line.imageIndex }) : buildField(null, 0, null, "not_detected");
   }
-  return output;
+  return result;
 }
 
-function parseContact(lines, rawText) {
-  const emailCandidates = [];
-  const phoneCandidates = [];
-  const sourceLines = [...lines, ...(textOf(rawText) ? [{ text: textOf(rawText), confidence: 0.45, imageIndex: null, boundingBox: null, id: "raw-contact" }] : [])];
-  for (const line of sourceLines) {
-    const careContext = /\b(?:consumer|customer|care|helpline|toll\s*free|complaint|contact)\b/i.test(line.text);
-    for (const match of line.text.matchAll(EMAIL_RE)) emailCandidates.push({ value: match[0], line, score: careContext ? 0.9 : 0.72 });
-    for (const match of line.text.matchAll(PHONE_RE)) {
-      const digits = match[0].replace(/\D/g, "");
-      if (digits.length < 8 || digits.length > 13) continue;
-      if (/^(\d)\1+$/.test(digits)) continue;
-      phoneCandidates.push({ value: textOf(match[0]), line, score: careContext ? 0.86 : 0.6 });
+function parseContacts(lines, rawText) {
+  let email = null;
+  let emailLine = null;
+  let phone = null;
+  let phoneLine = null;
+  for (const line of lines) {
+    EMAIL_RE.lastIndex = 0;
+    PHONE_RE.lastIndex = 0;
+    const e = line.text.match(EMAIL_RE)?.[0];
+    const p = line.text.match(PHONE_RE)?.[0];
+    if (!email && e) { email = e; emailLine = line; }
+    if (!phone && p && /\b(?:consumer|customer|care|helpline|complaint|toll\s*free)\b/i.test(line.text)) { phone = p; phoneLine = line; }
+  }
+  if (!email) { EMAIL_RE.lastIndex = 0; email = String(rawText || "").match(EMAIL_RE)?.[0] || null; }
+  if (!phone) {
+    for (const line of lines) {
+      PHONE_RE.lastIndex = 0;
+      const p = line.text.match(PHONE_RE)?.[0];
+      if (p && !/\b(?:fssai|license|lic\.?|batch|lot)\b/i.test(line.text)) { phone = p; phoneLine = line; break; }
     }
   }
-  const bestEmail = emailCandidates.sort((a, b) => b.score - a.score)[0];
-  const bestPhone = phoneCandidates.sort((a, b) => b.score - a.score)[0];
   return {
-    consumerCareEmail: bestEmail ? buildField(bestEmail.value, bestEmail.score, bestEmail.line.text, "found", bestEmail.line.imageIndex == null ? {} : { imageIndex: bestEmail.line.imageIndex }) : buildField(null, 0, null),
-    consumerCarePhone: bestPhone ? buildField(bestPhone.value, bestPhone.score, bestPhone.line.text, "found", bestPhone.line.imageIndex == null ? {} : { imageIndex: bestPhone.line.imageIndex }) : buildField(null, 0, null),
+    consumerCareEmail: buildField(email, email ? 0.84 : 0, emailLine?.text || (email ? "Recovered from raw OCR text" : null), email ? "found" : "not_detected", emailLine ? { imageIndex: emailLine.imageIndex } : {}),
+    consumerCarePhone: buildField(phone, phone ? 0.76 : 0, phoneLine?.text || null, phone ? "found" : "not_detected", phoneLine ? { imageIndex: phoneLine.imageIndex } : {}),
   };
 }
 
 function parseFssai(lines) {
-  const candidates = [];
   for (const line of lines) {
-    const nearby = FSSAI_LABEL_RE.test(line.text) && /\d{14}/.test(line.text);
-    const nums = line.text.match(/\b\d{14}\b/g) || [];
-    for (const n of nums) {
-      if (nearby) candidates.push({ value: n, line, score: 0.93 });
-    }
+    if (!FSSAI_LABEL_RE.test(line.text)) continue;
+    const nearby = line.text.match(/\b\d{14}\b/)?.[0];
+    if (nearby) return buildField(nearby, 0.90, line.text, "found", { imageIndex: line.imageIndex });
+    const valueLine = findNearbyValue(lines, line, (text) => /^\d{14}$/.test(text.trim()));
+    if (valueLine) return buildField(valueLine.text.trim(), 0.82, `${line.text} ${valueLine.text}`, "found", { imageIndex: valueLine.imageIndex });
   }
-  if (!candidates.length) {
-    for (const line of lines) {
-      if (!FSSAI_LABEL_RE.test(line.text)) continue;
-      const next = nearbyValue(line, lines, /\b\d{14}\b/, null);
-      if (next) candidates.push({ value: next.match[0], line: next.line, score: next.score + 0.1 });
-    }
-  }
-  const winner = candidates.sort((a, b) => b.score - a.score)[0];
-  return winner ? buildField(winner.value, Math.min(0.98, winner.score), winner.line.text, "found", { imageIndex: winner.line.imageIndex }) : buildField(null, 0, null);
+  return buildField(null, 0);
 }
 
-function gtinValid(value) {
+function gtinChecksum(value) {
   const digits = String(value || "").replace(/\D/g, "");
   if (![8, 12, 13, 14].includes(digits.length)) return false;
   let sum = 0;
@@ -496,193 +371,142 @@ function gtinValid(value) {
 function parseBarcode(lines) {
   const candidates = [];
   for (const line of lines) {
-    const contextual = BARCODE_CONTEXT_RE.test(line.text);
-    const nums = line.text.match(/\b\d{8,14}\b/g) || [];
-    for (const n of nums) {
-      if (/\b(?:fssai|license|licence|phone|mobile|contact|batch|lot)\b/i.test(line.text) && !contextual) continue;
-      if (!gtinValid(n)) continue;
-      let score = n.length === 13 ? 0.88 : 0.82;
-      if (contextual) score += 0.1;
-      if (line.boundingBox) score += 0.02;
-      candidates.push({ value: n, line, score });
+    const rawNumbers = line.text.match(/\b\d{8,18}\b/g) || [];
+    for (const raw of rawNumbers) {
+      if (!gtinChecksum(raw)) continue;
+      if (FSSAI_LABEL_RE.test(line.text) || /\b(?:license|lic\.?|batch|lot|phone|mobile|toll\s*free)\b/i.test(line.text)) continue;
+      const contextBoost = BARCODE_CONTEXT_RE.test(line.text) ? 0.10 : 0;
+      const lengthBoost = raw.length === 13 ? 0.04 : 0;
+      candidates.push({ raw, line, score: 0.86 + contextBoost + lengthBoost });
     }
   }
-  const winner = candidates.sort((a, b) => b.score - a.score)[0];
-  return winner ? buildField(winner.value, Math.min(0.98, winner.score), winner.line.text, "found", { imageIndex: winner.line.imageIndex, format: `GTIN-${winner.value.length}` }) : buildField(null, 0, null, "not_detected");
+  candidates.sort((a, b) => b.score - a.score);
+  const winner = candidates[0];
+  return winner ? buildField(winner.raw, winner.score, `Checksum-valid GTIN candidate from: ${winner.line.text}`, "found", { imageIndex: winner.line.imageIndex }) : buildField(null, 0);
 }
 
-function parseOrigin(lines) {
-  for (const line of lines) {
-    const match = /\b(?:made\s+in|country\s+of\s+origin|product\s+of)\s*[:\-]?\s*([A-Za-z][A-Za-z .'-]{1,40})/i.exec(line.text);
-    if (match) return buildField(textOf(match[1]), 0.88, line.text, "found", { imageIndex: line.imageIndex });
-  }
-  return buildField(null, 0, null, "not_detected");
-}
-
-function parseRole(lines, role) {
-  const label = LABELS[role];
-  const companyCandidates = [];
-  const addressCandidates = [];
-  for (const line of lines) {
-    if (!label.test(line.text)) continue;
-    const sameLine = textOf(line.text.replace(label, "").replace(/^\s*[:\-–,]+/, ""));
-    if (sameLine && !isAddressLike(sameLine)) companyCandidates.push({ value: sameLine, line, score: 0.88 });
+function extractLabeledEntity(lines, key) {
+  const label = LABELS[key];
+  const labelLines = lines.filter((line) => label.test(line.text));
+  for (const line of labelLines) {
+    const sameLine = textOf(line.text.replace(label, "").replace(/^\s*[:\-–,]+\s*/, ""));
+    if (sameLine && !LABELS[key].test(sameLine)) {
+      const value = sameLine.replace(/^[:\-–,]+/, "").trim();
+      if (value) return buildField(value, 0.84, line.text, "found", { imageIndex: line.imageIndex });
+    }
+    const nearby = [];
     for (const candidate of lines) {
-      if (!sameImage(line, candidate) || candidate.id === line.id) continue;
-      if (LABELS.manufacturer.test(candidate.text) || LABELS.packer.test(candidate.text) || LABELS.marketer.test(candidate.text) || LABELS.importer.test(candidate.text)) continue;
-      if (DATE_RE.test(candidate.text) || MRP_LABEL_RE.test(candidate.text) || /\bfssai\b/i.test(candidate.text) || CLAIM_RE.test(candidate.text)) continue;
-      if (isAddressLike(candidate.text)) {
-        if (line.boundingBox && candidate.boundingBox) {
-          const dy = candidate.boundingBox.top - line.boundingBox.top;
-          const dist = distance(line.boundingBox, candidate.boundingBox);
-          if (dy >= -line.boundingBox.height && dy <= Math.max(140, line.boundingBox.height * 14) && dist <= Math.max(180, line.boundingBox.height * 16)) {
-            addressCandidates.push({ value: candidate.text, line: candidate, score: 0.62 + Math.max(0, horizontalOverlap(line.boundingBox, candidate.boundingBox)) * 0.15 });
-          }
-        } else {
-          addressCandidates.push({ value: candidate.text, line: candidate, score: 0.5 });
-        }
-      } else if (!sameLine && /[A-Za-z]{3,}/.test(candidate.text) && candidate.index > line.index && candidate.index <= line.index + 4 && !isAdministrative(candidate.text) && !companyCandidates.length) {
-        companyCandidates.push({ value: candidate.text, line: candidate, score: 0.62 });
+      if (candidate.id === line.id || !sameImage(candidate, line)) continue;
+      if (candidate.boundingBox && line.boundingBox) {
+        const dy = candidate.boundingBox.top - line.boundingBox.top;
+        if (dy < -line.boundingBox.height || dy > Math.max(5 * line.boundingBox.height, 220)) continue;
       }
+      if (LABELS[key].test(candidate.text) || MRP_LABEL_RE.test(candidate.text) || QUANTITY_RE.test(candidate.text) || DATE_RE.test(candidate.text)) continue;
+      if (PROMO_RE.test(candidate.text) || CLAIM_RE.test(candidate.text)) continue;
+      nearby.push(candidate);
     }
+    nearby.sort((a, b) => (a.boundingBox ? distance(line.boundingBox, a.boundingBox) : 999999) - (b.boundingBox ? distance(line.boundingBox, b.boundingBox) : 999999));
+    const winner = nearby[0];
+    if (winner) return buildField(winner.text, 0.70, `${line.text} ${winner.text}`, "found", { imageIndex: winner.imageIndex });
   }
-  companyCandidates.sort((a, b) => b.score - a.score);
-  addressCandidates.sort((a, b) => b.score - a.score);
-  const company = companyCandidates[0];
-  const address = addressCandidates[0];
-  return {
-    company: company ? buildField(company.value, company.score, company.line.text, "found", { imageIndex: company.line.imageIndex }) : buildField(null, 0, null),
-    address: address ? buildField(address.value, address.score, address.line.text, "found", { imageIndex: address.line.imageIndex }) : buildField(null, 0, null),
-  };
+  return buildField(null, 0);
 }
 
-function chooseIdentity(lines) {
-  const candidates = identityCandidates(lines);
-  if (!candidates.length) return { product: buildField(null, 0, null), brand: buildField(null, 0, null), candidates: [] };
-
-  const productPool = candidates.map((item) => {
-    let score = item.score;
-    const text = item.line.text;
-    if (/\b(?:toothpaste|tooth\s*powder|biscuits?|cookies?|noodles?|snacks?|chips?|soap|shampoo|detergent|oil|ghee|milk|chocolate|coffee|tea|juice|drink|masala|spice|flour|rice|atta|salt|sugar|sauce|cream|powder)\b/i.test(text)) score += 0.1;
-    if (/\b(?:brand|trademark)\b/i.test(text)) score -= 0.2;
-    return { ...item, productScore: Math.min(1, score) };
-  }).sort((a, b) => b.productScore - a.productScore);
-
-  const product = productPool[0];
-  const brandPool = candidates.map((item) => {
-    let score = item.score;
-    const similarity = product ? levenshteinSimilarity(item.line.text, product.line.text) : 0;
-    if (product && similarity >= 0.9) score -= 0.45;
-    if (item.line.text.split(/\s+/).length <= 3) score += 0.04;
-    if (item.line.text === item.line.text.toUpperCase()) score += 0.06;
-    if (ORGANIZATION_RE.test(item.line.text)) score -= 0.16;
-    return { ...item, brandScore: Math.max(0, Math.min(1, score)) };
-  }).sort((a, b) => b.brandScore - a.brandScore);
-
-  const brand = brandPool[0] && brandPool[0].brandScore >= 0.42 ? brandPool[0] : null;
-  const productConfidence = product ? Math.min(0.94, 0.25 + product.productScore * 0.72 + Math.min(0.1, product.repetition.exact * 0.05)) : 0;
-  const brandConfidence = brand ? Math.min(0.9, 0.25 + brand.brandScore * 0.62 + Math.min(0.1, brand.repetition.exact * 0.05)) : 0;
-  return {
-    product: product ? buildField(product.line.text, productConfidence, product.line.text, productConfidence >= 0.68 ? "found" : "needs_review", { imageIndex: product.line.imageIndex }) : buildField(null, 0, null),
-    brand: brand ? buildField(brand.line.text, brandConfidence, brand.line.text, brandConfidence >= 0.62 ? "found" : "needs_review", { imageIndex: brand.line.imageIndex }) : buildField(null, 0, null),
-    candidates: candidates.slice(0, 8).map((item) => ({ text: item.line.text, score: Number(item.score.toFixed(3)), imageIndex: item.line.imageIndex })),
-  };
-}
-
-function detectInnerPack(rawText, lines) {
+function extractCountry(lines) {
   for (const line of lines) {
-    if (INNER_PACK_RE.test(line.text)) return { detected: true, evidence: line.text, imageIndex: line.imageIndex };
+    const match = line.text.match(/\b(?:made\s+in|country\s+of\s+origin)\s*[:\-]?\s*(.+)$/i);
+    if (match) return buildField(match[1].trim(), 0.86, line.text, "found", { imageIndex: line.imageIndex });
   }
-  const raw = textOf(rawText);
-  if (raw && INNER_PACK_RE.test(raw)) return { detected: true, evidence: raw.match(INNER_PACK_RE)?.[0] || null, imageIndex: null };
-  return { detected: false, evidence: null, imageIndex: null };
+  return buildField(null, 0);
 }
 
-function applyInnerPack(fields, ref) {
-  if (!ref.detected) return fields;
-  const keys = ["mrp", "batchNumber", "dateOfManufacture", "dateOfPacking", "bestBefore", "expiryDate"];
-  const next = { ...fields };
-  for (const key of keys) {
-    if (next[key]?.status === "not_detected") {
-      next[key] = buildField(null, 0, `Packaging references additional detail on an inner/individual pack: ${ref.evidence || "reference detected"}`, "referenced_inner_pack", { imageIndex: ref.imageIndex });
-    }
+function imageQuality(detections) {
+  const byImage = new Map();
+  for (const d of detections) {
+    if (!byImage.has(d.imageIndex)) byImage.set(d.imageIndex, []);
+    byImage.get(d.imageIndex).push(d);
   }
-  return next;
+  const output = {};
+  for (const [index, group] of byImage) {
+    const averageConfidence = group.length ? group.reduce((sum, d) => sum + d.confidence, 0) / group.length : 0;
+    const totalCharacters = group.reduce((sum, d) => sum + d.text.length, 0);
+    output[index] = {
+      status: totalCharacters < 5 ? "unreadable_low_quality" : averageConfidence < 0.35 ? "needs_review" : "readable",
+      detectionCount: group.length,
+      averageConfidence,
+      totalCharacters,
+      hasGeometry: group.some((d) => d.boundingBox),
+    };
+  }
+  return output;
 }
 
-function reconcile(existing, local) {
-  const result = { ...(existing || {}) };
-  for (const key of FIELD_NAMES) {
-    const candidate = local[key];
-    if (!candidate || candidate.value == null || candidate.status === "not_detected") continue;
-    const current = result[key];
-    if (!current || !current.value || current.status === "not_found" || current.status === "not_detected" || current.status === "absent") {
-      result[key] = candidate;
-      continue;
-    }
-    const currentConfidence = Number(current.confidence || 0);
-    const candidateConfidence = Number(candidate.confidence || 0);
-    const currentValue = textOf(current.value);
-    const candidateValue = textOf(candidate.value);
-    const similarity = levenshteinSimilarity(currentValue, candidateValue);
-    const saferReplacement = key === "productName" || key === "brandName";
-    if (candidateConfidence > currentConfidence + 0.14 || (saferReplacement && current.status === "needs_review" && candidate.status === "found" && similarity < 0.75 && candidateConfidence > 0.62)) {
-      result[key] = candidate;
+function applyInnerPackStatus(fields, reference) {
+  if (!reference) return fields;
+  const eligible = ["mrp", "batchNumber", "dateOfManufacture", "dateOfPacking", "bestBefore", "expiryDate"];
+  for (const key of eligible) {
+    if (fields[key]?.status === "not_detected") {
+      fields[key] = buildField(null, 0, reference, "referenced_inner_pack");
     }
   }
-  return result;
+  return fields;
 }
 
-export function interpretOcrFields({ detections = [], rawText = "", existingFields = null } = {}) {
-  const lines = allLines(detections, rawText);
-  const spatialLines = buildSpatialLines(detections);
-  const semanticLines = spatialLines.length ? spatialLines.concat(lines.filter((line) => !line.boundingBox && !spatialLines.some((s) => s.id === line.id))) : lines;
-  const identity = chooseIdentity(semanticLines);
-  const quantity = parseQuantity(semanticLines);
-  const dates = parseDates(semanticLines);
-  const manufacturer = parseRole(semanticLines, "manufacturer");
-  const packer = parseRole(semanticLines, "packer");
-  const marketer = parseRole(semanticLines, "marketer");
-  const importer = parseRole(semanticLines, "importer");
-  const contacts = parseContact(semanticLines, rawText);
-  const ref = detectInnerPack(rawText, semanticLines);
-
-  let fields = {
-    productName: identity.product,
-    brandName: identity.brand,
-    mrp: parseMRP(semanticLines),
+export function interpretOcrFields({ detections = [], rawText = "" } = {}) {
+  const normalized = uniqueDetections(detections);
+  const identity = pickIdentityPair(normalized);
+  const quantity = parseQuantity(normalized);
+  const dates = parseDates(normalized);
+  const contacts = parseContacts(normalized, rawText);
+  const innerPackReference = INNER_PACK_RE.test(textOf(rawText)) || normalized.some((line) => INNER_PACK_RE.test(line.text));
+  const fields = {
+    productName: identity.productName,
+    brandName: identity.brandName,
+    mrp: parseMRP(normalized),
     netQuantity: quantity.netQuantity,
     unit: quantity.unit,
-    batchNumber: parseBatch(semanticLines),
+    batchNumber: parseBatch(normalized),
     ...dates,
-    manufacturer: manufacturer.company,
-    manufacturerAddress: manufacturer.address,
-    packer: packer.company,
-    packerAddress: packer.address,
-    marketer: marketer.company,
-    marketerAddress: marketer.address,
-    importer: importer.company,
-    importerAddress: importer.address,
+    manufacturer: extractLabeledEntity(normalized, "manufacturer"),
+    manufacturerAddress: buildField(null, 0),
+    packer: extractLabeledEntity(normalized, "packer"),
+    packerAddress: buildField(null, 0),
+    marketer: extractLabeledEntity(normalized, "marketer"),
+    marketerAddress: buildField(null, 0),
+    importer: extractLabeledEntity(normalized, "importer"),
+    importerAddress: buildField(null, 0),
     consumerCarePhone: contacts.consumerCarePhone,
     consumerCareEmail: contacts.consumerCareEmail,
-    countryOfOrigin: parseOrigin(semanticLines),
-    fssaiLicenseNumber: parseFssai(semanticLines),
-    barcode: parseBarcode(semanticLines),
+    countryOfOrigin: extractCountry(normalized),
+    fssaiLicenseNumber: parseFssai(normalized),
+    barcode: parseBarcode(normalized),
   };
 
-  fields = applyInnerPack(fields, ref);
-  fields = reconcile(existingFields, fields);
+  applyInnerPackStatus(fields, innerPackReference ? "OCR detected a reference to an inner/individual pack or under-seal details." : null);
 
   return {
     fields,
-    innerPackReference: ref,
-    candidateEvidence: { identity: identity.candidates },
     metadata: {
-      source: "LOCAL_GEOMETRY_RECONCILER",
-      detectionCount: Array.isArray(detections) ? detections.length : 0,
-      spatialLineCount: spatialLines.length,
-      rawLineCount: lines.length,
-      geometryAvailable: spatialLines.some((line) => line.boundingBox),
+      source: "LOCAL_DETERMINISTIC_RECONCILER",
+      detectionCount: normalized.length,
+      candidateEvidence: identity.candidates,
+      imageQuality: imageQuality(normalized),
+      innerPackReference,
+      rawTextPreserved: true,
+      noExternalModel: true,
     },
+    rawText: textOf(rawText),
   };
 }
+
+export function rankProductCandidates(detections = []) {
+  return rankIdentityCandidates(uniqueDetections(detections)).map((candidate) => ({
+    text: candidate.detection.text,
+    score: Number(candidate.score.toFixed(4)),
+    prominence: Number(candidate.prominence.toFixed(4)),
+    repetition: Number(candidate.repetition.toFixed(4)),
+    imageIndex: candidate.detection.imageIndex,
+  }));
+}
+
+export { gtinChecksum, normalizeBox, distance, levenshteinSimilarity, FIELD_NAMES };
