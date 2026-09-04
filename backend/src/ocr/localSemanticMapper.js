@@ -8,10 +8,8 @@ export const DECLARATION_TYPES = [
 
 const GlinerResponseSchema = z.object({
   mappings: z.array(z.object({
-    id: z.string(), imageIndex: z.number().int().min(0), type: z.enum(DECLARATION_TYPES), text: z.string().min(1),
-    value: z.string().nullable().optional(), confidence: z.enum(["HIGH", "MEDIUM", "LOW"]),
-    confidenceValue: z.number().min(0).max(1).optional(), boundingBox: z.object({ left: z.number(), top: z.number(), width: z.number(), height: z.number() }).nullable().optional(),
-    source: z.string().optional(),
+    id: z.string(), imageIndex: z.number().int().min(0), type: z.enum(DECLARATION_TYPES), text: z.string().min(1), value: z.string().nullable().optional(), confidence: z.enum(["HIGH", "MEDIUM", "LOW"]),
+    confidenceValue: z.number().min(0).max(1).optional(), boundingBox: z.object({ left: z.number(), top: z.number(), width: z.number(), height: z.number() }).nullable().optional(), source: z.string().optional(),
   })).default([]),
 });
 
@@ -166,15 +164,14 @@ function makeInferredMappings(candidates, existingMappings) {
   }
   if (!existingMappings.some((item) => item.type === "BRAND")) {
     const bestBrand = [...candidates].map((candidate) => ({ candidate, score: brandScore(candidate, candidates) })).sort((a, b) => b.score - a.score)[0];
-    if (bestBrand && bestBrand.score >= 40) mappings.push(makeMapping(bestBrand.candidate, "BRAND", "LAYOUT_HEURISTIC", bestBrand.candidate.text, bestBrand.score >= 70 ? "MEDIUM" : "LOW", Math.min(0.82, 0.4 + bestBrand.score / 100)));
+    if (bestBrand && bestBrand.score >= 38) mappings.push(makeMapping(bestBrand.candidate, "BRAND", "LAYOUT_HEURISTIC", bestBrand.candidate.text, bestBrand.score >= 70 ? "MEDIUM" : "LOW", Math.min(0.82, 0.36 + bestBrand.score / 100)));
   }
   return mappings;
 }
 
 function makeMapping(candidate, type, source, value, confidence, confidenceValue) {
-  const normalizedValue = value || extractValue(type, candidate.text);
-  if (!normalizedValue) return null;
-  return { id: candidate.id, imageIndex: candidate.imageIndex, type, text: candidate.text, value: normalizedValue, confidence, confidenceValue, source, boundingBox: candidate.boundingBox || null };
+  if (!candidate || !value) return null;
+  return { id: String(candidate.id), imageIndex: candidate.imageIndex, type, text: normalizeText(candidate.text), value: normalizeText(value), confidence, confidenceValue: Number(confidenceValue || 0), boundingBox: candidate.boundingBox || null, source };
 }
 
 function mapToField(type) {
@@ -206,8 +203,9 @@ function buildFields(mappings) {
 
 async function glinerMap(candidates) {
   const url = process.env.GLINER_SERVICE_URL || "http://localhost:8091";
-  const timeoutMs = Number(process.env.GLINER_TIMEOUT_MS || "5000");
-  const response = await fetch(`${url}/map`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(timeoutMs), body: JSON.stringify({ candidates }) });
+  const configuredTimeoutMs = Number(process.env.GLINER_TIMEOUT_MS || "0");
+  const signal = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0 ? AbortSignal.timeout(configuredTimeoutMs) : undefined;
+  const response = await fetch(`${url}/map`, { method: "POST", headers: { "Content-Type": "application/json" }, ...(signal ? { signal } : {}), body: JSON.stringify({ candidates }) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.detail || data?.error || `GLiNER2 failed (${response.status})`);
   const parsed = GlinerResponseSchema.safeParse(data);
