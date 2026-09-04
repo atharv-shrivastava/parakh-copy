@@ -85,23 +85,16 @@ async function analyzeWithPaddle(images) {
 }
 
 async function analyzeWithPaddleAndGliner(images) {
-  const concurrency = Math.max(1, Math.min(Number(process.env.OCR_PADDLE_CONCURRENCY || "2"), images.length));
-  const results = [];
-  for (let start = 0; start < images.length; start += concurrency) {
-    const batch = images.slice(start, start + concurrency);
-    const batchResults = await Promise.all(batch.map(async (image, offset) => {
-      const imageIndex = start + offset;
-      const paddle = await analyzeOneWithPaddle(image, imageIndex);
-      let semantic;
-      try {
-        semantic = await runSemanticMapper(paddle.evidence, config);
-      } catch (error) {
-        semantic = { error: error?.message || "GLiNER semantic mapping failed.", declarationEvidence: [], otherDeclarations: [], warnings: [error?.message || "GLiNER semantic mapping failed."] };
-      }
-      return { paddle, semantic };
-    }));
-    results.push(...batchResults);
-  }
+  const results = await Promise.all(images.map(async (image, imageIndex) => {
+    const paddle = await analyzeOneWithPaddle(image, imageIndex);
+    let semantic;
+    try {
+      semantic = await runSemanticMapper(paddle.evidence, config);
+    } catch (error) {
+      semantic = { error: error?.message || "GLiNER semantic mapping failed.", declarationEvidence: [], otherDeclarations: [], warnings: [error?.message || "GLiNER semantic mapping failed."] };
+    }
+    return { paddle, semantic };
+  }));
   const paddleResults = results.map((item) => item.paddle).sort((a, b) => a.imageIndex - b.imageIndex);
   const semanticResults = results.map((item) => item.semantic).filter(Boolean);
   return {
@@ -145,9 +138,7 @@ function mergeSemanticResults(results) {
         }
       }
     }
-    if (Array.isArray(result.otherDeclarations)) {
-      otherDeclarations.push(...result.otherDeclarations);
-    }
+    if (Array.isArray(result.otherDeclarations)) otherDeclarations.push(...result.otherDeclarations);
     if (Array.isArray(result.warnings)) warnings.push(...result.warnings.filter(Boolean));
   }
   const uniqueOther = Array.from(new Set(otherDeclarations.map((item) => typeof item === "string" ? item : item?.text).map((item) => String(item || "").trim()).filter(Boolean)));
