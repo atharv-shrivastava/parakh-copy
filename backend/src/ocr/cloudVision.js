@@ -12,12 +12,20 @@ function polygonToBox(vertices, imageWidth, imageHeight) {
   const right = Math.max(...xs);
   const bottom = Math.max(...ys);
   if (right <= left || bottom <= top) return null;
-  return {
-    left: clamp01(left / imageWidth),
-    top: clamp01(top / imageHeight),
-    width: clamp01((right - left) / imageWidth),
-    height: clamp01((bottom - top) / imageHeight),
-  };
+  return { left: clamp01(left / imageWidth), top: clamp01(top / imageHeight), width: clamp01((right - left) / imageWidth), height: clamp01((bottom - top) / imageHeight) };
+}
+
+function polygonToPixelBox(vertices) {
+  const points = Array.isArray(vertices) ? vertices : [];
+  const xs = points.map((point) => Number(point?.x ?? 0)).filter(Number.isFinite);
+  const ys = points.map((point) => Number(point?.y ?? 0)).filter(Number.isFinite);
+  if (!xs.length || !ys.length) return null;
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  const right = Math.max(...xs);
+  const bottom = Math.max(...ys);
+  if (right <= left || bottom <= top) return null;
+  return { left, top, width: right - left, height: bottom - top };
 }
 
 function estimateLineHeight(words, imageHeight) {
@@ -27,15 +35,8 @@ function estimateLineHeight(words, imageHeight) {
 
 function wordsFromTextAnnotations(textAnnotations, imageIndex, imageWidth, imageHeight) {
   const words = (Array.isArray(textAnnotations) ? textAnnotations : []).slice(1).map((annotation, index) => {
-    const vertices = annotation?.boundingPoly?.vertices || [];
-    const boxPixels = polygonToPixelBox(vertices);
-    return {
-      index,
-      text: String(annotation?.description || "").trim(),
-      imageIndex,
-      pixelBox: boxPixels,
-      pixelHeight: boxPixels?.height || 0,
-    };
+    const pixelBox = polygonToPixelBox(annotation?.boundingPoly?.vertices);
+    return { index, text: String(annotation?.description || "").trim(), pixelBox, pixelHeight: pixelBox?.height || 0 };
   }).filter((item) => item.text && item.pixelBox);
 
   if (!words.length) return [];
@@ -63,28 +64,15 @@ function wordsFromTextAnnotations(textAnnotations, imageIndex, imageWidth, image
       imageIndex,
       text: sorted.map((item) => item.text).join(" ").replace(/\s+/g, " ").trim(),
       confidence: 0.95,
-      boundingBox: {
-        left: clamp01(left / imageWidth),
-        top: clamp01(top / imageHeight),
-        width: clamp01((right - left) / imageWidth),
-        height: clamp01((bottom - top) / imageHeight),
-      },
+      boundingBox: polygonToBox([
+        { x: left * imageWidth, y: top * imageHeight },
+        { x: right * imageWidth, y: top * imageHeight },
+        { x: right * imageWidth, y: bottom * imageHeight },
+        { x: left * imageWidth, y: bottom * imageHeight },
+      ], imageWidth, imageHeight),
       source: "cloud-vision",
     };
   }).filter((item) => item.text);
-}
-
-function polygonToPixelBox(vertices) {
-  const points = Array.isArray(vertices) ? vertices : [];
-  const xs = points.map((point) => Number(point?.x ?? 0)).filter(Number.isFinite);
-  const ys = points.map((point) => Number(point?.y ?? 0)).filter(Number.isFinite);
-  if (!xs.length || !ys.length) return null;
-  const left = Math.min(...xs);
-  const top = Math.min(...ys);
-  const right = Math.max(...xs);
-  const bottom = Math.max(...ys);
-  if (right <= left || bottom <= top) return null;
-  return { left, top, width: right - left, height: bottom - top };
 }
 
 export async function analyzeWithCloudVision(images, config) {
@@ -99,13 +87,11 @@ export async function analyzeWithCloudVision(images, config) {
     headers: { "Content-Type": "application/json" },
     signal: AbortSignal.timeout(config.visionTimeoutMs),
     body: JSON.stringify({
-      requests: images.map(({ base64, imageWidth, imageHeight }) => ({
+      requests: images.map(({ base64 }) => ({
         image: { content: base64 },
         features: [{ type: "TEXT_DETECTION" }],
         imageContext: { languageHints: ["en", "hi"] },
-        _imageWidth: imageWidth,
-        _imageHeight: imageHeight,
-      })).map(({ _imageWidth, _imageHeight, ...request }) => ({ ...request, imageContext: { ...request.imageContext, _imageWidth, _imageHeight } })),
+      })),
     }),
   });
   const data = await response.json().catch(() => ({}));
