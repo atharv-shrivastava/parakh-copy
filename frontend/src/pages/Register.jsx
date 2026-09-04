@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { saveSession } from "../lib/auth";
 import "../styles/auth.css";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 function Register() {
   const [form, setForm] = useState({ name: "", email: "", password: "", confirm: "" });
