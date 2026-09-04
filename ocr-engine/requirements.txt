@@ -5,3 +5,4 @@ paddleocr>=3.0,<4
 paddlepaddle>=3.0,<4
 opencv-python-headless>=4.10,<5
 numpy>=2.0,<3
+Pillow>=10,<12
