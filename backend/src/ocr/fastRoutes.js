@@ -20,7 +20,7 @@ const upload = multer({
 
 function extension(mediaType) { return mediaType === "image/png" ? "png" : mediaType === "image/webp" ? "webp" : "jpg"; }
 
-function rawTextEvidence(rawText, startIndex = 0) {
+function rawTextEvidence(rawText) {
   const lines = String(rawText || "")
     .split(/\r?\n/)
     .map((text) => text.replace(/\s+/g, " ").trim())
@@ -43,11 +43,15 @@ function rawTextEvidence(rawText, startIndex = 0) {
   contextualPatterns.forEach(({ re, type }) => {
     lines.forEach((line, index) => {
       if (!re.test(line)) return;
-      for (let offset = 1; offset <= 3; offset += 1) {
+      for (let offset = 1; offset <= 6; offset += 1) {
         const next = lines[index + offset];
         if (!next) break;
         if (/^(?:for|visit us|toll free|e-?mail|made in|store in|for sale|mfg\.? lic\.?|lic\.|www\.)/i.test(next)) break;
-        if (/^\(?[A-Z]\)?\s+/.test(next) || /\b(?:limited|ltd|private|foods|ayurved|herbal|industries|division|centre|centre)\b/i.test(next) || next.length >= 6) {
+        const looksLikeGarbage = /^(?:[0-9]{1,3}|[#*]+|[A-Z]{1,3})$/.test(next);
+        if (looksLikeGarbage) continue;
+        const looksLikeCompany = /\b(?:limited|ltd|private|foods|food|ayurved|herbal|industr(?:y|ies)|division|park|company|pvt)\b/i.test(next);
+        const looksLikeLabeledValue = /^\(?[A-Z]\)?[.)]?\s+.{5,}/.test(next);
+        if (looksLikeCompany || looksLikeLabeledValue || next.length >= 8) {
           evidence.push({
             id: `raw-context:${type}:${index}:${offset}`,
             imageIndex: 0,
@@ -61,7 +65,7 @@ function rawTextEvidence(rawText, startIndex = 0) {
     });
   });
 
-  return evidence.slice(startIndex);
+  return evidence;
 }
 
 async function analyzeWithPaddle(images) {
@@ -77,8 +81,7 @@ async function analyzeWithPaddle(images) {
   const rawEvidence = Array.isArray(data?.result?.declarationEvidence) ? data.result.declarationEvidence : [];
   const evidence = rawEvidence.map((item, index) => ({ id: String(item?.id ?? `paddle-${Math.max(0, Number(item?.imageIndex || 1) - 1)}:${index}`), imageIndex: Math.max(0, Number(item?.imageIndex || 1) - 1), text: String(item?.text || "").trim(), confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)), boundingBox: item?.boundingBox || null })).filter((item) => item.text);
   const rawText = String(data?.result?.rawText || evidence.map((item) => item.text).join("\n"));
-  const missingRawCandidates = rawTextEvidence(rawText);
-  const mergedEvidence = [...evidence, ...missingRawCandidates];
+  const mergedEvidence = [...evidence, ...rawTextEvidence(rawText)];
   return { provider: "paddleocr", model: data?.model || "PaddleOCR", rawText, evidence: mergedEvidence };
 }
 
