@@ -6,7 +6,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { authenticate } from "../middleware/auth.js";
 import { getOcrConfig } from "./config.js";
-import { analyzePackage } from "./service.js";
 import { analyzeWithCloudVision } from "./cloudVision.js";
 import { runSemanticMapper } from "./semanticMapper.js";
 
@@ -50,17 +49,31 @@ async function readUploadedImages(files, dimensions = []) {
   return images;
 }
 
+async function runHybrid(images) {
+  const vision = await analyzeWithCloudVision(images, config);
+  const semantic = await runSemanticMapper(vision.evidence, config);
+  return { vision, semantic };
+}
+
 router.post("/analyze", authenticate, upload.array("images", config.maxImages), async (req, res) => {
   const files = req.files || [];
   try {
     if (!files.length) return res.status(400).json({ error: { code: "OCR_NO_IMAGES", message: "Upload at least one package image." } });
     const images = await readUploadedImages(files, safeDimensions(req.body?.dimensions));
-    const result = await analyzePackage(images, config);
-    res.json({ result, provider: "gemini", model: config.model });
+    const { vision, semantic } = await runHybrid(images);
+    res.json({
+      result: semantic,
+      provider: semantic.semantic?.provider || "local",
+      model: semantic.semantic?.provider === "openai" ? config.openaiSemanticModel : semantic.semantic?.provider === "gemini" ? config.geminiModel : "local declaration mapper",
+      detectionProvider: vision.provider,
+      detectionProviders: [vision.provider],
+      rawText: vision.rawText,
+      semantic: semantic.semantic,
+    });
   } catch (error) {
     console.error("[ocr]", error);
-    const status = error.statusCode || 500;
-    res.status(status).json({ error: { code: error.code || "OCR_INTERNAL_ERROR", message: error.message || "OCR analysis failed." } });
+    const status = error.statusCode || 502;
+    res.status(status).json({ error: { code: error.code || "OCR_HYBRID_ERROR", message: error.message || "OCR analysis failed." } });
   } finally {
     await Promise.all(files.map((file) => fs.unlink(file.path).catch(() => {})));
   }
@@ -71,8 +84,7 @@ router.post("/hybrid", authenticate, upload.array("images", config.maxImages), a
   try {
     if (!files.length) return res.status(400).json({ error: { code: "OCR_NO_IMAGES", message: "Upload at least one package image." } });
     const images = await readUploadedImages(files, safeDimensions(req.body?.dimensions));
-    const vision = await analyzeWithCloudVision(images, config);
-    const semantic = await runSemanticMapper(vision.evidence, config);
+    const { vision, semantic } = await runHybrid(images);
     res.json({
       result: semantic,
       provider: semantic.semantic?.provider || "local",
