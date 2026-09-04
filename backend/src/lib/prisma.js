@@ -8,6 +8,10 @@ const adapter = new PrismaPg({
 
 const prisma = new PrismaClient({
   adapter,
+  transactionOptions: {
+    maxWait: 10000,
+    timeout: 30000,
+  },
 });
 
 export default prisma;

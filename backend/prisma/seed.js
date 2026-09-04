@@ -5,17 +5,24 @@ import { PrismaClient } from "@prisma/client";
 const adapter = new PrismaPg({ connectionString: process.env.DIRECT_URL });
 const prisma = new PrismaClient({ adapter });
 
-async function getOrCreateCategory(name, slug, parentId = null) {
+async function getOrCreateCategory(name, slug, parentId = null, isFinalProductType = false) {
   if (parentId === null) {
     const existing = await prisma.category.findFirst({ where: { parentId: null, slug } });
-    if (existing) return prisma.category.update({ where: { id: existing.id }, data: { name } });
-    return prisma.category.create({ data: { name, slug, parentId: null } });
+    if (existing) {
+      return prisma.category.update({
+        where: { id: existing.id },
+        data: { name, isSystem: true, ownerId: null, isFinalProductType },
+      });
+    }
+    return prisma.category.create({
+      data: { name, slug, parentId: null, isSystem: true, ownerId: null, isFinalProductType },
+    });
   }
 
   return prisma.category.upsert({
     where: { parentId_slug: { parentId, slug } },
-    update: { name },
-    create: { name, slug, parentId },
+    update: { name, isSystem: true, ownerId: null, isFinalProductType },
+    create: { name, slug, parentId, isSystem: true, ownerId: null, isFinalProductType },
   });
 }
 
@@ -49,7 +56,7 @@ async function main() {
   await getOrCreateCategory("Soft Drinks", "soft-drinks", beverages.id);
   await getOrCreateCategory("Milk", "milk", dairy.id);
 
-  console.log("PARAKH categories seeded successfully.");
+  console.log("PARAKH global categories seeded successfully.");
 }
 
 main()

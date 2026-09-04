@@ -7,14 +7,32 @@ datasource db {
 }
 
 model User {
-  id          String        @id @default(cuid())
-  name        String
-  email       String        @unique
-  role        String        @default("WORKER")
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  scans       Scan[]
-  inspections Inspection[]
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  passwordHash String?
+  role         String        @default("USER")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sessions     Session[]
+  scans        Scan[]
+  inspections  Inspection[]
+  categories   Category[]
+  products     Product[]
+  shops        Shop[]
+  rulesCreated ComplianceRule[] @relation("RuleCreatedBy")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Shop {
@@ -25,58 +43,85 @@ model Shop {
   state       String?
   latitude    Float?
   longitude   Float?
+  sourceType  String        @default("OFFLINE")
+  ownerId     String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
+  owner       User?         @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   inspections Inspection[]
+
+  @@index([name])
+  @@index([ownerId])
+  @@index([sourceType])
 }
 
 model Category {
-  id        String     @id @default(cuid())
-  name      String
-  slug      String
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  parentId  String?
-  parent    Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children  Category[] @relation("CategoryHierarchy")
-  products  Product[]
+  id                 String     @id @default(cuid())
+  name               String
+  slug               String
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  parentId           String?
+  isSystem           Boolean    @default(false)
+  sourceType         String     @default("OFFLINE")
+  ownerId            String?
+  isFinalProductType Boolean    @default(false)
+  parent             Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children           Category[] @relation("CategoryHierarchy")
+  products           Product[]
+  owner              User?      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   @@unique([parentId, slug])
+  @@index([ownerId])
+  @@index([isSystem])
+  @@index([parentId])
+  @@index([isFinalProductType])
+  @@index([sourceType])
 }
 
 model Product {
-  id               String        @id @default(cuid())
-  brandName        String?
-  productName      String
-  description      String?
-  netQuantity      String?
-  unit             String?
-  mrp              Float?
-  barcode          String?
-  imageUrl         String?
-  complianceStatus String        @default("NEEDS_REVIEW")
-  violationReason  String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  categoryId       String
-  category         Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  inspections      Inspection[]
+  id                String        @id @default(cuid())
+  brandName         String?
+  productName       String
+  description       String?
+  ocrData           String?
+  netQuantity       String?
+  unit              String?
+  mrp               Float?
+  barcode            String?
+  imageUrl          String?
+  imageUrls         Json          @default("[]")
+  complianceStatus  String        @default("NEEDS_REVIEW")
+  violationReason   String?
+  sourceType        String        @default("OFFLINE")
+  sourceUrl         String?
+  sourceWebsiteName String?
+  ownerId           String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  categoryId        String
+  category          Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  owner             User?         @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  inspections       Inspection[]
 
   @@index([categoryId])
+  @@index([ownerId])
   @@index([brandName])
   @@index([productName])
   @@index([barcode])
   @@index([complianceStatus])
+  @@index([sourceType])
+  @@index([createdAt])
 }
 
 model Scan {
-  id          String        @id @default(cuid())
+  id          String      @id @default(cuid())
   imageUrl    String?
   ocrText     String?
-  status      String        @default("PENDING")
-  createdAt   DateTime      @default(now())
+  status      String      @default("PENDING")
+  createdAt   DateTime    @default(now())
   workerId    String
-  worker      User          @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  worker      User        @relation(fields: [workerId], references: [id], onDelete: Restrict)
   inspection  Inspection?
 }
 
@@ -98,4 +143,28 @@ model Inspection {
   @@index([productId])
   @@index([workerId])
   @@index([inspectedAt])
+}
+
+model ComplianceRule {
+  id             String   @id @default(cuid())
+  ruleId         String   @unique
+  ruleCode       String
+  ruleNumber     String
+  subclause      String?
+  title          String
+  description    String
+  category       String
+  defaultSeverity String
+  enabled        Boolean  @default(true)
+  isBuiltin      Boolean  @default(false)
+  definition     Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdById    String?
+  createdBy      User?    @relation("RuleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([ruleCode])
+  @@index([enabled])
+  @@index([category])
+  @@index([isBuiltin])
 }

@@ -1,0 +1,27 @@
+name: Rules Engine CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'rules-engine/**'
+  pull_request:
+    paths:
+      - 'rules-engine/**'
+      - '.github/workflows/rules-engine.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rules-engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: rules-engine/package.json
+      - run: npm install
+      - run: npm run check

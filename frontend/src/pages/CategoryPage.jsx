@@ -1,238 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { apiFetch, getUser } from "../lib/auth";
 import "../styles/products.css";
-
 const API_URL = "http://localhost:5000/api";
-
-function createSlug(name) {
-  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+const pathOf = c => [c?.parent?.parent?.parent,c?.parent?.parent,c?.parent,c].filter(Boolean).map(x=>x.name).join(" → ");
+export default function CategoryPage(){
+ const {categoryId}=useParams(),location=useLocation(),[searchParams]=useSearchParams(),user=getUser();
+ const globalManagement=location.pathname.startsWith("/admin/categories/")&&searchParams.get("globalAdmin")==="1"&&user?.role==="ADMIN";
+ const [category,setCategory]=useState(null),[childName,setChildName]=useState(""),[childFinal,setChildFinal]=useState(false),[showChild,setShowChild]=useState(false),[message,setMessage]=useState(""),[advancedSelect,setAdvancedSelect]=useState(false),[selected,setSelected]=useState([]),[filters,setFilters]=useState({status:"ALL",productName:"",brand:"",shop:"",unit:"",minQ:"",maxQ:"",minMrp:"",maxMrp:"",dateFrom:"",dateTo:""});
+ async function load(){const r=await apiFetch(`${API_URL}/categories/id/${categoryId}`);const d=await r.json().catch(()=>null);if(r.ok)setCategory(d);else setMessage(d?.error||"Category not found");}
+ useEffect(()=>{load();setSelected([])},[categoryId]);
+ const depth=useMemo(()=>{let d=1,p=category?.parent;while(p){d++;p=p.parent}return d},[category]),children=category?.children||[],isFinal=!!category?.isFinalProductType,canManageGlobal=globalManagement&&category?.isSystem,canAddChild=!isFinal&&depth<4;
+ const products=(category?.products||[]).filter(p=>{const shop=p.inspections?.[0]?.shop?.name||"",q=parseFloat(String(p.netQuantity||"").replace(/[^0-9.]/g,"")),dt=new Date(p.inspections?.[0]?.inspectedAt||p.createdAt);return(filters.status==="ALL"||p.complianceStatus===filters.status)&&(p.productName||"").toLowerCase().includes(filters.productName.toLowerCase())&&(p.brandName||"").toLowerCase().includes(filters.brand.toLowerCase())&&shop.toLowerCase().includes(filters.shop.toLowerCase())&&(!filters.unit||(p.unit||"").toLowerCase()===filters.unit.toLowerCase())&&(!filters.minQ||q>=+filters.minQ)&&(!filters.maxQ||q<=+filters.maxQ)&&(!filters.minMrp||p.mrp>=+filters.minMrp)&&(!filters.maxMrp||p.mrp<=+filters.maxMrp)&&(!filters.dateFrom||dt>=new Date(filters.dateFrom+"T00:00:00"))&&(!filters.dateTo||dt<=new Date(filters.dateTo+"T23:59:59.999"))});
+ const all=products.length&&products.every(p=>selected.includes(p.id));
+ const setF=(k,v)=>{setFilters(x=>({...x,[k]:v}));setSelected([])};
+ async function addChild(){if(!childName.trim()||!canAddChild)return;const globalChild=!!canManageGlobal;const endpoint=globalChild?`${API_URL}/categories/global`:`${API_URL}/categories`;const r=await apiFetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:childName,parentId:category.id,isFinal:childFinal,sourceType:category.sourceType})});const d=await r.json().catch(()=>null);if(!r.ok)return setMessage(d?.error||"Could not add category");setChildName("");setChildFinal(false);setShowChild(false);setMessage(globalChild?"Global subcategory added for all users.":"Private subcategory added to this account.");load()}
+ async function delCategory(id){if(!confirm("Delete this category branch? Registered products will be moved to the appropriate Uncategorized category."))return;const r=await apiFetch(`${API_URL}/categories/${id}`,{method:"DELETE"});const d=await r.json().catch(()=>null);if(!r.ok)return setMessage(d?.error||"Delete failed");location.href=globalManagement?`/admin/categories/${String(category.sourceType||"OFFLINE").toLowerCase()}`:category.parent?`/products/category/${category.parent.id}`:"/products"}
+ async function delProducts(){if(!selected.length||!confirm(`Delete ${selected.length} product(s)?`))return;for(const id of selected){const r=await apiFetch(`${API_URL}/products/${id}`,{method:"DELETE"});if(!r.ok){const d=await r.json().catch(()=>null);setMessage(d?.error||"Delete failed");break}}setSelected([]);load()}
+ if(!category)return <div className="products-page"><p>{message||"Loading..."}</p></div>;
+ return <div className="products-page"><Link className="back-link" to={globalManagement?`/admin/categories/${String(category.sourceType||"OFFLINE").toLowerCase()}`:category.parent?`/products/category/${category.parent.id}`:"/products"}>← {globalManagement?"Global categories":"Back"}</Link><div className="page-header"><p className="eyebrow">{globalManagement?"ADMIN · GLOBAL":"PRODUCT DATABASE"} · LEVEL {depth}</p><h1>{category.name}</h1><p>{pathOf(category)}</p><p>{category.isSystem?"GLOBAL":"PRIVATE"} · {category.sourceType==="ECOMMERCE"?"E-COMMERCE":"OFFLINE"} · {isFinal?"FINAL PRODUCT CATEGORY":"SUBCATEGORY"}</p></div>{message&&<div className="status-message">{message}</div>}
+ {(canAddChild||!category.isSystem)&&<section className="product-actions category-toolbar">{canAddChild&&<button className="secondary-action" onClick={()=>setShowChild(v=>!v)}>{canManageGlobal?"+ Add global subcategory":"+ Add private subcategory"}</button>}{(!category.isSystem||canManageGlobal)&&<button className="delete-category-button" onClick={()=>delCategory(category.id)}>{canManageGlobal?"Delete global category":"Delete private category"}</button>}</section>}
+ {showChild&&<div className="category-form"><input placeholder={canManageGlobal?"New global subcategory":"New private subcategory"} value={childName} onChange={e=>setChildName(e.target.value)}/><label><input type="checkbox" checked={childFinal} onChange={e=>setChildFinal(e.target.checked)}/> Set as final product type</label><button onClick={addChild}>Add</button><span className="gesture-hint">{canManageGlobal?"Global category · available to all users":"Private category · available only to this account"}</span></div>}
+ {!isFinal&&<section className="product-categories"><div className="section-heading"><div><h2>Subcategories</h2><p>{globalManagement?"Create global subcategories here. Private categories are managed separately in Products.":"Global categories can be viewed here. Subcategories you add are private to your account."} Maximum depth is four.</p></div></div><div className="category-grid">{children.map(c=><div className="category-item" key={c.id}><Link className="category-card" to={globalManagement&&c.isSystem?`/admin/categories/${String(c.sourceType||category.sourceType||"OFFLINE").toLowerCase()}/${c.id}?globalAdmin=1`:`/products/category/${c.id}`}><h3>{c.name}</h3><p>{c.isSystem?"Global":"Private to your account"} · {c.sourceType==="ECOMMERCE"?"E-commerce":"Offline"} · {c.isFinalProductType?"Final category":`Level ${depth+1}`}</p></Link>{(!c.isSystem||canManageGlobal)&&<button className="delete-category-button" onClick={()=>delCategory(c.id)}>Delete</button>}</div>)}</div>{!children.length&&<p>No subcategories yet.</p>}</section>}
+ {isFinal&&<section className="product-categories"><div className="section-heading"><div><h2>Registered {category.name} products</h2><p>{products.length} products match the current filters.</p></div></div><div className="filter-panel"><input placeholder="Product" value={filters.productName} onChange={e=>setF("productName",e.target.value)}/><input placeholder="Brand" value={filters.brand} onChange={e=>setF("brand",e.target.value)}/><input placeholder="Shop" value={filters.shop} onChange={e=>setF("shop",e.target.value)}/><select value={filters.status} onChange={e=>setF("status",e.target.value)}><option>ALL</option><option>OKAY</option><option>VIOLATION</option><option>NEEDS_REVIEW</option></select><select value={filters.unit} onChange={e=>setF("unit",e.target.value)}><option value="">Any unit</option><option value="mg">mg</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="pcs">pcs</option><option value="dozen">dozen</option><option value="m">m</option></select><input type="number" placeholder="Min quantity" value={filters.minQ} onChange={e=>setF("minQ",e.target.value)}/><input type="number" placeholder="Max quantity" value={filters.maxQ} onChange={e=>setF("maxQ",e.target.value)}/><input type="number" placeholder="Min MRP" value={filters.minMrp} onChange={e=>setF("minMrp",e.target.value)}/><input type="number" placeholder="Max MRP" value={filters.maxMrp} onChange={e=>setF("maxMrp",e.target.value)}/><label className="filter-date"><span>From date</span><input type="date" value={filters.dateFrom} onChange={e=>setF("dateFrom",e.target.value)}/></label><label className="filter-date"><span>To date</span><input type="date" value={filters.dateTo} onChange={e=>setF("dateTo",e.target.value)}/></label></div><div className="bulk-toolbar"><span className="gesture-hint">Selection controls available to product owner</span>{advancedSelect&&<label><input type="checkbox" checked={!!all} onChange={()=>setSelected(all?[]:products.map(p=>p.id))}/> Select all matching</label>}{advancedSelect&&selected.length>0&&<button className="delete-category-button" onClick={delProducts}>Delete selected ({selected.length})</button>}</div><div className="product-list">{products.map(p=><div className="product-row" key={p.id}>{advancedSelect&&<input type="checkbox" checked={selected.includes(p.id)} onChange={()=>setSelected(x=>x.includes(p.id)?x.filter(i=>i!==p.id):[...x,p.id])}/>}<Link to={`/products/item/${p.id}`}><div><strong>{p.productName}</strong><span>{p.brandName||"Brand not recorded"}</span></div><div><span>{p.netQuantity||"-"} {p.unit||""}</span><span>₹{p.mrp??"-"} · {p.inspections?.[0]?.shop?.name||"Shop not recorded"}</span></div><span className={`compliance-badge ${p.complianceStatus.toLowerCase()}`}>{p.complianceStatus}</span></Link></div>)}</div></section>}
+ </div>;
 }
-
-function CategoryPage() {
-  const { categoryId } = useParams();
-  const [category, setCategory] = useState(null);
-  const [filters, setFilters] = useState({
-    status: "ALL",
-    brandName: "",
-    shopName: "",
-    productName: "",
-    unit: "",
-    minQuantity: "",
-    maxQuantity: "",
-  });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [childName, setChildName] = useState("");
-  const [showChildForm, setShowChildForm] = useState(false);
-  const [message, setMessage] = useState("");
-
-  async function loadCategory() {
-    setLoading(true);
-    setError("");
-    try {
-      const response = await fetch(`${API_URL}/categories/id/${categoryId}`);
-      if (!response.ok) throw new Error("Category not found");
-      setCategory(await response.json());
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    loadCategory();
-  }, [categoryId]);
-
-  const depth = category
-    ? category.parent
-      ? category.parent.parent
-        ? 3
-        : 2
-      : 1
-    : 0;
-
-  const isProductType = depth === 3;
-  const canAddChild = depth === 1 || depth === 2;
-  const children = category?.children ?? [];
-
-  const filteredProducts = useMemo(() => {
-    return (category?.products ?? []).filter((product) => {
-      const shop = product.inspections?.[0]?.shop?.name ?? "";
-      const quantity = Number.parseFloat(product.netQuantity ?? "");
-      const min = filters.minQuantity === "" ? null : Number(filters.minQuantity);
-      const max = filters.maxQuantity === "" ? null : Number(filters.maxQuantity);
-
-      return (
-        (filters.status === "ALL" || product.complianceStatus === filters.status) &&
-        product.productName.toLowerCase().includes(filters.productName.toLowerCase()) &&
-        (product.brandName ?? "").toLowerCase().includes(filters.brandName.toLowerCase()) &&
-        shop.toLowerCase().includes(filters.shopName.toLowerCase()) &&
-        (!filters.unit || product.unit === filters.unit) &&
-        (min === null || (Number.isFinite(quantity) && quantity >= min)) &&
-        (max === null || (Number.isFinite(quantity) && quantity <= max))
-      );
-    });
-  }, [category, filters]);
-
-  async function addChildCategory() {
-    const name = childName.trim();
-    if (!name || !category || !canAddChild) return;
-
-    try {
-      const response = await fetch(`${API_URL}/categories`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, slug: createSlug(name), parentId: category.id }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not add category");
-      setChildName("");
-      setShowChildForm(false);
-      setMessage(`Added ${data.name}.`);
-      await loadCategory();
-    } catch (err) {
-      setMessage(err.message);
-    }
-  }
-
-  async function deleteCategory() {
-    if (!category) return;
-    const confirmed = window.confirm(
-      `Delete "${category.name}"? Categories containing children or products cannot be deleted.`
-    );
-    if (!confirmed) return;
-
-    try {
-      const response = await fetch(`${API_URL}/categories/${category.id}`, { method: "DELETE" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not delete category");
-      window.location.href = depth === 1 ? "/products" : `/products/category/${category.parent.id}`;
-    } catch (err) {
-      setMessage(err.message);
-    }
-  }
-
-  const setFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
-
-  if (loading) return <div className="products-page"><p>Loading category...</p></div>;
-  if (error) return <div className="products-page"><p>Error: {error}</p></div>;
-
-  const parentLink = category.parent ? `/products/category/${category.parent.id}` : "/products";
-  const levelTitle = depth === 1 ? "Subcategories" : depth === 2 ? "Product Types" : "Products";
-  const addLabel = depth === 1 ? "Register New Subcategory" : "Register New Product Type";
-  const path = [category.parent?.parent?.parent, category.parent?.parent, category.parent, category]
-    .filter(Boolean)
-    .map((item) => item.name)
-    .join(" → ");
-
-  return (
-    <div className="products-page">
-      <Link to={parentLink} className="back-link">← Back</Link>
-
-      <div className="page-header">
-        <p className="eyebrow">PRODUCT DATABASE</p>
-        <h1>{category.name}</h1>
-        <p>{path}</p>
-      </div>
-
-      {message && <div className="status-message">{message}</div>}
-
-      <section className="product-actions category-toolbar">
-        {canAddChild && (
-          <button className="secondary-action" type="button" onClick={() => setShowChildForm((value) => !value)}>
-            + {addLabel}
-          </button>
-        )}
-        <button className="delete-category-button" type="button" onClick={deleteCategory}>
-          Delete {depth === 1 ? "Category" : depth === 2 ? "Subcategory" : "Product Type"}
-        </button>
-      </section>
-
-      {showChildForm && canAddChild && (
-        <div className="category-form">
-          <input
-            value={childName}
-            onChange={(event) => setChildName(event.target.value)}
-            placeholder={depth === 1 ? `New subcategory under ${category.name}` : `New product type under ${category.name}`}
-          />
-          <button type="button" onClick={addChildCategory}>Add</button>
-        </div>
-      )}
-
-      {isProductType ? (
-        <section className="product-categories">
-          <div className="section-heading">
-            <div>
-              <h2>Scanned Products</h2>
-              <p>Products are added here automatically when an inspection is saved from Scan.</p>
-            </div>
-          </div>
-
-          <div className="filter-panel">
-            <select value={filters.status} onChange={(e) => setFilter("status", e.target.value)}>
-              <option value="ALL">All compliance results</option>
-              <option value="OKAY">Okay</option>
-              <option value="VIOLATION">Violation</option>
-              <option value="NEEDS_REVIEW">Needs review</option>
-            </select>
-            <input placeholder="Product name" value={filters.productName} onChange={(e) => setFilter("productName", e.target.value)} />
-            <input placeholder="Company / brand" value={filters.brandName} onChange={(e) => setFilter("brandName", e.target.value)} />
-            <input placeholder="Shop name" value={filters.shopName} onChange={(e) => setFilter("shopName", e.target.value)} />
-            <select value={filters.unit} onChange={(e) => setFilter("unit", e.target.value)}>
-              <option value="">Any unit</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="pcs">pcs</option><option value="m">m</option>
-            </select>
-            <input type="number" placeholder="Min quantity" value={filters.minQuantity} onChange={(e) => setFilter("minQuantity", e.target.value)} />
-            <input type="number" placeholder="Max quantity" value={filters.maxQuantity} onChange={(e) => setFilter("maxQuantity", e.target.value)} />
-          </div>
-
-          {filteredProducts.length === 0 ? <p>No products match these filters.</p> : (
-            <div className="product-list">
-              {filteredProducts.map((product) => (
-                <Link key={product.id} to={`/products/item/${product.id}`} className="product-row">
-                  <div><strong>{product.productName}</strong><span>{product.brandName || "Company not recorded"}</span></div>
-                  <div><span>{product.netQuantity || "Quantity not recorded"} {product.unit || ""}</span><span>{product.inspections?.[0]?.shop?.name || "Shop not recorded"}</span></div>
-                  <span className={`compliance-badge ${product.complianceStatus.toLowerCase()}`}>{product.complianceStatus}</span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-      ) : (
-        <section className="product-categories">
-          <div className="section-heading">
-            <div><h2>{levelTitle}</h2><p>Level {depth} of 3. Only the next hierarchy level can be created here.</p></div>
-          </div>
-          {children.length === 0 ? <p>No {depth === 1 ? "subcategories" : "product types"} yet.</p> : (
-            <div className="category-grid">
-              {children.map((child) => (
-                <div key={child.id} className="category-item">
-                  <Link to={`/products/category/${child.id}`} className="category-card">
-                    <h3>{child.name}</h3>
-                    <p>{depth === 1 ? "Open subcategory" : "Open product type"}</p>
-                  </Link>
-                  <button
-                    type="button"
-                    className="delete-category-button"
-                    onClick={async () => {
-                      if (!window.confirm(`Delete "${child.name}"? This cannot be undone.`)) return;
-                      try {
-                        const response = await fetch(`${API_URL}/categories/${child.id}`, { method: "DELETE" });
-                        const data = await response.json();
-                        if (!response.ok) throw new Error(data.error || "Could not delete category");
-                        setMessage(`"${child.name}" deleted successfully.`);
-                        await loadCategory();
-                      } catch (err) { setMessage(err.message); }
-                    }}
-                  >Delete</button>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-    </div>
-  );
-}
-
-export default CategoryPage;

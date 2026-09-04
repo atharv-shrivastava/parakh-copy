@@ -1,240 +1,442 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { apiFetch } from "../lib/auth";
 import "../styles/scan.css";
 
 const API_URL = "http://localhost:5000/api";
-
-const emptyForm = {
-  brandName: "",
-  productName: "",
-  description: "",
-  netQuantity: "",
-  unit: "",
-  mrp: "",
-  barcode: "",
-};
+const PUTER_EVALUATE_URL = "http://localhost:8080/api/ocr/evaluate-structured";
+const MAX_IMAGES = 4;
+const MAX_PUTER_IMAGE_SIZE = 10 * 1024 * 1024;
+const OCR_FIELDS = ["productName","brandName","manufacturer","manufacturerAddress","packer","packerAddress","importer","importerAddress","netQuantity","unit","mrp","currency","dateOfManufacture","dateOfPacking","bestBefore","expiryDate","batchNumber","consumerCarePhone","consumerCareEmail","countryOfOrigin","fssaiLicenseNumber","barcode"];
+const emptyForm = { brandName: "", productName: "", description: "", netQuantity: "", unit: "", mrp: "", barcode: "", shopName: "", shopAddress: "", shopCity: "", shopState: "", notes: "" };
 
 function flattenCategories(nodes, path = []) {
   return nodes.flatMap((node) => {
-    const nextPath = [...path, node];
-    return [
-      { ...node, path: nextPath },
-      ...flattenCategories(node.children ?? [], nextPath),
-    ];
+    const next = [...path, node];
+    return [{ ...node, path: next }, ...flattenCategories(node.children || [], next)];
   });
 }
 
+function fieldValue(result, key) {
+  const field = result?.[key];
+  return field?.status === "found" && field.value !== null && field.value !== undefined ? String(field.value) : "";
+}
+
+function formFromOcr(result) {
+  if (!result) return { ...emptyForm };
+  const details = [
+    ["Manufacturer", fieldValue(result, "manufacturer")],
+    ["Manufacturer address", fieldValue(result, "manufacturerAddress")],
+    ["Packer", fieldValue(result, "packer")],
+    ["Packer address", fieldValue(result, "packerAddress")],
+    ["Importer", fieldValue(result, "importer")],
+    ["Importer address", fieldValue(result, "importerAddress")],
+    ["Currency", fieldValue(result, "currency")],
+    ["Manufacturing date", fieldValue(result, "dateOfManufacture")],
+    ["Packing date", fieldValue(result, "dateOfPacking")],
+    ["Best before", fieldValue(result, "bestBefore")],
+    ["Expiry date", fieldValue(result, "expiryDate")],
+    ["Batch / lot number", fieldValue(result, "batchNumber")],
+    ["Consumer care phone", fieldValue(result, "consumerCarePhone")],
+    ["Consumer care email", fieldValue(result, "consumerCareEmail")],
+    ["Country of origin", fieldValue(result, "countryOfOrigin")],
+    ["FSSAI license number", fieldValue(result, "fssaiLicenseNumber")],
+  ].filter(([, value]) => value);
+  const declarations = Array.isArray(result.otherDeclarations) ? result.otherDeclarations.filter(Boolean) : [];
+  return {
+    brandName: fieldValue(result, "brandName") || fieldValue(result, "manufacturer"),
+    productName: fieldValue(result, "productName"),
+    netQuantity: fieldValue(result, "netQuantity"),
+    unit: fieldValue(result, "unit"),
+    mrp: fieldValue(result, "mrp").replace(/[^0-9.]/g, ""),
+    barcode: fieldValue(result, "barcode"),
+    description: [...details.map(([label, value]) => `${label}: ${value}`), ...declarations].join("\n"),
+    shopName: "",
+    shopAddress: "",
+    shopCity: "",
+    shopState: "",
+    notes: "",
+  };
+}
+
+async function fileToDataUrl(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) {
+    bitmap.close();
+    throw new Error("Could not prepare the image for storage.");
+  }
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas.toDataURL("image/jpeg", 0.72);
+}
+
+function normalizePuterOcr(candidate, rawText) {
+  const result = {};
+  for (const key of OCR_FIELDS) {
+    const field = candidate?.[key];
+    result[key] = field && typeof field === "object" ? {
+      value: field.value ?? null,
+      raw: field.raw ?? null,
+      confidence: Number.isFinite(Number(field.confidence)) ? Number(field.confidence) : 0,
+      evidence: field.evidence ?? null,
+      status: ["found","absent","unreadable","ambiguous"].includes(field.status) ? field.status : "absent",
+    } : { value: null, raw: null, confidence: 0, evidence: null, status: "absent" };
+  }
+  result.otherDeclarations = Array.isArray(candidate?.otherDeclarations) ? candidate.otherDeclarations : [];
+  result.rawText = typeof candidate?.rawText === "string" && candidate.rawText.trim() ? candidate.rawText : rawText;
+  result.warnings = Array.isArray(candidate?.warnings) ? candidate.warnings : [];
+  result.unreadableFields = Array.isArray(candidate?.unreadableFields) ? candidate.unreadableFields : [];
+  result.needsReview = Boolean(candidate?.needsReview) || OCR_FIELDS.some((key) => {
+    const f = result[key];
+    return f.status === "unreadable" || f.status === "ambiguous" || (f.status === "found" && f.confidence < 0.6);
+  });
+  return result;
+}
+
+function extractJsonObject(text) {
+  const source = String(text || "").trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  const start = source.indexOf("{");
+  if (start < 0) throw new Error("Puter did not return structured OCR JSON.");
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < source.length; i += 1) {
+    const ch = source[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error("Puter returned incomplete structured OCR JSON.");
+}
+
+function repairJsonEscapes(text) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (!inString) {
+      output += ch;
+      if (ch === '"') inString = true;
+      continue;
+    }
+    if (escaped) {
+      if (!["\"", "\\", "/", "b", "f", "n", "r", "t"].includes(ch) && ch !== "u") output += "\\\\";
+      output += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      output += ch;
+      inString = false;
+      continue;
+    }
+    if (ch.charCodeAt(0) < 0x20) output += ch === "\n" ? "\\n" : ch === "\r" ? "\\r" : "\\t";
+    else output += ch;
+  }
+  if (escaped) output += "\\\\";
+  return output;
+}
+
+function parsePuterJson(text) {
+  const candidate = extractJsonObject(text);
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    try {
+      return JSON.parse(repairJsonEscapes(candidate));
+    } catch (error) {
+      throw new Error(`Puter returned malformed structured OCR JSON: ${error.message}`);
+    }
+  }
+}
+
+async function runPuterOcr(files) {
+  const puter = window.puter;
+  if (!puter?.ai?.img2txt) throw new Error("Puter.js OCR is not loaded. Refresh the page and try again.");
+  const chunks = await Promise.all(files.map(async (file, index) => {
+    if (file.size > MAX_PUTER_IMAGE_SIZE) throw new Error(`Image ${index + 1} exceeds Puter OCR’s 10 MB limit.`);
+    const text = await puter.ai.img2txt(file);
+    return `[IMAGE ${index + 1}]\n${String(text || "").trim()}`;
+  }));
+  const rawText = chunks.filter((x) => x.trim()).join("\n\n");
+  if (!rawText.trim()) throw new Error("Puter OCR found no readable text.");
+  if (!puter.ai.chat) return normalizePuterOcr({}, rawText);
+  const prompt = "Convert this OCR text into JSON fields for PARAKH. Never invent data. Every field must use {value,raw,confidence,evidence,status}; status must be found, absent, unreadable or ambiguous. Escape all backslashes and newlines correctly because the result will be parsed by JSON.parse. Return only one valid JSON object with no markdown. Fields: " + OCR_FIELDS.join(", ") + ". Also return otherDeclarations, rawText, warnings, unreadableFields, needsReview. OCR text:\n\n" + rawText;
+  const response = await puter.ai.chat(prompt, { model: "gpt-5.6-luna", max_tokens: 5000 });
+  const content = response?.message?.content || response?.content || response?.text || "";
+  return normalizePuterOcr(parsePuterJson(content), rawText);
+}
+
 function Scan() {
+  const videoRef = useRef(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState("");
   const [categories, setCategories] = useState([]);
-  const [imageName, setImageName] = useState("");
-  const [ocrText, setOcrText] = useState("");
+  const [images, setImages] = useState([]);
+  const [ocr, setOcr] = useState(null);
+  const [compliance, setCompliance] = useState(null);
+  const [complianceError, setComplianceError] = useState(null);
+  const [acceptedFindingIds, setAcceptedFindingIds] = useState([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [form, setForm] = useState(emptyForm);
+  const [analyzing, setAnalyzing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showRegistration, setShowRegistration] = useState(false);
+  const [useExtractedData, setUseExtractedData] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    fetch(`${API_URL}/categories/tree/all`)
-      .then((response) => {
-        if (!response.ok) throw new Error();
-        return response.json();
+    apiFetch(`${API_URL}/categories/tree/all`)
+      .then((r) => {
+        if (!r.ok) throw new Error(r.status === 401 ? "Please sign in first." : "Unable to load categories");
+        return r.json();
       })
       .then(setCategories)
-      .catch(() => setMessage("Unable to load categories."));
+      .catch((e) => setMessage(e.message));
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (videoRef.current?.srcObject) videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      images.forEach((item) => {
+        if (item?.url) URL.revokeObjectURL(item.url);
+      });
+    };
+  }, [images]);
+
   const flatCategories = flattenCategories(categories);
-
+  const finalCategories = flatCategories.filter((c) => Boolean(c.isFinalProductType));
+  const selectedCategory = flatCategories.find((c) => c.id === selectedCategoryId);
+  const violationFindings = useMemo(() => {
+    const findings = Array.isArray(compliance?.findings) ? compliance.findings : Array.isArray(compliance?.violations) ? compliance.violations : [];
+    return findings.filter((finding) => finding?.status === "VIOLATION" || !finding?.status);
+  }, [compliance]);
   const suggestedCategory = useMemo(() => {
-    const text = ocrText.toLowerCase();
-    if (!text) return null;
-    return flatCategories
-      .filter((category) =>
-        text.includes(category.name.toLowerCase()) ||
-        text.includes(category.slug.replaceAll("-", " "))
-      )
-      .sort((a, b) => b.name.length - a.name.length)[0] ?? null;
-  }, [ocrText, flatCategories]);
+    const text = `${ocr?.rawText || ""} ${fieldValue(ocr, "productName")} ${fieldValue(ocr, "brandName")}`.toLowerCase();
+    if (!text.trim()) return null;
+    return finalCategories
+      .filter((c) => text.includes(c.name.toLowerCase()) || text.includes(c.slug.replaceAll("-", " ")))
+      .sort((a, b) => b.name.length - a.name.length)[0] || null;
+  }, [ocr, finalCategories]);
 
-  const selectedCategory = flatCategories.find((item) => item.id === selectedCategoryId);
-  const selectedIsFinalType = selectedCategory?.path?.length === 3;
-
-  function handleImage(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setImageName(file.name);
-    setMessage("Image selected. Enter or review the OCR text, then confirm the destination category.");
+  function addFiles(files) {
+    const selected = Array.from(files || []).filter((file) => file instanceof File && file.type.startsWith("image/"));
+    if (!selected.length) return;
+    setImages((current) => {
+      const remaining = MAX_IMAGES - current.length;
+      if (remaining <= 0) return current;
+      const accepted = selected.slice(0, remaining).map((file) => ({ file, url: URL.createObjectURL(file) }));
+      return [...current, ...accepted];
+    });
+    if (images.length + selected.length > MAX_IMAGES) setMessage(`You can retain a maximum of ${MAX_IMAGES} images.`);
+    setOcr(null);
+    setCompliance(null);
+    setAcceptedFindingIds([]);
+    setComplianceError(null);
+    setShowRegistration(false);
+    setUseExtractedData(false);
+    setForm(emptyForm);
+    setMessage("Images ready for analysis.");
   }
 
-  function applySuggestion() {
-    if (!suggestedCategory) {
-      setMessage("No confident category suggestion was found. Choose one manually.");
-      return;
+  function handleImages(event) {
+    addFiles(event.target.files);
+    event.target.value = "";
+  }
+
+  async function openCamera() {
+    setCameraError("");
+    setMessage("");
+    if (images.length >= MAX_IMAGES) return setMessage(`You can retain a maximum of ${MAX_IMAGES} images.`);
+    if (!navigator.mediaDevices?.getUserMedia) return setCameraError("Camera access is not available in this browser. Use Upload Images instead.");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      setCameraOpen(true);
+      requestAnimationFrame(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+      });
+    } catch (e) {
+      setCameraError(e.name === "NotAllowedError" ? "Camera permission was denied. Allow camera access for localhost." : "Could not open the camera. Check that a webcam is available.");
     }
-    setSelectedCategoryId(suggestedCategory.id);
-    setMessage(`Category selected: ${suggestedCategory.path.map((item) => item.name).join(" → ")}`);
   }
 
-  function updateForm(key, value) {
-    setForm((current) => ({ ...current, [key]: value }));
+  function closeCamera() {
+    if (videoRef.current?.srcObject) videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraOpen(false);
   }
+
+  function capturePhoto() {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2) return setCameraError("Camera is still starting. Try again in a moment.");
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext("2d");
+    if (!context) return setCameraError("Could not capture the image.");
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (!blob) return setCameraError("Could not capture the image.");
+      const file = new File([blob], `camera-${Date.now()}.jpg`, { type: "image/jpeg" });
+      addFiles([file]);
+      closeCamera();
+    }, "image/jpeg", 0.88);
+  }
+
+  function removeImage(index) {
+    setImages((current) => {
+      const target = current[index];
+      if (target?.url) URL.revokeObjectURL(target.url);
+      return current.filter((_, i) => i !== index);
+    });
+    setOcr(null);
+    setCompliance(null);
+    setAcceptedFindingIds([]);
+    setComplianceError(null);
+    setShowRegistration(false);
+    setUseExtractedData(false);
+    setForm(emptyForm);
+  }
+
+  async function analyzeImages() {
+    if (!images.length) return setMessage("Add at least one package image first.");
+    setAnalyzing(true);
+    setMessage("Puter.js OCR is extracting text from the selected images...");
+    try {
+      const extracted = await runPuterOcr(images.map(({ file }) => file));
+      setMessage("Puter OCR complete. Running Legal Metrology Rules Engine...");
+      const response = await apiFetch(PUTER_EVALUATE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ocr: extracted,
+          inspectionId: crypto.randomUUID(),
+          productId: crypto.randomUUID(),
+          inspectionDate: new Date().toISOString().slice(0, 10),
+          context: "physical_package",
+          commodityCategory: selectedCategory?.name || "packaged commodity",
+          consumerType: "general",
+          isImported: false,
+          packageType: "retail",
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : data.error?.message || "Rules Engine evaluation failed");
+      const findings = Array.isArray(data.compliance?.findings) ? data.compliance.findings : Array.isArray(data.compliance?.violations) ? data.compliance.violations : [];
+      const violations = findings.filter((finding) => finding?.status === "VIOLATION" || !finding?.status);
+      setAcceptedFindingIds(violations.map((finding, index) => String(finding.findingId ?? finding.ruleId ?? `violation-${index}`)));
+      setOcr(extracted);
+      setCompliance(data.compliance || null);
+      setComplianceError(data.complianceError || null);
+      setForm(emptyForm);
+      setShowRegistration(false);
+      setUseExtractedData(false);
+      setMessage(data.complianceError ? `OCR complete. Rules Engine unavailable: ${data.complianceError.message}` : "Puter OCR and Rules Engine analysis complete. Review the extracted data, then register the product.");
+    } catch (e) {
+      setMessage(e.message || "Puter OCR analysis failed.");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  function updateOcrField(key, value) {
+    setOcr((current) => current ? { ...current, [key]: { ...current[key], value } } : current);
+  }
+
+  function applyExtractedData() {
+    if (!ocr) return;
+    setForm(formFromOcr(ocr));
+    setUseExtractedData(true);
+    setShowRegistration(true);
+    setMessage("Extracted data applied to the registration form. Review and edit the fields before registering.");
+  }
+
+  function openRegistration() {
+    setShowRegistration(true);
+    setUseExtractedData(false);
+    setForm(emptyForm);
+    setMessage(ocr ? "Registration opened. Choose Use extracted data to populate the form, or enter everything manually." : "Manual registration opened.");
+  }
+
+  function toggleFinding(finding, index) {
+    const id = String(finding?.findingId ?? finding?.ruleId ?? `violation-${index}`);
+    setAcceptedFindingIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  }
+
+  function isFindingAccepted(finding, index) {
+    const id = String(finding?.findingId ?? finding?.ruleId ?? `violation-${index}`);
+    return acceptedFindingIds.includes(id);
+  }
+
+  function updateForm(key, value) { setForm((current) => ({ ...current, [key]: value })); }
 
   async function saveProduct(event) {
     event.preventDefault();
-
-    if (!selectedCategoryId || !selectedIsFinalType) {
-      setMessage("Select a final product type, such as Food → Ready to Eat → Biscuits.");
-      return;
-    }
-
+    if (!selectedCategoryId || !selectedCategory) return setMessage("Final category is required.");
+    if (!form.shopName.trim()) return setMessage("Shop name is required.");
     setSaving(true);
-    setMessage("");
-
     try {
-      const response = await fetch(`${API_URL}/products`, {
+      const imageUrls = await Promise.all(images.map(({ file }) => fileToDataUrl(file)));
+      const rulesStatus = compliance?.overallStatus;
+      const status = rulesStatus === "VIOLATION" || rulesStatus === "FAIL" ? "VIOLATION" : rulesStatus === "UNABLE_TO_VERIFY" || !compliance ? "NEEDS_REVIEW" : ocr?.needsReview ? "NEEDS_REVIEW" : "OKAY";
+      const reason = status === "VIOLATION" ? "Rules Engine reported one or more compliance violations." : ocr?.needsReview ? "OCR contains low-confidence or unreadable fields and requires review." : "Automated OCR and Rules Engine assessment completed.";
+      const response = await apiFetch(`${API_URL}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, categoryId: selectedCategoryId }),
+        body: JSON.stringify({ ...form, categoryId: selectedCategoryId, imageUrls, ocrData: { ocr, compliance: compliance || null, complianceError: complianceError || null }, acceptedFindingIds, complianceStatus: status, violationReason: reason, inspectionDate: new Date().toISOString() }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not save product");
-
-      setMessage(
-        data.complianceStatus === "VIOLATION"
-          ? `Saved to ${selectedCategory.name}. VIOLATION: ${data.violationReason || "Review required."}`
-          : `Saved to ${selectedCategory.name}. Compliance result: ${data.complianceStatus}.`
-      );
-      setForm(emptyForm);
-    } catch (error) {
-      setMessage(error.message);
+      const productId = data.product?.id || data.id;
+      if (!productId) throw new Error("Product was saved but the server did not return its ID.");
+      window.location.href = `/products/item/${productId}`;
+    } catch (e) {
+      setMessage(e.message);
     } finally {
       setSaving(false);
     }
   }
 
-  return (
-    <div className="scan-page">
-      <div className="page-header">
-        <p className="eyebrow">PRODUCT INSPECTION</p>
-        <h1>Scan Product</h1>
-        <p>Scan the label, let PARAKH suggest the category, confirm it, then enter the product data while performing the inspection.</p>
-      </div>
-
-      <section className="scan-area">
-        <div className="scan-icon">+</div>
-        <h2>Upload product image</h2>
-        <p>{imageName || "Take a clear photograph of the product label or upload an existing image."}</p>
-        <label className="primary-button scan-file-button">
-          Upload Image
-          <input type="file" accept="image/*" onChange={handleImage} hidden />
-        </label>
-      </section>
-
-      <section className="scan-review">
-        <div className="section-heading">
-          <div>
-            <h2>OCR and category assignment</h2>
-            <p>Automatic classification is a suggestion. The inspector can always correct it.</p>
-          </div>
-        </div>
-
-        <label>
-          OCR text
-          <textarea value={ocrText} onChange={(event) => setOcrText(event.target.value)} placeholder="OCR output will appear here..." />
-        </label>
-
-        {suggestedCategory && (
-          <div className="scan-suggestion">
-            <span>Suggested: <strong>{suggestedCategory.path.map((item) => item.name).join(" → ")}</strong></span>
-            <button type="button" className="secondary-button" onClick={applySuggestion}>Use suggestion</button>
-          </div>
-        )}
-
-        <label>
-          Confirm destination category
-          <select value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)}>
-            <option value="">Select final product type</option>
-            {flatCategories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {"— ".repeat(category.path.length - 1)}{category.path.map((item) => item.name).join(" → ")}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {selectedCategoryId && !selectedIsFinalType && (
-          <div className="status-message">This is not a product type yet. Select the final third-level category.</div>
-        )}
-      </section>
-
-      {selectedIsFinalType && (
-        <form className="scan-review registration-form" onSubmit={saveProduct}>
-          <div className="section-heading">
-            <div>
-              <h2>Product information</h2>
-              <p>Destination: {selectedCategory.path.map((item) => item.name).join(" → ")}</p>
-            </div>
-          </div>
-
-          <div className="form-grid">
-            <label>
-              Company / Manufacturer / Brand *
-              <input required value={form.brandName} onChange={(e) => updateForm("brandName", e.target.value)} placeholder="Company name" />
-            </label>
-            <label>
-              Product name *
-              <input required value={form.productName} onChange={(e) => updateForm("productName", e.target.value)} placeholder="Product name" />
-            </label>
-            <label>
-              Weight / quantity / volume *
-              <input required value={form.netQuantity} onChange={(e) => updateForm("netQuantity", e.target.value)} placeholder="e.g. 100" />
-            </label>
-            <label>
-              Measuring unit *
-              <select required value={form.unit} onChange={(e) => updateForm("unit", e.target.value)}>
-                <option value="">Select unit</option>
-                <option value="g">g</option>
-                <option value="kg">kg</option>
-                <option value="mg">mg</option>
-                <option value="ml">ml</option>
-                <option value="L">L</option>
-                <option value="pcs">pcs</option>
-                <option value="m">m</option>
-              </select>
-            </label>
-            <label>
-              MRP *
-              <input required type="number" min="0" step="0.01" value={form.mrp} onChange={(e) => updateForm("mrp", e.target.value)} placeholder="MRP" />
-            </label>
-            <label>
-              Barcode
-              <input value={form.barcode} onChange={(e) => updateForm("barcode", e.target.value)} placeholder="Barcode / GTIN" />
-            </label>
-            <label className="full-width">
-              Other inspection details
-              <textarea value={form.description} onChange={(e) => updateForm("description", e.target.value)} placeholder="Relevant declarations or observations..." />
-            </label>
-          </div>
-
-          <button className="primary-button" type="submit" disabled={saving}>
-            {saving ? "Saving inspection..." : "Save Scanned Product & Verify"}
-          </button>
-        </form>
-      )}
-
-      {message && <div className="status-message">{message}</div>}
-
-      <section className="scan-info">
-        <h2>What PARAKH checks</h2>
-        <div className="check-grid">
-          <div className="check-item"><strong>Mandatory declarations</strong><span>Checks required packaged-commodity information.</span></div>
-          <div className="check-item"><strong>Pricing information</strong><span>Checks MRP and related declarations.</span></div>
-          <div className="check-item"><strong>Quantity information</strong><span>Supports weight, volume and count-based quantities.</span></div>
-          <div className="check-item"><strong>Violation result</strong><span>Shows products that fail automated screening.</span></div>
-        </div>
-      </section>
-    </div>
-  );
+  return <div className="scan-page">
+    <div className="page-header"><p className="eyebrow">PRODUCT INSPECTION</p><h1>Scan Product</h1><p>Capture or upload package images, extract declarations, run the Legal Metrology Rules Engine, then register the inspected product.</p></div>
+    <section className="scan-area"><div className="scan-icon">⌁</div><h2>Capture or upload package images</h2><p>Use the camera or choose up to {MAX_IMAGES} images showing different sides of the package.</p><div className="scan-upload-actions"><button type="button" className="primary-button" onClick={openCamera}>Open Camera</button><label className="secondary-button scan-file-button">Upload Images<input type="file" accept="image/*" multiple onChange={handleImages} hidden /></label></div><p className="scan-limit">{images.length}/{MAX_IMAGES} images selected</p>{cameraError && <div className="status-message">{cameraError}</div>}</section>
+    {cameraOpen && <div className="camera-overlay" role="dialog" aria-modal="true"><div className="camera-modal"><div className="camera-header"><h2>Capture package image</h2><button type="button" onClick={closeCamera}>Close</button></div><video ref={videoRef} className="camera-video" autoPlay playsInline muted /><div className="camera-actions"><button type="button" className="primary-button" onClick={capturePhoto}>Capture Photo</button><button type="button" className="secondary-button" onClick={closeCamera}>Cancel</button></div></div></div>}
+    {images.length > 0 && <section className="scan-review"><div className="section-heading"><div><h2>Evidence images</h2><p>All selected images will be retained on the registered product.</p></div></div><div className="scan-image-grid">{images.map(({ url, file }, i) => <div className="scan-image-card" key={`${file.name}-${i}`}><img src={url} alt={`Package evidence ${i + 1}`} /><button type="button" onClick={() => removeImage(i)}>Remove</button><span>{file.name}</span></div>)}</div><button type="button" className="primary-button" onClick={analyzeImages} disabled={analyzing}>{analyzing ? "Analyzing..." : "Analyze Images"}</button></section>}
+    {ocr && <section className="scan-review"><div className="section-heading"><div><h2>OCR extraction and Rules Engine result</h2><p>Edit the extracted values here if OCR needs correction. Use the registration actions below to carry them into the editable product form.</p></div></div><div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && value && typeof value === "object" && ["found","absent","unreadable","ambiguous"].includes(value.status)).map(([key, value]) => <label key={key} className="ocr-edit-field"><strong>{key.replace(/([A-Z])/g, " $1")}</strong><input value={value.value ?? ""} placeholder={value.status === "found" ? "Review value" : value.status} onChange={(e) => updateOcrField(key, e.target.value)} /><small>{value.status === "found" ? `${Math.round((value.confidence || 0) * 100)}% confidence` : value.status}</small></label>)}</div><div className="ocr-status-grid"><div><strong>Rules Engine</strong><span>{compliance?.overallStatus || "Not evaluated"}</span></div><div><strong>OCR confidence</strong><span>{ocr.needsReview ? "Review required" : "Confident"}</span></div><div><strong>Unreadable fields</strong><span>{ocr.unreadableFields?.length || 0}</span></div></div>{complianceError && <div className="status-message">Rules Engine: {complianceError.message}</div>}{compliance?.summary && <div className="ocr-summary">Rules: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}{violationFindings.length > 0 && <div className="finding-review"><strong>Inspector review of detected violations</strong><p>Checked findings will be accepted into the final inspection. Unchecked findings remain in the audit record as rejected by the inspector.</p>{violationFindings.map((v, i) => <label key={`${v.findingId || v.ruleId || "finding"}-${i}`} className="finding-review-item"><input type="checkbox" checked={isFindingAccepted(v, i)} onChange={() => toggleFinding(v, i)} /><span>{v.message || v.reason || JSON.stringify(v)}</span></label>)}<small>{acceptedFindingIds.length} of {violationFindings.length} detected violations accepted</small></div>}<label>Raw OCR<textarea value={ocr.rawText || ""} onChange={(e) => setOcr((c) => ({ ...c, rawText: e.target.value }))} /></label>{suggestedCategory && <div className="scan-suggestion"><span>Suggested final category: <strong>{suggestedCategory.path.map((x) => x.name).join(" → ")}</strong></span><button type="button" className="secondary-button" onClick={() => setSelectedCategoryId(suggestedCategory.id)}>Use suggestion</button></div>}<div className="scan-upload-actions register-after-ocr"><button type="button" className="primary-button" onClick={openRegistration}>Register Product</button><button type="button" className="secondary-button" onClick={applyExtractedData}>Use extracted data</button></div></section>}
+    {!showRegistration && <section className="scan-review registration-form"><div className="section-heading"><div><h2>Register product</h2><p>Register manually, or after OCR use the extracted result to prefill the registration form.</p></div></div><div className="scan-upload-actions"><button type="button" className="primary-button" onClick={openRegistration}>{ocr ? "Open Registration" : "Register Manually"}</button></div></section>}
+    {showRegistration && <form className="scan-review registration-form" onSubmit={saveProduct}><div className="section-heading"><div><h2>Register product</h2><p>{ocr ? "Use extracted data to populate this form, then edit the final values before registering." : "Manual registration: package images are retained, but OCR is skipped."}</p></div></div>{ocr && <div className="scan-upload-actions extracted-data-actions"><button type="button" className="secondary-button" onClick={applyExtractedData}>Use extracted data</button>{useExtractedData && <span>Extracted data applied. All fields remain editable.</span>}</div>}<div className="form-grid"><label>Brand / Manufacturer<input value={form.brandName} onChange={(e) => updateForm("brandName", e.target.value)} /></label><label>Product name *<input required value={form.productName} onChange={(e) => updateForm("productName", e.target.value)} /></label><label>Quantity / volume / pieces<input value={form.netQuantity} onChange={(e) => updateForm("netQuantity", e.target.value)} /></label><label>Unit<select value={form.unit} onChange={(e) => updateForm("unit", e.target.value)}><option value="">Select</option><option value="mg">mg</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="L">L</option><option value="pcs">pcs</option><option value="dozen">dozen</option><option value="m">m</option></select></label><label>MRP<input type="number" min="0" step="0.01" value={form.mrp} onChange={(e) => updateForm("mrp", e.target.value)} /></label><label>Barcode<input value={form.barcode} onChange={(e) => updateForm("barcode", e.target.value)} /></label><label className="full-width">Final category *<select required value={selectedCategoryId} onChange={(e) => setSelectedCategoryId(e.target.value)}><option value="">Select a final category</option>{finalCategories.map((c) => <option key={c.id} value={selectedCategoryId}>{c.path.map((x) => x.name).join(" → ")}</option>)}</select></label><label>Shop name *<input required value={form.shopName} onChange={(e) => updateForm("shopName", e.target.value)} /></label><label>Shop address<input value={form.shopAddress} onChange={(e) => updateForm("shopAddress", e.target.value)} /></label><label>City<input value={form.shopCity} onChange={(e) => updateForm("shopCity", e.target.value)} /></label><label>State<input value={form.shopState} onChange={(e) => updateForm("shopState", e.target.value)} /></label><label className="full-width">Notes<textarea value={form.notes} onChange={(e) => updateForm("notes", e.target.value)} /></label></div><button className="primary-button" disabled={saving}>{saving ? "Registering..." : "Register Product"}</button></form>}
+    {message && <div className="status-message">{message}</div>}<Link className="back-link" to="/history">View inspection history →</Link>
+  </div>;
 }
 
 export default Scan;

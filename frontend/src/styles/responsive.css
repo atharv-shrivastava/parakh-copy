@@ -1,0 +1,410 @@
+/* Additive responsive layer. Keeps existing page CSS intact. */
+
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.app-layout {
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 100;
+  width: 240px;
+  height: 100vh;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar .navigation {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sidebar .navigation a {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.sidebar-user {
+  margin-top: auto;
+  padding: 16px 8px 0;
+  display: grid;
+  gap: 6px;
+}
+
+.sidebar-user strong,
+.sidebar-user span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-user span {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.sidebar-user button {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 6px;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: transparent;
+  color: #e5e7eb;
+  font: inherit;
+  font-weight: 600;
+}
+
+.sidebar-user button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.main-content {
+  width: calc(100% - 240px);
+  max-width: none;
+  min-width: 0;
+  margin: 0 0 0 240px;
+  padding: 32px;
+  overflow-wrap: anywhere;
+}
+
+/* Shared overflow protection */
+
+button,
+input,
+select,
+textarea,
+.a,
+.card,
+.panel {
+  max-width: 100%;
+}
+
+button,
+select,
+input,
+textarea {
+  min-width: 0;
+}
+
+pre,
+code,
+.ocr-raw-text,
+.break-anywhere {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Common action/toolbars become usable on narrow screens. */
+
+.actions,
+.toolbar,
+.page-actions,
+.button-row,
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Tablet */
+
+@media (max-width: 900px) {
+  .sidebar {
+    width: 210px;
+  }
+
+  .main-content {
+    width: calc(100% - 210px);
+    margin-left: 210px;
+    padding: 24px;
+  }
+}
+
+/* Mobile */
+
+@media (max-width: 768px) {
+  .app-layout {
+    display: block;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    padding: 12px 12px 10px;
+    overflow: visible;
+    box-shadow: 0 1px 10px rgba(15, 23, 42, 0.08);
+  }
+
+  .logo {
+    margin-bottom: 10px;
+    padding: 0 4px;
+    line-height: 1.05;
+  }
+
+  .logo h2 {
+    font-size: 21px;
+  }
+
+  .logo span {
+    display: block;
+    margin-top: 3px;
+    font-size: 11px;
+  }
+
+  .sidebar .navigation {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sidebar .navigation::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sidebar .navigation a {
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 9px 12px;
+  }
+
+  .sidebar-user {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 8px 2px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .sidebar-user strong {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .sidebar-user span {
+    flex: 0 0 auto;
+  }
+
+  .sidebar-user button {
+    width: auto;
+    flex: 0 0 auto;
+    min-height: 38px;
+    margin-top: 0;
+  }
+
+  .main-content {
+    width: 100%;
+    margin: 0;
+    padding: 20px 14px 28px;
+  }
+
+  .page-content {
+    padding: 20px 14px;
+  }
+
+  .dashboard-header,
+  .section-heading,
+  .camera-header,
+  .image-editor-header {
+    gap: 12px;
+  }
+
+  .dashboard-header {
+    flex-direction: column;
+  }
+
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .scan-area,
+  .scan-review,
+  .scan-card,
+  .image-editor-modal,
+  .camera-modal,
+  .products-page .product-actions {
+    padding: 18px;
+  }
+
+  .scan-upload-actions,
+  .image-editor-actions,
+  .image-editor-footer,
+  .camera-actions,
+  .product-action-buttons,
+  .report-actions {
+    width: 100%;
+  }
+
+  .scan-upload-actions > *,
+  .image-editor-actions > *,
+  .image-editor-footer > *,
+  .camera-actions > *,
+  .product-action-buttons > *,
+  .report-actions > * {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .primary-button,
+  .secondary-button,
+  .register-product-button,
+  .secondary-action,
+  .report-button {
+    min-height: 42px;
+  }
+
+  .camera-overlay,
+  .image-editor-overlay {
+    align-items: flex-start;
+    padding: 10px;
+  }
+
+  .camera-modal,
+  .image-editor-modal {
+    width: 100%;
+    max-height: calc(100vh - 20px);
+    border-radius: 12px;
+  }
+
+  .camera-video {
+    max-height: 56vh;
+  }
+
+  .image-editor-preview {
+    min-height: 220px;
+    margin: 12px 0;
+    padding: 10px;
+  }
+
+  .image-editor-preview img {
+    max-height: 46vh;
+  }
+
+  .category-form,
+  .private-category-fields,
+  .bulk-toolbar,
+  .report-meta,
+  .history-toolbar,
+  .reports-toolbar {
+    width: 100%;
+  }
+
+  .filter-panel {
+    width: 100%;
+  }
+
+  .product-row,
+  .report-card,
+  .history-item,
+  .finding-row {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-content {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .scan-page,
+  .products-page,
+  .history-page,
+  .reports-page {
+    width: 100%;
+  }
+
+  .scan-area {
+    padding: 16px 12px;
+  }
+
+  .scan-area h2 {
+    font-size: 20px;
+  }
+
+  .scan-image-grid,
+  .ocr-fields-grid,
+  .ocr-status-grid,
+  .check-grid,
+  .product-image-gallery {
+    grid-template-columns: 1fr;
+  }
+
+  .category-card,
+  .global-source-card,
+  .quick-card,
+  .inspection-card,
+  .check-item {
+    padding: 16px;
+  }
+
+  .history-item,
+  .report-card,
+  .product-row {
+    padding: 14px;
+  }
+
+  .logo h2 {
+    font-size: 19px;
+  }
+
+  .sidebar-user {
+    gap: 6px;
+  }
+
+  .sidebar-user span {
+    display: none;
+  }
+}
+
+/* Touch devices: slightly larger controls without changing desktop styling. */
+
+@media (hover: none) and (pointer: coarse) {
+  .sidebar .navigation a,
+  .primary-button,
+  .secondary-button,
+  .register-product-button,
+  .secondary-action,
+  .history-clear,
+  .report-button,
+  .scan-image-card button,
+  .sidebar-user button {
+    min-height: 42px;
+  }
+}
