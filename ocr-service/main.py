@@ -45,7 +45,9 @@ _max_ocr_side = max(800, int(os.getenv("PADDLEOCR_MAX_SIDE", "1200")))
 _cache_ttl = max(5, int(os.getenv("PADDLEOCR_CACHE_TTL_SECONDS", "30")))
 _cache_limit = max(1, int(os.getenv("PADDLEOCR_CACHE_ITEMS", "8")))
 
-_engine_name = os.getenv("OCR_ENGINE", "rapidocr").lower()
+# PaddleOCR is the default production path. RapidOCR remains available only as an
+# explicit alternative through OCR_ENGINE=rapidocr.
+_engine_name = os.getenv("OCR_ENGINE", "paddleocr").lower()
 _rapid_use_cls = os.getenv("RAPIDOCR_TEXT_ORIENTATION", "true").lower() == "true"
 _skew_rescue_enabled = os.getenv("PADDLEOCR_SKEW_RESCUE", "true").lower() == "true"
 _skew_min_degrees = max(1.5, float(os.getenv("PADDLEOCR_SKEW_MIN_DEGREES", "2.5")))
@@ -204,7 +206,6 @@ def estimate_skew_degrees(image_array: np.ndarray) -> float:
                 angle += 180.0
             while angle > 90.0:
                 angle -= 180.0
-            # Only use lines plausibly representing text rows, not vertical package edges.
             if abs(angle) <= _skew_max_degrees:
                 weighted_angles.append((angle, length))
 
@@ -231,7 +232,6 @@ def rotate_image(image: Image.Image, degrees: float) -> Image.Image:
 
 
 def dedupe_entries(primary: list[dict[str, Any]], rescue: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep the higher-confidence version of duplicate text while retaining new rescue text."""
     merged = list(primary)
     for candidate in rescue:
         normalized = " ".join(candidate.get("text", "").split()).casefold()
@@ -260,7 +260,6 @@ async def _run_rapid_with_skew_rescue(image_array: np.ndarray, image_index: int,
     if abs(skew) < _skew_min_degrees:
         return base_entries
 
-    # Preserve the original OCR result. The rotated pass is an additive rescue only.
     rescue_pil = rotate_image(Image.fromarray(image_array), -skew)
     rescue_array = np.asarray(rescue_pil)
     rescue_height, rescue_width = rescue_array.shape[:2]
@@ -284,7 +283,6 @@ async def _run_ocr_engine(image_array: np.ndarray, image_index: int, width: int,
     if entries:
         return entries, "rapidocr"
 
-    # Keep PaddleOCR as a recovery engine, never as the normal hot path.
     paddle_entries = []
     result = await asyncio.to_thread(_get_paddleocr().predict, image_array)
     for item in result:
@@ -381,16 +379,15 @@ async def analyze(images: list[UploadFile] = File(...)):
     if cached is not None:
         return cached
 
-    task = _inflight.get(key)
-    if task is None:
-        task = asyncio.create_task(_analyze_contents(items))
-        _inflight[key] = task
+    existing = _inflight.get(key)
+    if existing is not None:
+        return await existing
 
+    task = asyncio.create_task(_analyze_contents(items))
+    _inflight[key] = task
     try:
         result = await task
+        _store_cached(key, result)
+        return result
     finally:
-        if _inflight.get(key) is task:
-            _inflight.pop(key, None)
-
-    _store_cached(key, result)
-    return result
+        _inflight.pop(key, None)
