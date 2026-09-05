@@ -98,17 +98,24 @@ async function runOcr(files, signal, categoryOptions = []) {
   if (!data.result) throw new Error("Local OCR returned no structured result.");
   return {
     result: data.result,
-    provider: data.provider || "paddleocr",
-    model: data.model || "PaddleOCR",
+    provider: data.provider || "rapidocr",
+    model: data.model || "RapidOCR",
     semantic: data.semantic || null,
-    detectionProvider: data.detectionProvider || "paddleocr",
-    detectionProviders: data.detectionProviders || ["paddleocr"],
+    detectionProvider: data.detectionProvider || "rapidocr",
+    detectionProviders: data.detectionProviders || ["rapidocr"],
     fallbackReason: data.fallbackReason || null,
     aiSuggestedCategory: data.aiSuggestedCategory || null,
     aiSemanticEnabled: Boolean(data.aiSemanticEnabled),
     aiSemanticError: data.aiSemanticError || null,
     timing: data.timing || null,
   };
+}
+
+function formatElapsed(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 export default function ScanV2() {
@@ -120,6 +127,8 @@ export default function ScanV2() {
   const [compliance, setCompliance] = useState(null);
   const [complianceError, setComplianceError] = useState(null);
   const [acceptedFindingIds, setAcceptedFindingIds] = useState([]);
+  const [manualViolations, setManualViolations] = useState([]);
+  const [manualViolationReason, setManualViolationReason] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
   const [providerInfo, setProviderInfo] = useState(null);
@@ -127,6 +136,8 @@ export default function ScanV2() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
+  const [analysisElapsedMs, setAnalysisElapsedMs] = useState(0);
+  const [analysisDurationMs, setAnalysisDurationMs] = useState(null);
   const [saving, setSaving] = useState(false);
   const [showRegistration, setShowRegistration] = useState(false);
   const [useExtractedData, setUseExtractedData] = useState(false);
@@ -147,11 +158,20 @@ export default function ScanV2() {
     if (videoRef.current?.srcObject) videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
   }, []);
 
+  useEffect(() => {
+    if (!analyzing) return undefined;
+    const started = Date.now();
+    setAnalysisElapsedMs(0);
+    const timer = window.setInterval(() => setAnalysisElapsedMs(Date.now() - started), 100);
+    return () => window.clearInterval(timer);
+  }, [analyzing]);
+
   const flat = flattenCategories(categories);
   const finalCategories = flat.filter((category) => category.isFinalProductType);
   const selected = flat.find((category) => category.id === selectedCategoryId);
   const violations = compliance?.findings?.filter((finding) => finding.status === "VIOLATION") || [];
-  const accepted = violations.filter((finding) => acceptedFindingIds.includes(finding.findingId));
+  const accepted = compliance?.findings?.filter((finding) => acceptedFindingIds.includes(finding.findingId)) || [];
+  const selectedViolations = [...accepted, ...manualViolations];
 
   function update(key, value) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -171,6 +191,8 @@ export default function ScanV2() {
     setEditingImageIndex(null);
     resetAnalysisState();
     setAnalyzing(false);
+    setAnalysisElapsedMs(0);
+    setAnalysisDurationMs(null);
     setSaving(false);
     setMessage("Scan reset. Add new package images to begin again.");
   }
@@ -180,6 +202,8 @@ export default function ScanV2() {
     setCompliance(null);
     setComplianceError(null);
     setAcceptedFindingIds([]);
+    setManualViolations([]);
+    setManualViolationReason("");
     setProviderInfo(null);
     setAiSuggestedCategory(null);
     setSelectedCategoryId("");
@@ -257,7 +281,8 @@ export default function ScanV2() {
   async function analyze() {
     if (!images.length) return setMessage("Add at least one package image first.");
     setAnalyzing(true);
-    setMessage("Running PaddleOCR + AI semantic mapping...");
+    setAnalysisDurationMs(null);
+    setMessage("Running RapidOCR + AI semantic verification...");
     const controller = new AbortController();
     controllerRef.current?.abort();
     controllerRef.current = controller;
@@ -275,8 +300,8 @@ export default function ScanV2() {
       setProviderInfo(info);
       setAiSuggestedCategory(info.aiSuggestedCategory || null);
       const providerMessage = info.aiSemanticEnabled
-        ? "PaddleOCR + AI semantic mapping completed. Running Rules Engine..."
-        : "PaddleOCR + deterministic mapping completed. Running Rules Engine...";
+        ? "RapidOCR + AI semantic verification completed. Running Rules Engine..."
+        : "RapidOCR + deterministic mapping completed. Running Rules Engine...";
       setMessage(providerMessage);
       const response = await apiFetch(`${OCR_URL}/api/ocr/evaluate-structured`, {
         method: "POST",
@@ -309,22 +334,26 @@ export default function ScanV2() {
       setCompliance(data.compliance || null);
       setComplianceError(data.complianceError || null);
       setAcceptedFindingIds((data.compliance?.findings || []).filter((finding) => finding.status === "VIOLATION").map((finding) => finding.findingId));
+      setManualViolations([]);
+      setManualViolationReason("");
       setForm(EMPTY_FORM);
       setSelectedCategoryId("");
       setShowRegistration(false);
       setUseExtractedData(false);
+      if (Number.isFinite(info.timing?.totalMs)) setAnalysisDurationMs(Number(info.timing.totalMs));
       setMessage(info.aiSuggestedCategory?.categoryName
-        ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} AI suggests: ${info.aiSuggestedCategory.categoryPath || info.aiSuggestedCategory.categoryName}.`
+        ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} Analysis time: ${formatElapsed(Number(info.timing?.totalMs || 0))}. AI suggests: ${info.aiSuggestedCategory.categoryPath || info.aiSuggestedCategory.categoryName}.`
         : info.aiSemanticError
-          ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} AI suggestion unavailable: ${info.aiSemanticError}`
+          ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} Analysis time: ${formatElapsed(Number(info.timing?.totalMs || 0))}. AI suggestion unavailable: ${info.aiSemanticError}`
           : info.fallbackReason
-            ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} ${info.fallbackReason}`
-            : "OCR and Rules Engine evaluation complete. Review the extracted fields, then choose how to register the product.");
+            ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} Analysis time: ${formatElapsed(Number(info.timing?.totalMs || 0))}. ${info.fallbackReason}`
+            : `OCR and Rules Engine evaluation complete in ${formatElapsed(Number(info.timing?.totalMs || 0))}. Review the extracted fields, then choose how to register the product.`);
     } catch (error) {
       if (error?.name === "AbortError") return;
       setMessage(error.message || "OCR analysis failed.");
     } finally {
       if (controllerRef.current === controller) controllerRef.current = null;
+      setAnalysisDurationMs((current) => current ?? analysisElapsedMs);
       setAnalyzing(false);
     }
   }
@@ -361,6 +390,26 @@ export default function ScanV2() {
     setAcceptedFindingIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
   }
 
+  function addManualViolation() {
+    const reason = manualViolationReason.trim();
+    if (!reason) return setMessage("Enter a reason before adding a manual violation.");
+    setManualViolations((current) => [...current, {
+      findingId: `MANUAL-${crypto.randomUUID()}`,
+      ruleCode: "MANUAL",
+      ruleNumber: "Inspector override",
+      status: "VIOLATION",
+      severity: "REVIEW",
+      message: reason,
+      violationReason: reason,
+    }]);
+    setManualViolationReason("");
+    setMessage("Manual violation added. It will be included in the registration audit record.");
+  }
+
+  function removeManualViolation(id) {
+    setManualViolations((current) => current.filter((finding) => finding.findingId !== id));
+  }
+
   async function save(event) {
     event.preventDefault();
     if (!selectedCategoryId) return setMessage("Select an offline final category before saving.");
@@ -378,9 +427,9 @@ export default function ScanV2() {
           sourceType: "OFFLINE",
           imageUrls,
           acceptedFindingIds,
-          ocrData: { ocr, compliance, complianceError, providerInfo, aiSuggestedCategory, visualInspection },
-          complianceStatus: accepted.length ? "VIOLATION" : "OKAY",
-          violationReason: accepted.map((finding) => finding.message || finding.violationReason || finding.ruleCode).join(" | "),
+          ocrData: { ocr, compliance, complianceError, providerInfo, aiSuggestedCategory, visualInspection, manualViolations },
+          complianceStatus: selectedViolations.length ? "VIOLATION" : "OKAY",
+          violationReason: selectedViolations.map((finding) => finding.message || finding.violationReason || finding.ruleCode).join(" | "),
           inspectionDate: new Date().toISOString(),
         }),
       });
@@ -397,6 +446,7 @@ export default function ScanV2() {
   }
 
   const editingImage = editingImageIndex == null ? null : images[editingImageIndex];
+  const displayedAnalysisTime = analysisDurationMs != null ? formatElapsed(analysisDurationMs) : formatElapsed(analysisElapsedMs);
 
   return <div className="scan-page">
     <div className="page-header">
@@ -422,11 +472,11 @@ export default function ScanV2() {
 
     {editingImage && <ImageEditor file={editingImage.file} url={editingImage.url} onApply={(file) => applyEditedImage(editingImageIndex, file)} onClose={() => setEditingImageIndex(null)} />}
 
-    {images.length > 0 && <section className="scan-review"><div className="section-heading"><div><h2>Evidence images</h2><p>Rotate or crop any image before OCR. Edited images are the ones sent to OCR and retained with the registered product.</p></div></div><div className="scan-image-grid">{images.map(({ url, file }, index) => <div className="scan-image-card" key={`${file.name}-${index}`}><img src={url} alt={`Package evidence ${index + 1}`} /><div className="scan-image-card-actions"><button type="button" onClick={() => setEditingImageIndex(index)}>Edit crop / rotate</button><button type="button" onClick={() => remove(index)}>Remove</button></div><span>{file.name}</span></div>)}</div><button type="button" className="primary-button" onClick={analyze} disabled={analyzing}>{analyzing ? "Analyzing..." : "Analyze Images"}</button></section>}
+    {images.length > 0 && <section className="scan-review"><div className="section-heading"><div><h2>Evidence images</h2><p>Rotate or crop any image before OCR. Edited images are the ones sent to OCR and retained with the registered product.</p></div></div><div className="scan-image-grid">{images.map(({ url, file }, index) => <div className="scan-image-card" key={`${file.name}-${index}`}><img src={url} alt={`Package evidence ${index + 1}`} /><div className="scan-image-card-actions"><button type="button" onClick={() => setEditingImageIndex(index)}>Edit crop / rotate</button><button type="button" onClick={() => remove(index)}>Remove</button></div><span>{file.name}</span></div>)}</div><div className="analyze-action-row"><button type="button" className="primary-button" onClick={analyze} disabled={analyzing}>{analyzing ? "Analyzing..." : "Analyze Images"}</button>{(analyzing || analysisDurationMs != null) && <span className="analysis-timer" aria-live="polite">Analysis time: <strong>{displayedAnalysisTime}</strong></span>}</div></section>}
 
     {images.length > 0 && <ScanVisualCheck />}
 
-    {providerInfo && <section className="ocr-status-grid"><div><strong>OCR / field mapper</strong><span>{providerInfo.aiSemanticEnabled ? "PaddleOCR + Gemini semantic assist + deterministic validation" : "PaddleOCR + local deterministic mapping"}</span></div><div><strong>Text detection</strong><span>{providerInfo.detectionProviders?.length ? providerInfo.detectionProviders.join(" + ") : providerInfo.detectionProvider || "PaddleOCR"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}/{violations.length}</span></div></section>}
+    {providerInfo && <section className="ocr-status-grid"><div><strong>OCR / field mapper</strong><span>{providerInfo.aiSemanticEnabled ? "RapidOCR + multi-model semantic verification" : "RapidOCR + local deterministic mapping"}</span></div><div><strong>Text detection</strong><span>{providerInfo.detectionProviders?.length ? providerInfo.detectionProviders.join(" + ") : providerInfo.detectionProvider || "RapidOCR"}</span></div><div><strong>Selected violations</strong><span>{selectedViolations.length}</span></div></section>}
 
     {aiSuggestedCategory && <section className="ai-category-card">
       <div className="ai-category-copy"><div className="ai-category-eyebrow">AI SUGGESTED CATEGORY</div><h2>{aiSuggestedCategory.categoryPath || aiSuggestedCategory.categoryName || "Category not determined"}</h2><p>{aiSuggestedCategory.reason || "Suggested from package imagery and OCR evidence."}</p></div>
@@ -434,11 +484,12 @@ export default function ScanV2() {
     </section>}
 
     {ocr && <section className="scan-review">
-      <div className="section-heading"><div><h2>OCR extraction and rule review</h2><p>Edit the extracted OCR values here, review the Rules Engine findings, then explicitly choose whether to use the extracted details for registration.</p></div></div>
+      <div className="section-heading"><div><h2>OCR extraction and rule review</h2><p>Extracted MRP, quantity, dates and other declarations are data. A violation appears only when a legal rule fails or an inspector explicitly records one.</p></div></div>
       <div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && key !== "semantic" && key !== "aiSemantic" && key !== "aiSuggestedCategory" && value && typeof value === "object" && ["found", "absent", "unreadable", "ambiguous"].includes(value.status)).map(([key, value]) => <label key={key} className="ocr-edit-field"><strong>{key.replace(/([A-Z])/g, " $1")}</strong><input value={value.value ?? ""} placeholder={value.status === "found" ? "Review value" : value.status} onChange={(event) => updateOcrField(key, event.target.value)} /><small>{value.status === "found" ? `${Math.round(Number(value.confidence || 0) * 100)}% confidence` : value.status}</small></label>)}</div>
       {complianceError && <div className="status-message">Rules Engine: {complianceError.message || complianceError}</div>}
       {compliance?.summary && <div className="ocr-summary">Rules: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}
-      {violations.length > 0 && <div className="rule-review-panel"><div className="section-heading"><div><h3>Inspector review</h3><p>Uncheck a false positive. The original engine finding remains in the audit record.</p></div></div>{violations.map((finding) => <label className="rule-review-row" key={finding.findingId}><input type="checkbox" checked={acceptedFindingIds.includes(finding.findingId)} onChange={() => toggle(finding.findingId)} /><span><strong>{finding.ruleCode || finding.ruleNumber}</strong><small>{finding.ruleNumber ? `Rule ${finding.ruleNumber} · ` : ""}{finding.severity || "REVIEW"}</small><em>{finding.message || finding.violationReason || "Violation detected"}</em></span></label>)}<div className="ocr-summary">Accepted violations: <strong>{accepted.length}</strong> of {violations.length}</div></div>}
+      {violations.length > 0 && <div className="rule-review-panel"><div className="section-heading"><div><h3>Engine violations</h3><p>These are the violations the Rules Engine actually produced. Uncheck any false positive before registration.</p></div></div>{violations.map((finding) => <label className="rule-review-row" key={finding.findingId}><input type="checkbox" checked={acceptedFindingIds.includes(finding.findingId)} onChange={() => toggle(finding.findingId)} /><span><strong>{finding.ruleCode || finding.ruleNumber}</strong><small>{finding.ruleNumber ? `Rule ${finding.ruleNumber} · ` : ""}{finding.severity || "REVIEW"}</small><em>{finding.message || finding.violationReason || "Violation detected"}</em></span></label>)}<div className="ocr-summary">Selected engine violations: <strong>{accepted.length}</strong> of {violations.length}</div></div>}
+      <div className="rule-review-panel manual-violation-panel"><div className="section-heading"><div><h3>Add a manual violation</h3><p>Use this only when the inspector identifies a violation that the automated rules did not capture.</p></div></div><textarea value={manualViolationReason} onChange={(event) => setManualViolationReason(event.target.value)} placeholder="Describe the observed violation and, where applicable, the relevant declaration/rule." /><button type="button" className="secondary-button" onClick={addManualViolation}>Add violation</button>{manualViolations.map((finding) => <div className="rule-review-row manual" key={finding.findingId}><span><strong>MANUAL</strong><small>Inspector override</small><em>{finding.message}</em></span><button type="button" className="secondary-button" onClick={() => removeManualViolation(finding.findingId)}>Remove</button></div>)}<div className="ocr-summary">Manual violations: <strong>{manualViolations.length}</strong></div></div>
       <label>Raw OCR<textarea value={ocr.rawText || ""} onChange={(event) => setOcr((current) => ({ ...current, rawText: event.target.value }))} /></label>
       <div className="extracted-action-panel"><div><strong>Registration actions</strong><span>Use the reviewed OCR details to prefill the final editable registration form, or register manually.</span></div><div className="scan-upload-actions"><button type="button" className="primary-button" onClick={applyExtractedData}>Use extracted details</button><button type="button" className="secondary-button" onClick={openManualRegistration}>Register manually</button></div></div>
     </section>}
@@ -449,7 +500,7 @@ export default function ScanV2() {
       <div className="section-heading"><div><h2>Register offline product</h2><p>{useExtractedData ? "Extracted details have been applied. Edit any value below before registering." : "Manual registration. Enter the final product details below."}</p></div></div>
       {ocr && <div className="extracted-action-panel compact"><div><strong>Extracted details</strong><span>{useExtractedData ? "Applied to this form. All fields remain editable." : "Not applied yet."}</span></div><button type="button" className="secondary-button" onClick={applyExtractedData}>Use extracted details</button></div>}
       <div className="registration-grid"><label>Product name<input value={form.productName} onChange={(event) => update("productName", event.target.value)} required /></label><label>Brand / manufacturer<input value={form.brandName} onChange={(event) => update("brandName", event.target.value)} /></label><label>Net quantity<input value={form.netQuantity} onChange={(event) => update("netQuantity", event.target.value)} /></label><label>Unit<input value={form.unit} onChange={(event) => update("unit", event.target.value)} /></label><label>MRP<input type="number" min="0" step="0.01" value={form.mrp} onChange={(event) => update("mrp", event.target.value)} /></label><label>Barcode<input value={form.barcode} onChange={(event) => update("barcode", event.target.value)} /></label><label>Offline final category<select value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} required><option value="">Select an offline final category</option>{finalCategories.map((category) => <option value={category.id} key={category.id}>{category.path.map((item) => item.name).join(" → ")}</option>)}</select></label><label>Shop name<input value={form.shopName} onChange={(event) => update("shopName", event.target.value)} required /></label><label>Shop address<input value={form.shopAddress} onChange={(event) => update("shopAddress", event.target.value)} /></label><label>City<input value={form.shopCity} onChange={(event) => update("shopCity", event.target.value)} /></label><label>State<input value={form.shopState} onChange={(event) => update("shopState", event.target.value)} /></label><label className="span-2">Description<textarea value={form.description} onChange={(event) => update("description", event.target.value)} /></label><label className="span-2">Inspector notes<textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} /></label></div>
-      <div className="ocr-status-grid"><div><strong>Final status</strong><span>{accepted.length ? "VIOLATION" : compliance?.summary?.unableToVerify || ocr?.needsReview ? "NEEDS_REVIEW" : "OKAY"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}</span></div><div><strong>Images retained</strong><span>{images.length}</span></div></div>
+      <div className="ocr-status-grid"><div><strong>Final status</strong><span>{selectedViolations.length ? "VIOLATION" : compliance?.summary?.unableToVerify || ocr?.needsReview ? "NEEDS_REVIEW" : "OKAY"}</span></div><div><strong>Selected violations</strong><span>{selectedViolations.length}</span></div><div><strong>Images retained</strong><span>{images.length}</span></div></div>
       <div className="scan-upload-actions"><button type="submit" className="primary-button" disabled={saving}>{saving ? "Saving..." : "Register Offline Product"}</button><button type="button" className="secondary-button" onClick={() => setShowRegistration(false)}>Back</button></div>
     </form>}
 
