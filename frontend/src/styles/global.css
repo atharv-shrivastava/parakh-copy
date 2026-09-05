@@ -504,3 +504,93 @@ img {
     padding: 20px;
   }
 }
+/* Final visual polish */
+@keyframes parakhFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes parakhSweep {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes parakhPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .62; }
+}
+
+.scan-review,
+.ecommerce-panel,
+.report-card,
+.history-item,
+.quick-card,
+.inspection-card,
+.shop-card,
+.status-message,
+.presentation-check-panel {
+  animation: parakhFadeIn .4s cubic-bezier(.16,1,.3,1) both;
+}
+
+.scan-review,
+.ecommerce-panel,
+.report-card,
+.history-item,
+.inspection-card,
+.shop-card,
+.quick-card {
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+
+.scan-review:hover,
+.ecommerce-panel:hover,
+.report-card:hover,
+.history-item:hover,
+.inspection-card:hover,
+.shop-card:hover,
+.quick-card:hover {
+  box-shadow: 0 10px 25px -5px rgba(0,0,0,.08), 0 8px 10px -6px rgba(0,0,0,.06);
+}
+
+.rule-review-dropdown[open] .rule-review-dropdown-body,
+.presentation-check-list details[open] .rule-review-dropdown-body {
+  animation: parakhSweep .25s ease-out both;
+}
+
+.analyze-action-row,
+.inspect-action-row {
+  align-items: center;
+}
+
+.analysis-timer,
+.ecommerce-analysis-timer {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+}
+
+.analyze-action-row .analysis-timer {
+  animation: parakhPulse 1.5s cubic-bezier(.4,0,.6,1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-review,
+  .ecommerce-panel,
+  .report-card,
+  .history-item,
+  .quick-card,
+  .inspection-card,
+  .shop-card,
+  .status-message,
+  .presentation-check-panel,
+  .analyze-action-row .analysis-timer {
+    animation: none;
+  }
+  .scan-review,
+  .ecommerce-panel,
+  .report-card,
+  .history-item,
+  .inspection-card,
+  .shop-card,
+  .quick-card {
+    transition: none;
+  }
+}
