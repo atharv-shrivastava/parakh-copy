@@ -47,7 +47,7 @@ const historySelect = {
   id: true, productName: true, brandName: true, netQuantity: true, unit: true, mrp: true, barcode: true,
   complianceStatus: true, violationReason: true, createdAt: true, sourceType: true, sourceUrl: true, sourceWebsiteName: true,
   owner: { select: { id: true, name: true, email: true } },
-  category: { select: { id: true, name: true, parent: { select: { id: true, name: true, parent: { select: { id: true, name: true, parent: { select: { id: true, name: true } } } } } } } },
+  category: { select: { id: true, name: true } },
   inspections: { select: { inspectedAt: true, shop: { select: { id: true, name: true, address: true, city: true, state: true, sourceType: true } }, worker: { select: { id: true, name: true } } }, orderBy: { inspectedAt: "desc" }, take: 1 }
 };
 
@@ -56,6 +56,8 @@ router.get("/history", async (req, res) => {
     const { query = "", status = "ALL", sourceType = "ALL" } = req.query;
     const search = String(query).trim();
     const source = String(sourceType || "ALL").toUpperCase();
+    const requestedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(requestedLimit) ? Math.min(100, Math.max(1, requestedLimit)) : 50;
     const where = {
       ...visibility(req),
       ...(status !== "ALL" ? { complianceStatus: status } : {}),
@@ -69,7 +71,7 @@ router.get("/history", async (req, res) => {
         { inspections: { some: { shop: { name: { contains: search, mode: "insensitive" } } } } }
       ] } : {})
     };
-    const data = await prisma.product.findMany({ where, select: historySelect, orderBy: { createdAt: "desc" }, take: 500 });
+    const data = await prisma.product.findMany({ where, select: historySelect, orderBy: { createdAt: "desc" }, take: limit });
     res.json(data);
   } catch (e) { console.error(e); res.status(500).json({ error: "Failed to fetch inspection history" }); }
 });
@@ -78,6 +80,8 @@ router.get("/", async (req, res) => {
   try {
     const { categoryId, status = "ALL", sourceType = "ALL", brandName, productName, unit, minQuantity, maxQuantity, shopName, minMrp, maxMrp } = req.query;
     const source = String(sourceType || "ALL").toUpperCase();
+    const requestedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(requestedLimit) ? Math.min(100, Math.max(1, requestedLimit)) : 50;
     const where = {
       ...visibility(req),
       ...(categoryId ? { categoryId } : {}),
@@ -92,7 +96,7 @@ router.get("/", async (req, res) => {
     const data = await prisma.product.findMany({
       where,
       select: { id: true, productName: true, brandName: true, netQuantity: true, unit: true, mrp: true, complianceStatus: true, createdAt: true, sourceType: true, sourceUrl: true, sourceWebsiteName: true, owner: { select: { name: true } }, category: { select: { id: true, name: true } }, inspections: { select: { inspectedAt: true, shop: { select: { id: true, name: true, sourceType: true } } }, orderBy: { inspectedAt: "desc" }, take: 1 } },
-      orderBy: { createdAt: "desc" }, take: 500
+      orderBy: { createdAt: "desc" }, take: limit
     });
     const minQ = minQuantity ? Number(minQuantity) : null;
     const maxQ = maxQuantity ? Number(maxQuantity) : null;
@@ -267,7 +271,7 @@ router.post("/", async (req, res) => {
       const inspection = await tx.inspection.create({ data: { status: finalStatus, notes: notes?.trim() || reason, inspectedAt, workerId: req.user.id, shopId: shop.id, productId: product.id } });
       return { product, shop, inspection };
     });
-    res.status(201).json({ ...result, id: result.product.id });
+    res.status(201).json({ id: result.product.id, product: { id: result.product.id }, inspection: { id: result.inspection.id, status: result.inspection.status } });
   } catch (e) { console.error(e); res.status(500).json({ error: e?.message || "Failed to register product" }); }
 });
 
