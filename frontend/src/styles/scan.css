@@ -32,6 +32,10 @@
 .secondary-button { border: 1px solid #d1d5db; background: #fff; color: #374151; }
 .primary-button:disabled { opacity: .6; cursor: not-allowed; }
 .status-message { margin-top: 18px; padding: 12px 14px; border-radius: 8px; background: #eff6ff; border: 1px solid #bfdbfe; }
+.analyze-action-row { display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap; margin-top:24px; }
+.analysis-timer { display:inline-flex; align-items:center; gap:6px; padding:10px 12px; border:1px solid #dbeafe; border-radius:8px; background:#eff6ff; color:#1e3a8a; font-variant-numeric:tabular-nums; }
+.manual-violation-panel textarea { min-height:100px; margin-top:12px; }
+.rule-review-row.manual { grid-template-columns: 1fr auto; align-items:center; }
 .camera-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, .75); box-sizing: border-box; }
 .camera-modal { width: min(900px, 100%); background: #fff; border-radius: 16px; padding: 18px; box-sizing: border-box; }
 .camera-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
@@ -54,4 +58,4 @@
 .registration-form .registration-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.registration-form .registration-grid label{margin-top:0}.registration-form .span-2{grid-column:1/-1}
 @media (max-width:800px) { .check-grid { grid-template-columns: repeat(2, 1fr); } .scan-image-grid { grid-template-columns: repeat(2, 1fr); } .ocr-fields-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:600px) { .check-grid, .ocr-status-grid, .registration-form .registration-grid, .image-editor-crop-controls { grid-template-columns: 1fr; } .scan-image-grid,.ocr-fields-grid { grid-template-columns: repeat(2, 1fr); } .scan-suggestion { flex-direction: column; align-items: stretch; } .camera-actions { flex-direction: column; } .registration-form .span-2 { grid-column:auto; } }
-@media (max-width:420px){.scan-image-grid,.ocr-fields-grid{grid-template-columns:1fr}.rule-review-row{grid-template-columns:auto 1fr}}
+@media (max-width:420px){.scan-image-grid,.ocr-fields-grid{grid-template-columns:1fr}.rule-review-row{grid-template-columns:auto 1fr}.rule-review-row.manual{grid-template-columns:1fr}}
