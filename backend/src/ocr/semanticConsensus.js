@@ -22,6 +22,12 @@ function voteField(key, providers) {
     }));
 
   const found = observations.filter((item) => isFound(item.field));
+  const votes = observations.map((item) => ({
+    provider: item.provider,
+    status: item.field.status,
+    value: item.field.value ?? null,
+  }));
+
   if (!found.length) {
     const statuses = observations.map((item) => item.field.status);
     const ambiguous = statuses.filter((status) => status === "ambiguous").length;
@@ -33,7 +39,8 @@ function voteField(key, providers) {
       confidence: 0,
       status: ambiguous >= 2 ? "ambiguous" : unreadable >= 2 ? "unreadable" : "absent",
       verification: "consensus",
-      votes: observations.map((item) => ({ provider: item.provider, status: item.field.status, value: item.field.value ?? null })),
+      source: "SEMANTIC_CONSENSUS",
+      votes,
     };
   }
 
@@ -56,7 +63,8 @@ function voteField(key, providers) {
       raw: best.field.raw ?? best.field.value,
       evidence: best.field.evidence ?? best.field.raw ?? best.field.value,
       verification: `majority-${winningGroup.length}/${providers.filter((item) => item?.enabled).length}`,
-      votes: observations.map((item) => ({ provider: item.provider, status: item.field.status, value: item.field.value ?? null })),
+      source: "SEMANTIC_CONSENSUS",
+      votes,
     };
   }
 
@@ -66,7 +74,8 @@ function voteField(key, providers) {
       ...only.field,
       verification: "single-model",
       confidence: Math.min(confidence(only.field.confidence), 0.74),
-      votes: observations.map((item) => ({ provider: item.provider, status: item.field.status, value: item.field.value ?? null })),
+      source: "SEMANTIC_CONSENSUS",
+      votes,
     };
   }
 
@@ -77,7 +86,8 @@ function voteField(key, providers) {
     confidence: 0,
     status: "ambiguous",
     verification: "conflict",
-    votes: observations.map((item) => ({ provider: item.provider, status: item.field.status, value: item.field.value ?? null })),
+    source: "SEMANTIC_CONSENSUS",
+    votes,
   };
 }
 
@@ -100,11 +110,12 @@ function voteCategory(providers, categoryOptions) {
     return { categoryId: null, categoryName: null, categoryPath: null, confidence: 0, reason: "Semantic providers disagreed on category." };
   }
   const allowed = categoryOptions.find((item) => String(item.id) === winning[0].id);
+  const best = [...winning].sort((a, b) => confidence(b.category.confidence) - confidence(a.category.confidence))[0];
   return {
     categoryId: allowed ? String(allowed.id) : winning[0].id,
     categoryName: allowed ? text(allowed.name) : winning[0].category.categoryName || null,
     categoryPath: allowed ? text(allowed.path) : winning[0].category.categoryPath || null,
-    confidence: confidence(winning.sort((a, b) => confidence(b.category.confidence) - confidence(a.category.confidence))[0].category.confidence),
+    confidence: confidence(best.category.confidence),
     reason: `${winning.length} semantic providers selected the same category.`,
   };
 }
