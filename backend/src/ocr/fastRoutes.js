@@ -250,22 +250,30 @@ async function handleFastAnalyze(req, res, files) {
     }
 
     const uploadMs = Date.now() - startedAt;
-    const parallelStartedAt = Date.now();
-    const [paddle, aiSemantic] = await Promise.all([
-      analyzeWithPaddle(images),
-      interpretPackageWithGemini({
-        images,
-        categoryOptions,
-      }),
+    const paddleStart = Date.now();
+    const geminiStart = Date.now();
+    const paddlePromise = analyzeWithPaddle(images).then((value) => ({
+      value,
+      durationMs: Date.now() - paddleStart,
+    }));
+    const geminiPromise = interpretPackageWithGemini({
+      images,
+      categoryOptions,
+    }).then((value) => ({
+      value,
+      durationMs: Date.now() - geminiStart,
+    }));
+
+    const [{ value: paddle, durationMs: paddleMs }, { value: aiSemantic, durationMs: aiMs }] = await Promise.all([
+      paddlePromise,
+      geminiPromise,
     ]);
-    const parallelMs = Date.now() - parallelStartedAt;
-    const paddleMs = null;
-    const aiMs = null;
+    const parallelMs = Date.now() - paddleStart;
 
     const result = buildStructuredResult(paddle, aiSemantic);
     const totalMs = Date.now() - startedAt;
 
-    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} parallel=${parallelMs}ms total=${totalMs}ms aiEnabled=${Boolean(aiSemantic.enabled)}`);
+    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} paddle=${paddleMs}ms gemini=${aiMs}ms parallel=${parallelMs}ms total=${totalMs}ms aiEnabled=${Boolean(aiSemantic.enabled)}`);
 
     res.json({
       result,
@@ -282,7 +290,7 @@ async function handleFastAnalyze(req, res, files) {
       aiSuggestedCategory: aiSemantic?.suggestedCategory || null,
       aiSemanticEnabled: Boolean(aiSemantic?.enabled),
       aiSemanticError: aiSemantic?.enabled ? null : aiSemantic?.reason || null,
-      timing: { uploadMs, parallelMs, paddleMs, aiMs, totalMs },
+      timing: { uploadMs, paddleMs, geminiMs: aiMs, parallelMs, totalMs },
       fallbackReason: result.warnings?.find((item) => item.includes("AI semantic assist unavailable")) || null,
     });
   } catch (error) {
