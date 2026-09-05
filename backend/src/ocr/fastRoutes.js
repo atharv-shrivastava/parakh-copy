@@ -7,6 +7,7 @@ import path from "node:path";
 import { authenticate } from "../middleware/auth.js";
 import { getOcrConfig } from "./config.js";
 import { interpretOcrFields } from "./ocrFieldInterpreter.js";
+import { interpretPackageWithGemini } from "./geminiPackageInterpreter.js";
 
 const router = express.Router();
 const config = getOcrConfig();
@@ -132,14 +133,49 @@ function normalizeField(field) {
   };
 }
 
-function buildStructuredResult(paddle) {
+function aiFieldUsable(field) {
+  return field && typeof field === "object" && field.status === "found" && field.value != null && String(field.value).trim() !== "";
+}
+
+function mergeSemanticFields(deterministicFields, aiFields) {
+  const merged = {};
+  const keys = new Set([...Object.keys(deterministicFields || {}), ...Object.keys(aiFields || {})]);
+  for (const key of keys) {
+    const local = normalizeField(deterministicFields?.[key]);
+    const ai = aiFields?.[key];
+    const aiConfidence = Number(ai?.confidence || 0);
+    const localConfidence = Number(local?.confidence || 0);
+    if (aiFieldUsable(ai) && (
+      local.status === "absent" ||
+      local.status === "unreadable" ||
+      local.status === "ambiguous" ||
+      localConfidence < 0.65 && aiConfidence >= localConfidence + 0.12
+    )) {
+      merged[key] = {
+        value: ai.value,
+        raw: ai.raw || ai.value,
+        confidence: aiConfidence,
+        evidence: ai.evidence || ai.raw || ai.value,
+        status: ai.status,
+        ...(Number.isInteger(ai.imageIndex) ? { imageIndex: ai.imageIndex } : {}),
+        source: "GEMINI_SEMANTIC_ASSIST",
+        deterministicFallback: local.value ?? null,
+      };
+    } else {
+      merged[key] = local;
+    }
+  }
+  return merged;
+}
+
+function buildStructuredResult(paddle, aiSemantic = null) {
   const reconciliation = interpretOcrFields({
     detections: paddle.evidence,
     rawText: paddle.rawText,
   });
 
+  const fields = mergeSemanticFields(reconciliation?.fields || {}, aiSemantic?.fields || {});
   const result = {};
-  const fields = reconciliation?.fields || {};
   for (const key of [
     "productName", "brandName", "manufacturer", "manufacturerAddress", "packer", "packerAddress",
     "marketer", "marketerAddress", "importer", "importerAddress", "netQuantity", "unit", "mrp",
@@ -164,6 +200,9 @@ function buildStructuredResult(paddle) {
   if (reconciliation?.metadata?.innerPackReference) {
     warnings.push("Package text refers to an individual/inner pack for additional batch, date, price, or related details.");
   }
+  if (!aiSemantic?.enabled) {
+    warnings.push("AI semantic assist unavailable; using local deterministic field mapping only.");
+  }
 
   const needsReview = Object.values(result).some((field) =>
     field?.status === "unreadable" || field?.status === "ambiguous" ||
@@ -172,9 +211,7 @@ function buildStructuredResult(paddle) {
 
   return {
     ...result,
-    otherDeclarations: declarationEvidence
-      .filter((item) => item.type === "OCR_TEXT")
-      .map((item) => item.text),
+    otherDeclarations: declarationEvidence.map((item) => item.text),
     declarationEvidence,
     rawText: paddle.rawText,
     warnings,
@@ -182,6 +219,10 @@ function buildStructuredResult(paddle) {
     needsReview,
     semanticReconciliation: reconciliation?.metadata || null,
     candidateEvidence: reconciliation?.candidateEvidence || {},
+    aiSemantic: aiSemantic?.enabled ? {
+      provider: aiSemantic.provider,
+      model: aiSemantic.model,
+    } : null,
   };
 }
 
@@ -192,7 +233,7 @@ async function readImages(files) {
   })));
 }
 
-async function handleFastAnalyze(_req, res, files) {
+async function handleFastAnalyze(req, res, files) {
   const startedAt = Date.now();
   try {
     if (!files.length) {
@@ -200,14 +241,32 @@ async function handleFastAnalyze(_req, res, files) {
     }
 
     const images = await readImages(files);
+    let categoryOptions = [];
+    try {
+      categoryOptions = JSON.parse(req.body?.categoryOptions || "[]");
+      if (!Array.isArray(categoryOptions)) categoryOptions = [];
+    } catch {
+      categoryOptions = [];
+    }
+
     const uploadMs = Date.now() - startedAt;
     const paddleStartedAt = Date.now();
     const paddle = await analyzeWithPaddle(images);
     const paddleMs = Date.now() - paddleStartedAt;
-    const result = buildStructuredResult(paddle);
+
+    const aiStartedAt = Date.now();
+    const aiSemantic = await interpretPackageWithGemini({
+      images,
+      detections: paddle.evidence,
+      rawText: paddle.rawText,
+      categoryOptions,
+    });
+    const aiMs = Date.now() - aiStartedAt;
+
+    const result = buildStructuredResult(paddle, aiSemantic);
     const totalMs = Date.now() - startedAt;
 
-    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} upload=${uploadMs}ms paddle=${paddleMs}ms total=${totalMs}ms`);
+    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} upload=${uploadMs}ms paddle=${paddleMs}ms ai=${aiMs}ms total=${totalMs}ms aiEnabled=${Boolean(aiSemantic.enabled)}`);
 
     res.json({
       result,
@@ -216,8 +275,16 @@ async function handleFastAnalyze(_req, res, files) {
       detectionProvider: "paddleocr",
       detectionProviders: ["paddleocr"],
       rawText: paddle.rawText,
-      semantic: null,
-      fallbackReason: result.warnings?.[0] || null,
+      semantic: aiSemantic?.enabled ? {
+        provider: aiSemantic.provider,
+        model: aiSemantic.model,
+        enabled: true,
+      } : null,
+      aiSuggestedCategory: aiSemantic?.suggestedCategory || null,
+      aiSemanticEnabled: Boolean(aiSemantic?.enabled),
+      aiSemanticError: aiSemantic?.enabled ? null : aiSemantic?.reason || null,
+      timing: { uploadMs, paddleMs, aiMs, totalMs },
+      fallbackReason: result.warnings?.find((item) => item.includes("AI semantic assist unavailable")) || null,
     });
   } catch (error) {
     console.error("[ocr:fast]", error);
