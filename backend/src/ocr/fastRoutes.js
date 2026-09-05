@@ -61,6 +61,13 @@ async function analyzeWithRapid(images) {
   return { provider: "rapidocr", model: "RapidOCR", rawText, evidence };
 }
 
+async function readImages(files) {
+  return Promise.all(files.map(async (file) => ({
+    base64: (await fs.readFile(file.path)).toString("base64"),
+    mediaType: file.mimetype,
+  })));
+}
+
 function normalizeField(field) {
   if (!field || typeof field !== "object") return { value: null, raw: null, confidence: 0, evidence: null, status: "absent" };
   const rawStatus = String(field.status || "").toLowerCase();
@@ -159,7 +166,6 @@ async function runSemanticProviders({ images, rapid, categoryOptions }) {
     { name: "cloudflare-gemma", fn: interpretPackageWithCloudflare, args: { modelOverride: cloudflareGemma, providerName: "cloudflare-gemma" } },
     { name: "cloudflare-moondream", fn: interpretPackageWithCloudflare, args: { modelOverride: cloudflareMoondream, providerName: "cloudflare-moondream" } },
   ];
-
   const settled = await Promise.all(providers.map(async ({ name, fn, args }) => {
     const started = Date.now();
     try {
@@ -169,7 +175,6 @@ async function runSemanticProviders({ images, rapid, categoryOptions }) {
       return { enabled: false, provider: name, model: args.modelOverride || null, reason: error?.message || `${name} semantic provider failed.`, timingMs: Date.now() - started };
     }
   }));
-
   const consensus = reconcileSemanticResults(settled, categoryOptions);
   return { ...consensus, timing: Object.fromEntries(settled.map((provider) => [provider.provider, provider.timingMs])) };
 }
@@ -186,7 +191,6 @@ async function handleFastAnalyze(req, res, files) {
     const rapidStart = Date.now();
     const rapid = await analyzeWithRapid(images);
     const rapidMs = Date.now() - rapidStart;
-
     const semanticStart = Date.now();
     const aiSemantic = await runSemanticProviders({ images, rapid, categoryOptions });
     const semanticMs = Date.now() - semanticStart;
@@ -195,10 +199,11 @@ async function handleFastAnalyze(req, res, files) {
     const parallelMs = totalMs - uploadMs;
 
     console.log(
-      `[ocr:fast] images=${files.length} evidence=${rapid.evidence.length} rapid=${rapidMs}ms semantic=${semanticMs}ms `
-      + `gemini=${aiSemantic.timing?.gemini ?? 0}ms cloudflare-gemma=${aiSemantic.timing?.["cloudflare-gemma"] ?? 0}ms `
-      + `cloudflare-moondream=${aiSemantic.timing?.["cloudflare-moondream"] ?? 0}ms providers=${aiSemantic.providerCount} `
-      + `total=${totalMs}ms`,
+      `[ocr:fast] images=${files.length} evidence=${rapid.evidence.length} rapid=${rapidMs}ms `
+      + `semantic=${semanticMs}ms gemini=${aiSemantic.timing?.gemini ?? 0}ms `
+      + `cloudflare-gemma=${aiSemantic.timing?.["cloudflare-gemma"] ?? 0}ms `
+      + `cloudflare-moondream=${aiSemantic.timing?.["cloudflare-moondream"] ?? 0}ms `
+      + `providers=${aiSemantic.providerCount} total=${totalMs}ms`,
     );
 
     res.json({
@@ -217,11 +222,13 @@ async function handleFastAnalyze(req, res, files) {
     });
   } catch (error) {
     console.error("[ocr:fast]", error);
-    res.status(error.statusCode || 502).json({ error: { code: error.code || "OCR_FAST_ERROR", message: error.message || "Fast OCR analysis failed." } });
+    const status = error.statusCode || 502;
+    res.status(status).json({ error: { code: error.code || "OCR_FAST_ERROR", message: error.message || "Fast OCR analysis failed." } });
   } finally {
     await Promise.all(files.map((file) => fs.unlink(file.path).catch(() => {})));
   }
 }
 
 router.post("/analyze", authenticate, upload.array("images", config.maxImages), (req, res) => handleFastAnalyze(req, res, req.files || []));
+
 export default router;
