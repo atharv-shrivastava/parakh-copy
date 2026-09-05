@@ -110,3 +110,111 @@ html[data-theme] .history-page select:focus {
   border-color: var(--theme-primary, #2563eb) !important;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--theme-primary, #2563eb) 16%, transparent) !important;
 }
+
+/* Hard fixes for the contrast/layout problems visible in the UI. */
+html[data-theme] .ecommerce-url-field {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: auto auto !important;
+  gap: 9px !important;
+  align-items: stretch !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+html[data-theme] .ecommerce-url-field > span {
+  display: block !important;
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  color: var(--theme-text, #111827) !important;
+  line-height: 1.25 !important;
+}
+html[data-theme] .ecommerce-url-field > .ecommerce-url-input,
+html[data-theme] .ecommerce-url-field input.ecommerce-url-input {
+  display: block !important;
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 56px !important;
+  margin: 0 !important;
+  padding: 0 17px !important;
+  box-sizing: border-box !important;
+  border: 2px solid var(--theme-border, #cbd5e1) !important;
+  border-radius: 14px !important;
+  background: var(--theme-input, #fff) !important;
+  color: var(--theme-input-text, #111827) !important;
+  line-height: 56px !important;
+}
+html[data-theme] .ecommerce-url-field > .ecommerce-url-input::placeholder {
+  color: var(--theme-muted, #6b7280) !important;
+  opacity: .9 !important;
+}
+html[data-theme] .ecommerce-url-field > .ecommerce-url-input:hover {
+  border-color: var(--theme-primary, #2563eb) !important;
+}
+html[data-theme] .ecommerce-url-field > .ecommerce-url-input:focus {
+  border-color: var(--theme-primary, #2563eb) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--theme-primary, #2563eb) 18%, transparent), 0 8px 22px rgba(0,0,0,.10) !important;
+}
+
+html[data-theme] .scan-area {
+  background: var(--theme-surface, #fff) !important;
+  color: var(--theme-text, #111827) !important;
+  border-color: var(--theme-border, #d1d5db) !important;
+}
+html[data-theme] .scan-area h2,
+html[data-theme] .scan-area strong,
+html[data-theme] .scan-area .scan-limit {
+  color: var(--theme-text, #111827) !important;
+}
+html[data-theme] .scan-area p {
+  color: var(--theme-muted, #6b7280) !important;
+}
+html[data-theme] .scan-icon {
+  background: var(--theme-primary-light, #eff6ff) !important;
+  color: var(--theme-primary, #2563eb) !important;
+}
+html[data-theme] .scan-review,
+html[data-theme] .check-item,
+html[data-theme] .scan-image-card,
+html[data-theme] .ocr-status-grid div,
+html[data-theme] .ocr-fields-grid > div,
+html[data-theme] .rule-review-panel,
+html[data-theme] .rule-review-dropdown,
+html[data-theme] .presentation-check-panel {
+  background: var(--theme-surface, #fff) !important;
+  color: var(--theme-text, #111827) !important;
+  border-color: var(--theme-border, #e5e7eb) !important;
+}
+html[data-theme] .scan-review input,
+html[data-theme] .scan-review textarea,
+html[data-theme] .scan-review select {
+  background: var(--theme-input, #fff) !important;
+  color: var(--theme-input-text, #111827) !important;
+  border-color: var(--theme-border, #d1d5db) !important;
+}
+html[data-theme] .secondary-button {
+  background: var(--theme-input, #fff) !important;
+  color: var(--theme-text, #111827) !important;
+  border-color: var(--theme-border, #d1d5db) !important;
+}
+html[data-theme] .rule-review-dropdown summary strong,
+html[data-theme] .rule-review-dropdown-body p strong,
+html[data-theme] .rule-review-row em {
+  color: var(--theme-text, #111827) !important;
+}
+html[data-theme] .rule-review-dropdown summary small,
+html[data-theme] .rule-review-dropdown-body p,
+html[data-theme] .rule-review-row small,
+html[data-theme] .ocr-summary,
+html[data-theme] .ocr-fields-grid small,
+html[data-theme] .ocr-fields-grid span,
+html[data-theme] .check-item span,
+html[data-theme] .scan-image-card span,
+html[data-theme] .presentation-check-panel p {
+  color: var(--theme-muted, #6b7280) !important;
+}
+html[data-theme^="dark"] .scan-area {
+  box-shadow: 0 12px 32px rgba(0,0,0,.22) !important;
+}
