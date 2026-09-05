@@ -66,7 +66,7 @@ function EcommerceProducts() {
     </section>
     {message && <div className="status-message">{message}</div>}
     <section className="product-categories"><div className="section-heading"><div><h2>E-commerce main categories</h2><p>Global E-commerce categories and your private E-commerce categories are shown here. Private categories remain private to your account.</p></div></div>
-      {loading ? <p>Loading...</p> : <div className="category-grid">{categories.map((category) => <div className="category-item" key={category.id}><Link to={`/ecommerce-products/category/${category.id}`} className="category-card"><h3>{category.name}</h3><p>{category.isSystem ? "Global" : "Private to your account"} · E-commerce · {category.isFinalProductType ? "Final category" : "Can contain subcategories"}</p></Link>{!category.isSystem && <button className="delete-category-button" type="button" onClick={() => deleteCategory(category)}>Delete</button>}</div>)}</div>}
+      {loading ? <p>Loading...</p> : <div className="category-grid">{categories.map((category) => <div className="category-item" key={category.id}><Link to={`/ecommerce-products/category/${category.id}`} className="category-card"><h3 data-no-auto-translate="true" className="category-identity">{category.name}</h3><p>{category.isSystem ? "Global" : "Private to your account"} · E-commerce · {category.isFinalProductType ? "Final category" : "Can contain subcategories"}</p></Link>{!category.isSystem && <button className="delete-category-button" type="button" onClick={() => deleteCategory(category)}>Delete</button>}</div>)}</div>}
       {!loading && !categories.length && <p>No E-commerce categories available.</p>}
     </section>
   </div>;
