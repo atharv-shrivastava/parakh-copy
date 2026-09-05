@@ -1,0 +1,169 @@
+/* PARAKH product-experience layer: visual-only enhancements. */
+
+.logo-full {
+  display: block;
+  max-width: 194px;
+  margin-top: 6px;
+  color: #8fa1b8;
+  font-size: 9px;
+  line-height: 1.45;
+  letter-spacing: .045em;
+  text-transform: none;
+}
+
+.sidebar-section-label {
+  margin: 18px 10px 7px;
+  color: #71839a;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.sidebar-section-label:first-child { margin-top: 6px; }
+
+.navigation a {
+  min-height: 44px!important;
+  padding: 8px 10px!important;
+}
+
+.nav-icon {
+  width: 32px!important;
+  height: 32px!important;
+  flex-basis: 32px!important;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.045)!important;
+  color: #8fa1b8!important;
+}
+
+.navigation a:hover .nav-icon,
+.navigation a.active .nav-icon {
+  color: #fff!important;
+  background: color-mix(in srgb, var(--theme-primary,#22d3ee) 18%, transparent)!important;
+  border-color: color-mix(in srgb, var(--theme-primary,#22d3ee) 30%, transparent);
+}
+
+.dashboard-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 28px 30px;
+  border: 1px solid var(--modern-border);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 85% 10%, color-mix(in srgb,var(--modern-accent) 16%,transparent), transparent 32%),
+    linear-gradient(135deg, color-mix(in srgb,var(--modern-surface) 95%,transparent), color-mix(in srgb,var(--modern-soft) 92%,transparent));
+  box-shadow: var(--modern-shadow);
+}
+
+.dashboard-hero::after {
+  content:"";
+  position:absolute;
+  width:180px;
+  height:180px;
+  right:-70px;
+  bottom:-90px;
+  border:1px solid color-mix(in srgb,var(--modern-accent) 16%,transparent);
+  border-radius:50%;
+}
+
+.dashboard-hero-copy h1 { max-width: 720px; }
+.dashboard-hero-copy p:last-child { max-width: 700px; }
+.dashboard-hero-actions { position: relative; z-index: 1; }
+
+.dashboard-primary-action,
+.dashboard-secondary-action {
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  min-height:42px;
+  padding:10px 14px;
+  border-radius:11px;
+  font-size:13px;
+  font-weight:800;
+  text-decoration:none;
+  transition:transform .16s ease,box-shadow .16s ease,background .16s ease,border-color .16s ease;
+}
+.dashboard-primary-action { background:var(--modern-accent); color:#fff; box-shadow:0 8px 20px color-mix(in srgb,var(--modern-accent) 22%,transparent); }
+.dashboard-secondary-action { border:1px solid var(--modern-border); background:var(--modern-surface); color:var(--modern-text); }
+.dashboard-primary-action:hover,.dashboard-secondary-action:hover { transform:translateY(-2px); }
+
+.dashboard-stat-grid { margin-top:2px; }
+.user-stat-card {
+  position:relative;
+  overflow:hidden;
+  min-height:124px;
+  padding:18px;
+  border:1px solid var(--modern-border)!important;
+  background:linear-gradient(145deg,var(--modern-surface),var(--modern-soft))!important;
+}
+.user-stat-card::after { content:""; position:absolute; width:62px; height:62px; right:-18px; bottom:-25px; border-radius:50%; background:color-mix(in srgb,var(--modern-accent) 8%,transparent); }
+.user-stat-card strong { font-size:32px; letter-spacing:-.04em; }
+.user-stat-card span { font-weight:750; }
+.user-stat-card small { color:var(--modern-muted); }
+
+.dashboard-feature-card,
+.dashboard-module-card {
+  position:relative;
+  overflow:hidden;
+}
+.dashboard-feature-card { min-height:270px; }
+.dashboard-feature-icon {
+  width:46px!important;
+  height:46px!important;
+  border:1px solid rgba(255,255,255,.15);
+  box-shadow:0 10px 25px rgba(0,0,0,.12);
+}
+.dashboard-module-card .module-heading a { border:1px solid var(--modern-border); border-radius:9px; padding:6px 9px; }
+
+.dashboard-inspection-row {
+  transition:background .16s ease,transform .16s ease,padding-left .16s ease;
+}
+.dashboard-inspection-row:hover { background:color-mix(in srgb,var(--modern-accent) 5%,transparent); transform:translateX(2px); }
+
+.dashboard-quick-links>a {
+  position:relative;
+  overflow:hidden;
+  transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;
+}
+.dashboard-quick-links>a:hover { transform:translateY(-3px); box-shadow:0 12px 28px rgba(15,23,42,.09); border-color:color-mix(in srgb,var(--modern-accent) 35%,var(--modern-border))!important; }
+.dashboard-quick-links>a>span { background:color-mix(in srgb,var(--modern-accent) 10%,transparent); color:var(--modern-accent); }
+
+/* Shops: clearer source split and denser inspection cards. */
+.shops-page,
+.reports-page { width:100%; }
+.shop-tabs,
+.shop-source-tabs { border-radius:14px; }
+.shop-card { position:relative; overflow:hidden; }
+.shop-card::before { content:""; position:absolute; inset:0 auto 0 0; width:3px; background:var(--modern-accent); opacity:.7; }
+.shop-card:hover { transform:translateY(-2px); }
+
+/* Reports: make the report rows feel like actionable records. */
+.report-card { display:flex; align-items:center; gap:18px; }
+.report-card-content { min-width:0; flex:1; }
+.report-actions { flex:0 0 auto; display:flex; gap:8px; }
+.report-button { min-width:112px; }
+.report-meta span { border-radius:999px; }
+
+/* Mobile: preserve both icon and text while allowing horizontal scrolling. */
+@media (max-width:768px) {
+  .sidebar-section-label { display:none; }
+  .logo-full { max-width:100%; font-size:8px; }
+  .navigation a { min-height:40px!important; padding:7px 9px!important; }
+  .nav-icon { width:28px!important; height:28px!important; flex-basis:28px!important; }
+  .dashboard-hero { padding:20px 18px; }
+  .dashboard-hero-actions { display:flex; width:100%; margin-top:4px; }
+  .dashboard-hero-actions>* { flex:1; justify-content:center; }
+  .report-card { align-items:stretch; flex-direction:column; }
+  .report-actions { width:100%; }
+  .report-button { flex:1; }
+}
+
+@media (max-width:480px) {
+  .logo-full { line-height:1.3; }
+  .dashboard-hero-actions { flex-direction:column; }
+  .dashboard-stat-grid { gap:9px!important; }
+  .user-stat-card { min-height:110px; padding:15px; }
+  .user-stat-card strong { font-size:28px; }
+  .report-actions { flex-direction:column; }
+  .report-button { width:100%; }
+}
