@@ -3,6 +3,7 @@ import { apiFetch } from "../lib/auth";
 import ScanVisualCheck from "../components/ScanVisualCheck";
 import ImageEditor from "../components/ImageEditor";
 import "../styles/scan.css";
+import "../styles/ai-category.css";
 
 const API_URL = "http://localhost:5000/api";
 const OCR_URL = "http://localhost:5000";
@@ -85,9 +86,10 @@ async function fileToDataUrl(file) {
   return canvas.toDataURL("image/jpeg", 0.72);
 }
 
-async function runOcr(files, signal) {
+async function runOcr(files, signal, categoryOptions = []) {
   const fd = new FormData();
   files.forEach((file) => fd.append("images", file));
+  fd.append("categoryOptions", JSON.stringify(categoryOptions));
   const response = await apiFetch(`${OCR_URL}/api/ocr/analyze`, { method: "POST", body: fd, signal });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -98,10 +100,14 @@ async function runOcr(files, signal) {
     result: data.result,
     provider: data.provider || "paddleocr",
     model: data.model || "PaddleOCR",
-    semantic: null,
+    semantic: data.semantic || null,
     detectionProvider: data.detectionProvider || "paddleocr",
     detectionProviders: data.detectionProviders || ["paddleocr"],
     fallbackReason: data.fallbackReason || null,
+    aiSuggestedCategory: data.aiSuggestedCategory || null,
+    aiSemanticEnabled: Boolean(data.aiSemanticEnabled),
+    aiSemanticError: data.aiSemanticError || null,
+    timing: data.timing || null,
   };
 }
 
@@ -117,6 +123,7 @@ export default function ScanV2() {
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
   const [providerInfo, setProviderInfo] = useState(null);
+  const [aiSuggestedCategory, setAiSuggestedCategory] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
@@ -174,6 +181,7 @@ export default function ScanV2() {
     setComplianceError(null);
     setAcceptedFindingIds([]);
     setProviderInfo(null);
+    setAiSuggestedCategory(null);
     setSelectedCategoryId("");
     setShowRegistration(false);
     setUseExtractedData(false);
@@ -249,22 +257,26 @@ export default function ScanV2() {
   async function analyze() {
     if (!images.length) return setMessage("Add at least one package image first.");
     setAnalyzing(true);
-    setMessage("Running PaddleOCR + deterministic field mapping...");
+    setMessage("Running PaddleOCR + AI semantic mapping...");
     const controller = new AbortController();
     controllerRef.current?.abort();
     controllerRef.current = controller;
     try {
-      const info = await runOcr(images.map((item) => item.file), controller.signal);
+      const categoryOptions = finalCategories.map((category) => ({
+        id: category.id,
+        name: category.name,
+        path: category.path.map((item) => item.name).join(" → "),
+      }));
+      const info = await runOcr(images.map((item) => item.file), controller.signal, categoryOptions);
       const extracted = info.result;
       window.sessionStorage.setItem("parakhDeclarationEvidence", JSON.stringify(extracted.declarationEvidence || []));
       window.dispatchEvent(new CustomEvent("parakh:declaration-evidence", { detail: extracted.declarationEvidence || [] }));
       const visualInspection = readVisualInspection();
       setProviderInfo(info);
-      const semanticLabel = "PaddleOCR";
-      const detectionLabel = info.detectionProviders?.length
-        ? info.detectionProviders.join(" + ")
-        : info.detectionProvider || "PaddleOCR";
-      const providerMessage = `${semanticLabel} + ${detectionLabel} completed. Running Rules Engine...`;
+      setAiSuggestedCategory(info.aiSuggestedCategory || null);
+      const providerMessage = info.aiSemanticEnabled
+        ? "PaddleOCR + AI semantic mapping completed. Running Rules Engine..."
+        : "PaddleOCR + deterministic mapping completed. Running Rules Engine...";
       setMessage(providerMessage);
       const response = await apiFetch(`${OCR_URL}/api/ocr/evaluate-structured`, {
         method: "POST",
@@ -301,7 +313,13 @@ export default function ScanV2() {
       setSelectedCategoryId("");
       setShowRegistration(false);
       setUseExtractedData(false);
-      setMessage(info.fallbackReason ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} ${info.fallbackReason}` : "PaddleOCR and Rules Engine evaluation complete. Review the extracted fields, then choose how to register the product.");
+      setMessage(info.aiSuggestedCategory?.categoryName
+        ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} AI suggests: ${info.aiSuggestedCategory.categoryPath || info.aiSuggestedCategory.categoryName}.`
+        : info.aiSemanticError
+          ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} AI suggestion unavailable: ${info.aiSemanticError}`
+          : info.fallbackReason
+            ? `${providerMessage.replace("Running Rules Engine...", "Rules Engine completed.")} ${info.fallbackReason}`
+            : "OCR and Rules Engine evaluation complete. Review the extracted fields, then choose how to register the product.");
     } catch (error) {
       if (error?.name === "AbortError") return;
       setMessage(error.message || "OCR analysis failed.");
@@ -321,6 +339,15 @@ export default function ScanV2() {
     setUseExtractedData(true);
     setShowRegistration(true);
     setMessage("Extracted details applied to the registration form. The values remain editable before registration.");
+  }
+
+  function applyAiCategory() {
+    const categoryId = aiSuggestedCategory?.categoryId;
+    if (!categoryId || !finalCategories.some((category) => String(category.id) === String(categoryId))) {
+      return setMessage("AI suggested a category name, but it does not match an available offline final category. Select the category manually.");
+    }
+    setSelectedCategoryId(String(categoryId));
+    setMessage(`AI category applied: ${aiSuggestedCategory.categoryPath || aiSuggestedCategory.categoryName}. You can still change it before registration.`);
   }
 
   function openManualRegistration() {
@@ -351,7 +378,7 @@ export default function ScanV2() {
           sourceType: "OFFLINE",
           imageUrls,
           acceptedFindingIds,
-          ocrData: { ocr, compliance, complianceError, providerInfo, visualInspection },
+          ocrData: { ocr, compliance, complianceError, providerInfo, aiSuggestedCategory, visualInspection },
           complianceStatus: accepted.length ? "VIOLATION" : "OKAY",
           violationReason: accepted.map((finding) => finding.message || finding.violationReason || finding.ruleCode).join(" | "),
           inspectionDate: new Date().toISOString(),
@@ -375,7 +402,7 @@ export default function ScanV2() {
     <div className="page-header">
       <p className="eyebrow">PRODUCT INSPECTION</p>
       <h1>Scan Product</h1>
-      <p>Capture or upload package images, prepare their orientation/crop, detect printed text with local PaddleOCR and map declarations before registration.</p>
+      <p>Capture or upload package images, prepare their orientation/crop, detect printed text, interpret declarations with AI assistance, and review compliance before registration.</p>
     </div>
 
     <section className="scan-area">
@@ -399,11 +426,16 @@ export default function ScanV2() {
 
     {images.length > 0 && <ScanVisualCheck />}
 
-    {providerInfo && <section className="ocr-status-grid"><div><strong>OCR / field mapper</strong><span>PaddleOCR + local deterministic mapping</span></div><div><strong>Text detection</strong><span>{providerInfo.detectionProviders?.length ? providerInfo.detectionProviders.join(" + ") : providerInfo.detectionProvider || "PaddleOCR"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}/{violations.length}</span></div></section>}
+    {providerInfo && <section className="ocr-status-grid"><div><strong>OCR / field mapper</strong><span>{providerInfo.aiSemanticEnabled ? "PaddleOCR + Gemini semantic assist + deterministic validation" : "PaddleOCR + local deterministic mapping"}</span></div><div><strong>Text detection</strong><span>{providerInfo.detectionProviders?.length ? providerInfo.detectionProviders.join(" + ") : providerInfo.detectionProvider || "PaddleOCR"}</span></div><div><strong>Accepted violations</strong><span>{accepted.length}/{violations.length}</span></div></section>}
+
+    {aiSuggestedCategory && <section className="ai-category-card">
+      <div className="ai-category-copy"><div className="ai-category-eyebrow">AI SUGGESTED CATEGORY</div><h2>{aiSuggestedCategory.categoryPath || aiSuggestedCategory.categoryName || "Category not determined"}</h2><p>{aiSuggestedCategory.reason || "Suggested from package imagery and OCR evidence."}</p></div>
+      <div className="ai-category-meta"><span className="ai-category-confidence">{Math.round(Number(aiSuggestedCategory.confidence || 0) * 100)}% confidence</span><button type="button" className="primary-button" onClick={applyAiCategory} disabled={!aiSuggestedCategory.categoryId}>Use AI Suggestion</button></div>
+    </section>}
 
     {ocr && <section className="scan-review">
       <div className="section-heading"><div><h2>OCR extraction and rule review</h2><p>Edit the extracted OCR values here, review the Rules Engine findings, then explicitly choose whether to use the extracted details for registration.</p></div></div>
-      <div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && key !== "semantic" && value && typeof value === "object" && ["found", "absent", "unreadable", "ambiguous"].includes(value.status)).map(([key, value]) => <label key={key} className="ocr-edit-field"><strong>{key.replace(/([A-Z])/g, " $1")}</strong><input value={value.value ?? ""} placeholder={value.status === "found" ? "Review value" : value.status} onChange={(event) => updateOcrField(key, event.target.value)} /><small>{value.status === "found" ? `${Math.round(Number(value.confidence || 0) * 100)}% confidence` : value.status}</small></label>)}</div>
+      <div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && key !== "semantic" && key !== "aiSemantic" && key !== "aiSuggestedCategory" && value && typeof value === "object" && ["found", "absent", "unreadable", "ambiguous"].includes(value.status)).map(([key, value]) => <label key={key} className="ocr-edit-field"><strong>{key.replace(/([A-Z])/g, " $1")}</strong><input value={value.value ?? ""} placeholder={value.status === "found" ? "Review value" : value.status} onChange={(event) => updateOcrField(key, event.target.value)} /><small>{value.status === "found" ? `${Math.round(Number(value.confidence || 0) * 100)}% confidence` : value.status}</small></label>)}</div>
       {complianceError && <div className="status-message">Rules Engine: {complianceError.message || complianceError}</div>}
       {compliance?.summary && <div className="ocr-summary">Rules: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}
       {violations.length > 0 && <div className="rule-review-panel"><div className="section-heading"><div><h3>Inspector review</h3><p>Uncheck a false positive. The original engine finding remains in the audit record.</p></div></div>{violations.map((finding) => <label className="rule-review-row" key={finding.findingId}><input type="checkbox" checked={acceptedFindingIds.includes(finding.findingId)} onChange={() => toggle(finding.findingId)} /><span><strong>{finding.ruleCode || finding.ruleNumber}</strong><small>{finding.ruleNumber ? `Rule ${finding.ruleNumber} · ` : ""}{finding.severity || "REVIEW"}</small><em>{finding.message || finding.violationReason || "Violation detected"}</em></span></label>)}<div className="ocr-summary">Accepted violations: <strong>{accepted.length}</strong> of {violations.length}</div></div>}
