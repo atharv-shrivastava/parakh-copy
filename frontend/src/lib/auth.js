@@ -1,12 +1,65 @@
 const TOKEN_KEY = "parakh_token";
 const USER_KEY = "parakh_user";
+const CACHE_PREFIX = "parakh_api_cache:";
+const CACHE_TTL = 5 * 60 * 1000;
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 export function getToken() { return localStorage.getItem(TOKEN_KEY); }
 export function getUser() { try { return JSON.parse(localStorage.getItem(USER_KEY) || "null"); } catch { return null; } }
-export function saveSession(token, user) { localStorage.setItem(TOKEN_KEY, token); localStorage.setItem(USER_KEY, JSON.stringify(user)); }
-export function clearSession() { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USER_KEY); }
+
+function clearApiCache() {
+  try {
+    Object.keys(sessionStorage).filter((key) => key.startsWith(CACHE_PREFIX)).forEach((key) => sessionStorage.removeItem(key));
+  } catch {}
+}
+
+export function invalidateApiCache() {
+  clearApiCache();
+  try { window.dispatchEvent(new CustomEvent("parakh:data-invalidated", { detail: { at: Date.now() } })); } catch {}
+}
+
+export function saveSession(token, user) {
+  clearApiCache();
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
+export function clearSession() {
+  clearApiCache();
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+}
+
 export function authHeaders(json = false) { return { ...(json ? { "Content-Type": "application/json" } : {}), ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) }; }
+
+function cacheKey(url) { return `${CACHE_PREFIX}${url}`; }
+
+function cachedResponse(entry) {
+  return new Response(entry.body, { status: entry.status, statusText: entry.statusText || "OK", headers: entry.headers || { "Content-Type": "application/json" } });
+}
+
+function readCached(url) {
+  try {
+    const raw = sessionStorage.getItem(cacheKey(url));
+    if (!raw) return null;
+    const entry = JSON.parse(raw);
+    if (!entry?.savedAt || Date.now() - entry.savedAt > CACHE_TTL) {
+      sessionStorage.removeItem(cacheKey(url));
+      return null;
+    }
+    return entry;
+  } catch { return null; }
+}
+
+async function cacheResponse(url, response) {
+  try {
+    if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) return response;
+    const clone = response.clone();
+    const body = await clone.text();
+    sessionStorage.setItem(cacheKey(url), JSON.stringify({ savedAt: Date.now(), status: response.status, statusText: response.statusText, headers: { "Content-Type": response.headers.get("content-type") || "application/json" }, body }));
+  } catch {}
+  return response;
+}
 
 async function optimizeOcrBody(body) {
   if (!(body instanceof FormData)) return body;
@@ -29,9 +82,8 @@ async function optimizeOcrBody(body) {
       context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       bitmap.close();
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.78));
-      if (blob && blob.size < value.size) {
-        optimized.append(key, new File([blob], value.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" }), value.name.replace(/\.[^.]+$/, ".jpg"));
-      } else optimized.append(key, value, value.name);
+      if (blob && blob.size < value.size) optimized.append(key, new File([blob], value.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" }), value.name.replace(/\.[^.]+$/, ".jpg"));
+      else optimized.append(key, value, value.name);
     } catch { optimized.append(key, value, value.name); }
   }
   return optimized;
@@ -39,11 +91,17 @@ async function optimizeOcrBody(body) {
 
 export async function apiFetch(url, options = {}) {
   const rawUrl = String(url);
-  const resolvedUrl = rawUrl.startsWith("http://localhost:5000/api")
-    ? rawUrl.replace("http://localhost:5000/api", API_URL)
-    : rawUrl;
+  const resolvedUrl = rawUrl.startsWith("http://localhost:5000/api") ? rawUrl.replace("http://localhost:5000/api", API_URL) : rawUrl;
+  const method = String(options.method || "GET").toUpperCase();
+  const isRead = ["GET", "HEAD"].includes(method);
+  if (isRead && typeof window !== "undefined") {
+    const cached = readCached(resolvedUrl);
+    if (cached) return cachedResponse(cached);
+  }
   const body = resolvedUrl.includes("/api/ocr/analyze") ? await optimizeOcrBody(options.body) : options.body;
   const response = await fetch(resolvedUrl, { ...options, body, headers: { ...authHeaders(Boolean(body && typeof body === "string")), ...(options.headers || {}) } });
   if (response.status === 401) clearSession();
+  if (response.ok && !isRead) invalidateApiCache();
+  if (response.ok && isRead) await cacheResponse(resolvedUrl, response);
   return response;
 }
