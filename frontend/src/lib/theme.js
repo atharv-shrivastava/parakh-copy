@@ -12,6 +12,14 @@ export const THEMES = [
   { id: "dark", name: "Midnight Dark", primary: "#60a5fa", background: "#0b1120", surface: "#111827", text: "#f1f5f9", muted: "#9ca9bb", border: "#253149", sidebar: "#050914" },
   { id: "dark-emerald", name: "Forest Dark", primary: "#34d399", background: "#071611", surface: "#0d2118", text: "#ecfdf5", muted: "#9cc4b0", border: "#1c4031", sidebar: "#03100b" },
   { id: "dark-violet", name: "Nebula Dark", primary: "#a78bfa", background: "#100c1b", surface: "#171225", text: "#f5f3ff", muted: "#b3a8c8", border: "#30264a", sidebar: "#08050f" },
+  { id: "crimson", name: "Crimson", primary: "#ef4444", background: "#fff5f5", surface: "#ffffff", text: "#2d1212", muted: "#795b5b", border: "#f2d8d8", sidebar: "#481010" },
+  { id: "plum", name: "Plum", primary: "#a855f7", background: "#fbf5ff", surface: "#ffffff", text: "#24112f", muted: "#725f7d", border: "#ead9f7", sidebar: "#34104e" },
+  { id: "ruby-dark", name: "Ruby Dark", primary: "#fb7185", background: "#160a0d", surface: "#211014", text: "#fff1f2", muted: "#c5a1a8", border: "#49232b", sidebar: "#090406" },
+  { id: "purple-dark", name: "Royal Purple Dark", primary: "#c084fc", background: "#120b1b", surface: "#1d1329", text: "#faf5ff", muted: "#b8a5c8", border: "#3a2850", sidebar: "#08040d" },
+  { id: "obsidian", name: "Obsidian", primary: "#e5e7eb", background: "#090a0d", surface: "#121417", text: "#f3f4f6", muted: "#9ca3af", border: "#292d33", sidebar: "#050607" },
+  { id: "graphite", name: "Graphite", primary: "#94a3b8", background: "#17191d", surface: "#22252a", text: "#f1f5f9", muted: "#a8b0bd", border: "#353941", sidebar: "#0c0e11" },
+  { id: "black-grey", name: "Black & Grey", primary: "#d1d5db", background: "#101112", surface: "#1b1d20", text: "#f5f5f5", muted: "#a1a1aa", border: "#303237", sidebar: "#000000" },
+  { id: "red-black", name: "Red & Black", primary: "#f43f5e", background: "#11090b", surface: "#1b1013", text: "#ffe4e6", muted: "#c59aa1", border: "#432129", sidebar: "#050304" },
 ];
 
 const KEY = "parakh_theme";
@@ -25,7 +33,8 @@ export function getTheme() {
 export function applyTheme(themeId) {
   const id = THEMES.some((theme) => theme.id === themeId) ? themeId : DEFAULT_THEME;
   document.documentElement.dataset.theme = id;
-  document.documentElement.style.colorScheme = id.startsWith("dark") || id === "dark" ? "dark" : "light";
+  const darkThemes = new Set(["dark", "dark-emerald", "dark-violet", "ruby-dark", "purple-dark", "obsidian", "graphite", "black-grey", "red-black"]);
+  document.documentElement.style.colorScheme = darkThemes.has(id) ? "dark" : "light";
   localStorage.setItem(KEY, id);
   return id;
 }
