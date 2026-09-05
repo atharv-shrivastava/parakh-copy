@@ -58,7 +58,7 @@ export async function interpretPackageWithCloudflare({ images = [], detections =
     if (signal?.aborted) throw new DOMException("The request was aborted.", "AbortError");
 
     const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${encodeURIComponent(model)}`,
+      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`,
       {
         method: "POST",
         headers: {
