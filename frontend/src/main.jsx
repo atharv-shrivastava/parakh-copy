@@ -7,6 +7,7 @@ import "./styles/components.css";
 import "./styles/theme.css";
 import "./styles/responsive.css";
 import "./styles/theme-overrides.css";
+import "./styles/performance-overrides.css";
 import { applyTheme, getTheme } from "./lib/theme";
 import { LanguageProvider } from "./components/LanguageProvider";
 
