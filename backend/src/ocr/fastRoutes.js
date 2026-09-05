@@ -32,30 +32,19 @@ function normalizeText(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
-function rawTextEvidence(rawText, imageIndex = 0) {
-  return String(rawText || "")
-    .split(/\r?\n/)
-    .map(normalizeText)
-    .filter(Boolean)
-    .map((text, index) => ({
-      id: `raw:${imageIndex}:${index}`,
-      imageIndex,
-      text,
-      confidence: 0.55,
-      boundingBox: null,
-    }));
-}
-
-async function analyzeOneWithPaddle(image, imageIndex) {
+async function analyzeWithPaddle(images) {
   const formData = new FormData();
-  const bytes = Buffer.from(image.base64, "base64");
-  formData.append(
-    "images",
-    new Blob([bytes], { type: image.mediaType }),
-    `parakh-${imageIndex + 1}.${extension(image.mediaType)}`,
-  );
-
   const paddleUrl = process.env.PADDLE_OCR_URL || "http://localhost:8081";
+
+  images.forEach((image, imageIndex) => {
+    const bytes = Buffer.from(image.base64, "base64");
+    formData.append(
+      "images",
+      new Blob([bytes], { type: image.mediaType }),
+      `parakh-${imageIndex + 1}.${extension(image.mediaType)}`,
+    );
+  });
+
   const response = await fetch(`${paddleUrl}/api/ocr/analyze`, {
     method: "POST",
     body: formData,
@@ -68,39 +57,29 @@ async function analyzeOneWithPaddle(image, imageIndex) {
     );
   }
 
-  const detections = Array.isArray(data?.result?.declarationEvidence)
+  const evidence = Array.isArray(data?.result?.declarationEvidence)
     ? data.result.declarationEvidence
-      .map((item, index) => ({
-        id: String(item?.id ?? `paddle-${imageIndex}:${index}`),
-        imageIndex,
-        text: normalizeText(item?.text),
-        confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
-        boundingBox: item?.boundingBox || null,
-      }))
+      .map((item, index) => {
+        const serviceImageIndex = Number(item?.imageIndex);
+        return {
+          id: String(item?.id ?? `paddle-evidence-${index}`),
+          imageIndex: Number.isFinite(serviceImageIndex) && serviceImageIndex >= 1
+            ? serviceImageIndex - 1
+            : 0,
+          text: normalizeText(item?.text),
+          confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
+          boundingBox: item?.boundingBox || null,
+        };
+      })
       .filter((item) => item.text)
     : [];
-  const rawText = normalizeText(data?.result?.rawText) || detections.map((item) => item.text).join("\n");
-  return {
-    imageIndex,
-    rawText,
-    evidence: [...detections, ...rawTextEvidence(rawText, imageIndex)],
-  };
-}
 
-async function analyzeWithPaddle(images) {
-  const concurrency = Math.max(1, Math.min(Number(process.env.OCR_PADDLE_CONCURRENCY || "2"), images.length));
-  const results = [];
-  for (let start = 0; start < images.length; start += concurrency) {
-    const batch = images.slice(start, start + concurrency);
-    const batchResults = await Promise.all(batch.map((image, offset) => analyzeOneWithPaddle(image, start + offset)));
-    results.push(...batchResults);
-  }
-  results.sort((a, b) => a.imageIndex - b.imageIndex);
+  const rawText = normalizeText(data?.result?.rawText) || evidence.map((item) => item.text).join("\n");
   return {
     provider: "paddleocr",
     model: "PaddleOCR",
-    rawText: results.map((item) => item.rawText).filter(Boolean).join("\n"),
-    evidence: results.flatMap((item) => item.evidence),
+    rawText,
+    evidence,
   };
 }
 
