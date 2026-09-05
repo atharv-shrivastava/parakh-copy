@@ -49,4 +49,19 @@ router.get("/:id/products", async (req, res) => {
   } catch (error) { console.error(error); res.status(500).json({ error: error?.message || "Failed to fetch shop products" }); }
 });
 
+router.delete("/:id", async (req, res) => {
+  try {
+    const shop = await prisma.shop.findFirst({ where: { id: req.params.id, ...visible(req) }, select: { id: true, name: true, sourceType: true } });
+    if (!shop) return res.status(404).json({ error: "Shop not found" });
+    await prisma.$transaction(async (tx) => {
+      await tx.inspection.deleteMany({ where: { shopId: shop.id } });
+      await tx.shop.delete({ where: { id: shop.id } });
+    });
+    res.json({ success: true, deletedShop: shop });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error?.message || "Failed to delete shop" });
+  }
+});
+
 export default router;
