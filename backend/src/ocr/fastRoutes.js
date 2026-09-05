@@ -28,11 +28,6 @@ function extension(mediaType) {
   return mediaType === "image/png" ? "png" : mediaType === "image/webp" ? "webp" : "jpg";
 }
 
-function optionalTimeoutSignal(envName) {
-  const timeoutMs = Number(process.env[envName] || "0");
-  return Number.isFinite(timeoutMs) && timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
-}
-
 function normalizeText(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -61,11 +56,9 @@ async function analyzeOneWithPaddle(image, imageIndex) {
   );
 
   const paddleUrl = process.env.PADDLE_OCR_URL || "http://localhost:8081";
-  const signal = optionalTimeoutSignal("OCR_PADDLE_SINGLE_TIMEOUT_MS");
   const response = await fetch(`${paddleUrl}/api/ocr/analyze`, {
     method: "POST",
     body: formData,
-    ...(signal ? { signal } : {}),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -250,8 +243,10 @@ async function handleFastAnalyze(req, res, files) {
     }
 
     const uploadMs = Date.now() - startedAt;
-    const paddleStart = Date.now();
-    const geminiStart = Date.now();
+    const parallelStart = Date.now();
+    const paddleStart = parallelStart;
+    const geminiStart = parallelStart;
+
     const paddlePromise = analyzeWithPaddle(images).then((value) => ({
       value,
       durationMs: Date.now() - paddleStart,
@@ -264,16 +259,16 @@ async function handleFastAnalyze(req, res, files) {
       durationMs: Date.now() - geminiStart,
     }));
 
-    const [{ value: paddle, durationMs: paddleMs }, { value: aiSemantic, durationMs: aiMs }] = await Promise.all([
+    const [{ value: paddle, durationMs: paddleMs }, { value: aiSemantic, durationMs: geminiMs }] = await Promise.all([
       paddlePromise,
       geminiPromise,
     ]);
-    const parallelMs = Date.now() - paddleStart;
+    const parallelMs = Date.now() - parallelStart;
 
     const result = buildStructuredResult(paddle, aiSemantic);
     const totalMs = Date.now() - startedAt;
 
-    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} paddle=${paddleMs}ms gemini=${aiMs}ms parallel=${parallelMs}ms total=${totalMs}ms aiEnabled=${Boolean(aiSemantic.enabled)}`);
+    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} paddle=${paddleMs}ms gemini=${geminiMs}ms parallel=${parallelMs}ms total=${totalMs}ms aiEnabled=${Boolean(aiSemantic.enabled)}`);
 
     res.json({
       result,
@@ -290,7 +285,7 @@ async function handleFastAnalyze(req, res, files) {
       aiSuggestedCategory: aiSemantic?.suggestedCategory || null,
       aiSemanticEnabled: Boolean(aiSemantic?.enabled),
       aiSemanticError: aiSemantic?.enabled ? null : aiSemantic?.reason || null,
-      timing: { uploadMs, paddleMs, geminiMs: aiMs, parallelMs, totalMs },
+      timing: { uploadMs, paddleMs, geminiMs, parallelMs, totalMs },
       fallbackReason: result.warnings?.find((item) => item.includes("AI semantic assist unavailable")) || null,
     });
   } catch (error) {
