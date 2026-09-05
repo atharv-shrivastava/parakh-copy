@@ -5,6 +5,7 @@ import { useLanguage } from "../components/LanguageProvider";
 import "../styles/dashboard.css";
 
 const API_URL = "http://localhost:5000/api";
+const ANALYTICS_CACHE_KEY = "parakh_dashboard_analytics";
 
 function StatCard({ label, value, tone = "neutral", detail }) {
   return <div className={`user-stat-card ${tone}`}>
@@ -17,28 +18,34 @@ function StatCard({ label, value, tone = "neutral", detail }) {
 export default function Dashboard() {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
-  const [analytics, setAnalytics] = useState(null);
+  const [analytics, setAnalytics] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem(ANALYTICS_CACHE_KEY) || "null"); } catch { return null; }
+  });
   const [loading, setLoading] = useState(true);
   const user = getUser();
   const { t } = useLanguage();
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      apiFetch(`${API_URL}/products?limit=6`),
-      apiFetch(`${API_URL}/products/analytics/summary`),
-    ]).then(async ([productsResponse, analyticsResponse]) => {
-      const [productsData, analyticsData] = await Promise.all([
-        productsResponse.json().catch(() => []),
-        analyticsResponse.json().catch(() => ({})),
-      ]);
-      if (!productsResponse.ok) throw new Error(productsData?.error || "Could not load dashboard");
-      if (!analyticsResponse.ok) throw new Error(analyticsData?.error || "Could not load analytics");
-      if (!active) return;
-      setHistory(Array.isArray(productsData) ? productsData.slice(0, 6) : []);
-      setAnalytics(analyticsData);
-    }).catch((e) => { if (active) setError(e?.message || "Could not load dashboard"); })
+    apiFetch(`${API_URL}/products?limit=6`)
+      .then(async (response) => {
+        const data = await response.json().catch(() => []);
+        if (!response.ok) throw new Error(data?.error || "Could not load recent products");
+        if (active) setHistory(Array.isArray(data) ? data.slice(0, 6) : []);
+      })
+      .catch((e) => { if (active) setError(e?.message || "Could not load recent products"); })
       .finally(() => { if (active) setLoading(false); });
+
+    apiFetch(`${API_URL}/products/analytics/summary`)
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data?.error || "Could not load analytics");
+        if (!active) return;
+        setAnalytics(data);
+        try { sessionStorage.setItem(ANALYTICS_CACHE_KEY, JSON.stringify(data)); } catch {}
+      })
+      .catch(() => {});
+
     return () => { active = false; };
   }, []);
 
@@ -51,35 +58,29 @@ export default function Dashboard() {
   const topRules = analytics?.topRules || [];
   const topCategories = analytics?.topCategories || [];
 
-  if (loading) return <main className="dashboard dashboard-modern"><div className="dashboard-loading"><div className="loading-orb" /><h2>Loading your PARAKH workspace</h2><p>Fetching inspection activity and compliance metrics.</p></div></main>;
+  if (loading && !history.length) return <main className="dashboard dashboard-modern"><div className="dashboard-loading"><div className="loading-orb" /><h2>Loading your PARAKH workspace</h2><p>Fetching recent inspections.</p></div></main>;
 
   return <main className="dashboard dashboard-modern">
     <header className="dashboard-hero">
       <div className="dashboard-hero-copy"><p className="eyebrow">PARAKH · INSPECTION WORKSPACE</p><h1>{t("welcome")}, {user?.name || "Inspector"}.</h1><p>{t("inspectSubtitle")}</p></div>
       <div className="dashboard-hero-actions"><Link className="dashboard-primary-action" to="/scan"><span>＋</span> New inspection</Link><Link className="dashboard-secondary-action" to="/products/manual-register">Manual registration</Link></div>
     </header>
-
     {error && <div className="dashboard-alert">{error}</div>}
-
     <section className="dashboard-stat-grid">
-      <StatCard label={t("totalRegistered")} value={total} detail="Registered products" />
-      <StatCard label={t("compliant")} value={compliant} tone="success" detail={`${complianceRate}% of registered products`} />
-      <StatCard label={t("violations")} value={violations} tone="danger" detail="Recorded violations" />
-      <StatCard label={t("needsReview")} value={review} tone="warning" detail="Require officer review" />
+      <StatCard label={t("totalRegistered")} value={total} detail={analytics ? "Registered products" : "Loading…"} />
+      <StatCard label={t("compliant")} value={analytics ? compliant : "—"} tone="success" detail={analytics ? `${complianceRate}% of registered products` : "Fetching compliance"} />
+      <StatCard label={t("violations")} value={analytics ? violations : "—"} tone="danger" detail="Recorded violations" />
+      <StatCard label={t("needsReview")} value={analytics ? review : "—"} tone="warning" detail="Require officer review" />
     </section>
-
     <section className="dashboard-workspace-grid">
       <div className="dashboard-feature-card dashboard-inspection-card"><div className="dashboard-feature-glow" /><div className="dashboard-feature-icon">⌁</div><p className="card-kicker">PRODUCT INSPECTION</p><h2>Scan a package and verify its declarations.</h2><p>Use OCR, semantic field mapping and the Legal Metrology Rules Engine while keeping the existing product hierarchy intact.</p><Link className="dashboard-feature-link" to="/scan">Start inspection <span>→</span></Link></div>
       <div className="dashboard-module-card hierarchy-card"><div className="module-heading"><div><p className="card-kicker">PRODUCT HIERARCHY</p><h2>Categories stay in control.</h2></div><Link to="/products">Open</Link></div><div className="hierarchy-visual"><div><span>MAIN CATEGORY</span><b>↓</b></div><div><span>SUBCATEGORY</span><b>↓</b></div><div className="hierarchy-final"><span>FINAL PRODUCT TYPE</span><strong>REGISTER PRODUCTS</strong></div></div><p>Browse offline and e-commerce categories, drill into subcategories and register products only under final product types.</p></div>
     </section>
-
     <section className="dashboard-section"><div className="dashboard-section-heading"><div><p className="card-kicker">RECENT ACTIVITY</p><h2>Latest inspections</h2></div><Link to="/history">View full history →</Link></div><div className="dashboard-inspection-list">{history.map((product, index) => { const inspection = product.inspections?.[0]; const status = product.complianceStatus || "NEEDS_REVIEW"; const source = String(product.sourceType || "OFFLINE").toUpperCase(); return <Link key={product.id} to={`/products/item/${product.id}`} className="dashboard-inspection-row"><div className="inspection-index">{String(index + 1).padStart(2, "0")}</div><div className="inspection-main"><strong>{product.productName}</strong><span>{product.brandName || "Company not recorded"} · {product.category?.name || "Uncategorised"}</span></div><div className="inspection-source"><span>{source === "ECOMMERCE" ? "E-COMMERCE" : "OFFLINE"}</span><small>{source === "ECOMMERCE" ? (product.sourceWebsiteName || "Website") : (inspection?.shop?.name || "Shop not recorded")}</small></div><span className={`dashboard-status ${status === "OKAY" ? "compliant" : status === "VIOLATION" ? "violation" : "review"}`}>{status.replaceAll("_", " ")}</span></Link>; })}{!history.length && <div className="dashboard-empty">No inspections have been registered yet.</div>}</div></section>
-
     <section className="dashboard-bottom-grid">
-      <div className="dashboard-module-card"><div className="module-heading"><div><p className="card-kicker">COMPLIANCE SIGNALS</p><h2>Frequent rule violations</h2></div><Link to="/reports">Reports</Link></div>{topRules.length ? <div className="dashboard-bars">{topRules.slice(0, 5).map((item) => { const max = Math.max(...topRules.map((x) => Number(x.count || 0)), 1); return <div className="dashboard-bar-row" key={item.rule}><div><span>{item.rule}</span><b>{item.count}</b></div><i><em style={{ width: `${Math.max(7, (Number(item.count || 0) / max) * 100)}%` }} /></i></div>; })}</div> : <p className="dashboard-muted">No violation pattern has emerged yet.</p>}</div>
-      <div className="dashboard-module-card"><div className="module-heading"><div><p className="card-kicker">CATEGORY DISTRIBUTION</p><h2>Most inspected categories</h2></div><Link to="/products">Browse</Link></div>{topCategories.length ? <div className="dashboard-category-list">{topCategories.slice(0, 6).map((item, index) => <Link key={item.categoryId || index} to={`/products/category/${item.categoryId}`} className="dashboard-category-row"><span className="category-rank">{index + 1}</span><span>{item.name}</span><b>{item.products}</b></Link>)}</div> : <p className="dashboard-muted">No category data yet.</p>}</div>
+      <div className="dashboard-module-card"><div className="module-heading"><div><p className="card-kicker">COMPLIANCE SIGNALS</p><h2>Frequent rule violations</h2></div><Link to="/reports">Reports</Link></div>{analytics ? (topRules.length ? <div className="dashboard-bars">{topRules.slice(0, 5).map((item) => { const max = Math.max(...topRules.map((x) => Number(x.count || 0)), 1); return <div className="dashboard-bar-row" key={item.rule}><div><span>{item.rule}</span><b>{item.count}</b></div><i><em style={{ width: `${Math.max(7, (Number(item.count || 0) / max) * 100)}%` }} /></i></div>; })}</div> : <p className="dashboard-muted">No violation pattern has emerged yet.</p>) : <p className="dashboard-muted">Loading compliance signals…</p>}</div>
+      <div className="dashboard-module-card"><div className="module-heading"><div><p className="card-kicker">CATEGORY DISTRIBUTION</p><h2>Most inspected categories</h2></div><Link to="/products">Browse</Link></div>{analytics ? (topCategories.length ? <div className="dashboard-category-list">{topCategories.slice(0, 6).map((item, index) => <Link key={item.categoryId || index} to={`/products/category/${item.categoryId}`} className="dashboard-category-row"><span className="category-rank">{index + 1}</span><span>{item.name}</span><b>{item.products}</b></Link>)}</div> : <p className="dashboard-muted">No category data yet.</p>) : <p className="dashboard-muted">Loading category data…</p>}</div>
     </section>
-
     <section className="dashboard-quick-links"><Link to="/products"><span>01</span><div><strong>Products & hierarchy</strong><small>Manage categories and registered records</small></div><b>→</b></Link><Link to="/shops"><span>02</span><div><strong>Inspection sources</strong><small>Browse registered shops and sources</small></div><b>→</b></Link><Link to="/reports"><span>03</span><div><strong>Compliance reports</strong><small>Generate evidence-backed reports</small></div><b>→</b></Link><Link to="/ecommerce-inspection"><span>04</span><div><strong>E-commerce inspection</strong><small>Inspect online product listings</small></div><b>→</b></Link></section>
   </main>;
 }
