@@ -8,7 +8,6 @@ import { authenticate } from "../middleware/auth.js";
 import { getOcrConfig } from "./config.js";
 import { interpretOcrFields } from "./ocrFieldInterpreter.js";
 import { interpretPackageWithGemini } from "./geminiPackageInterpreter.js";
-import { interpretPackageWithMistral } from "./mistralPackageInterpreter.js";
 import { interpretPackageWithCloudflare } from "./cloudflarePackageInterpreter.js";
 import { reconcileSemanticResults } from "./semanticConsensus.js";
 
@@ -243,13 +242,15 @@ async function readImages(files) {
 }
 
 async function runSemanticProviders({ images, rapid, categoryOptions }) {
+  const cloudflareLlama = "@cf/meta/llama-3.2-11b-vision-instruct";
+  const cloudflareGemma = "@cf/google/gemma-4-26b-a4b-it";
   const providers = [
-    { name: "gemini", fn: interpretPackageWithGemini },
-    { name: "mistral", fn: interpretPackageWithMistral },
-    { name: "cloudflare", fn: interpretPackageWithCloudflare },
+    { name: "gemini", fn: interpretPackageWithGemini, args: {} },
+    { name: "cloudflare-gemma", fn: interpretPackageWithCloudflare, args: { modelOverride: cloudflareGemma, providerName: "cloudflare-gemma" } },
+    { name: "cloudflare-llama", fn: interpretPackageWithCloudflare, args: { modelOverride: cloudflareLlama, providerName: "cloudflare-llama" } },
   ];
 
-  const settled = await Promise.all(providers.map(async ({ name, fn }) => {
+  const settled = await Promise.all(providers.map(async ({ name, fn, args }) => {
     const started = Date.now();
     try {
       const providerResult = await fn({
@@ -257,6 +258,7 @@ async function runSemanticProviders({ images, rapid, categoryOptions }) {
         detections: rapid.evidence,
         rawText: rapid.rawText,
         categoryOptions,
+        ...args,
       });
       return {
         ...providerResult,
@@ -267,7 +269,7 @@ async function runSemanticProviders({ images, rapid, categoryOptions }) {
       return {
         enabled: false,
         provider: name,
-        model: null,
+        model: args.modelOverride || null,
         reason: error?.message || `${name} semantic provider failed.`,
         timingMs: Date.now() - started,
       };
@@ -314,7 +316,8 @@ async function handleFastAnalyze(req, res, files) {
     console.log(
       `[ocr:fast] images=${files.length} evidence=${rapid.evidence.length} rapid=${rapidMs}ms `
       + `semantic=${semanticMs}ms gemini=${aiSemantic.timing?.gemini ?? 0}ms `
-      + `mistral=${aiSemantic.timing?.mistral ?? 0}ms cloudflare=${aiSemantic.timing?.cloudflare ?? 0}ms `
+      + `cloudflare-gemma=${aiSemantic.timing?.["cloudflare-gemma"] ?? 0}ms `
+      + `cloudflare-llama=${aiSemantic.timing?.["cloudflare-llama"] ?? 0}ms `
       + `providers=${aiSemantic.providerCount} total=${totalMs}ms`,
     );
 
@@ -339,8 +342,8 @@ async function handleFastAnalyze(req, res, files) {
         rapidMs,
         semanticMs,
         geminiMs: aiSemantic.timing?.gemini ?? 0,
-        mistralMs: aiSemantic.timing?.mistral ?? 0,
-        cloudflareMs: aiSemantic.timing?.cloudflare ?? 0,
+        cloudflareGemmaMs: aiSemantic.timing?.["cloudflare-gemma"] ?? 0,
+        cloudflareLlamaMs: aiSemantic.timing?.["cloudflare-llama"] ?? 0,
         totalMs,
         parallelMs,
       },
