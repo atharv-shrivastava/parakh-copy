@@ -68,7 +68,6 @@ async function analyzeWithPaddle(images) {
             : 0,
           text: normalizeText(item?.text),
           confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
-          boundingBox: item?.boundingBox || null,
         };
       })
       .filter((item) => item.text)
@@ -165,7 +164,7 @@ function buildStructuredResult(paddle, aiSemantic = null) {
       type: "OCR_TEXT",
       text: item.text,
       confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0.55)),
-      boundingBox: item.boundingBox || null,
+      source: "paddleocr",
     }));
 
   const warnings = [];
