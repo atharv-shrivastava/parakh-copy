@@ -25,8 +25,8 @@ function splitWhitespace(text) {
 
 export default function AutoTranslate() {
   const { language } = useLanguage();
-  const originals = useRef(new WeakMap());
   const cache = useRef(new Map());
+  const translatedByNode = useRef(new WeakMap());
   const busy = useRef(false);
   const observer = useRef(null);
   const timer = useRef(null);
@@ -40,6 +40,7 @@ export default function AutoTranslate() {
     } catch {
       cache.current = new Map();
     }
+    translatedByNode.current = new WeakMap();
 
     let cancelled = false;
 
@@ -52,24 +53,15 @@ export default function AutoTranslate() {
       let node;
       while ((node = walker.nextNode())) {
         if (shouldSkip(node)) continue;
-        if (!originals.current.has(node)) originals.current.set(node, node.nodeValue || "");
+        if (node.nodeValue === translatedByNode.current.get(node)) continue;
         nodes.push(node);
       }
-
-      if (language === "en") {
-        for (const item of nodes) {
-          const original = originals.current.get(item);
-          if (original != null && item.nodeValue !== original) item.nodeValue = original;
-        }
-        return;
-      }
+      if (!nodes.length) return;
 
       const missing = [];
       const missingSet = new Set();
       for (const item of nodes) {
-        const original = originals.current.get(item);
-        if (!original) continue;
-        const { core } = splitWhitespace(original);
+        const { core } = splitWhitespace(item.nodeValue || "");
         if (!core || cache.current.has(core)) continue;
         if (!missingSet.has(core)) { missingSet.add(core); missing.push(core); }
       }
@@ -87,18 +79,19 @@ export default function AutoTranslate() {
           for (const text of batch) cache.current.set(text, data?.translations?.[text] || text);
           if (cancelled) return;
         }
-        const compact = Object.fromEntries([...cache.current.entries()].slice(-700));
+        const compact = Object.fromEntries([...cache.current.entries()].slice(-1000));
         localStorage.setItem(cacheKey, JSON.stringify(compact));
 
         for (const item of nodes) {
-          const original = originals.current.get(item);
-          if (!original) continue;
-          const { leading, core, trailing } = splitWhitespace(original);
+          const { leading, core, trailing } = splitWhitespace(item.nodeValue || "");
           const translated = cache.current.get(core);
-          if (translated) item.nodeValue = `${leading}${translated}${trailing}`;
+          if (!translated) continue;
+          const next = `${leading}${translated}${trailing}`;
+          item.nodeValue = next;
+          translatedByNode.current.set(item, next);
         }
       } catch {
-        // Keep original text when the translation service is unavailable.
+        // Keep current text when the translation service is unavailable.
       } finally {
         busy.current = false;
       }
@@ -106,7 +99,7 @@ export default function AutoTranslate() {
 
     const schedule = () => {
       window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(process, 120);
+      timer.current = window.setTimeout(process, 180);
     };
     schedule();
     observer.current = new MutationObserver(schedule);
