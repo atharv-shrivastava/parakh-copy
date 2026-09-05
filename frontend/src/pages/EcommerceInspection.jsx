@@ -126,6 +126,7 @@ export default function EcommerceInspection() {
   const [selectedViolations, setSelectedViolations] = useState([]);
   const [manualViolations, setManualViolations] = useState([]);
   const [manualRuleCode, setManualRuleCode] = useState("");
+  const [manualRuleNumber, setManualRuleNumber] = useState("");
   const [manualViolationReason, setManualViolationReason] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -152,13 +153,14 @@ export default function EcommerceInspection() {
     const query = categoryFilter.trim().toLowerCase();
     return query ? finalCategories.filter((category) => category.path.some((node) => String(node.name || "").toLowerCase().includes(query))) : finalCategories;
   }, [categoryFilter, finalCategories]);
+  const selectedManualRule = useMemo(() => ENGINE_RULE_OPTIONS.find(([code]) => code === manualRuleCode) || null, [manualRuleCode]);
 
   function resetState({ clearUrl = true, text = "E-commerce analyzer reset." } = {}) {
     controllerRef.current?.abort();
     controllerRef.current = null;
     if (clearUrl) setUrl("");
     setListing(null); setOcr(null); setCompliance(null); setCategoryId(""); setCategoryFilter("");
-    setSelectedViolations([]); setManualViolations([]); setManualRuleCode(""); setManualViolationReason("");
+    setSelectedViolations([]); setManualViolations([]); setManualRuleCode(""); setManualRuleNumber(""); setManualViolationReason("");
     setError(""); setMessage(text); setBusy(false);
   }
 
@@ -175,7 +177,7 @@ export default function EcommerceInspection() {
     const controller = new AbortController();
     controllerRef.current?.abort(); controllerRef.current = controller;
     setBusy(true); setError(""); setMessage("Fetching listing data and product images...");
-    setListing(null); setOcr(null); setCompliance(null); setCategoryId(""); setCategoryFilter(""); setSelectedViolations([]); setManualViolations([]); setManualRuleCode(""); setManualViolationReason("");
+    setListing(null); setOcr(null); setCompliance(null); setCategoryId(""); setCategoryFilter(""); setSelectedViolations([]); setManualViolations([]); setManualRuleCode(""); setManualRuleNumber(""); setManualViolationReason("");
     try {
       const response = await apiFetch(`${API_URL}/products/ecommerce/analyze-url`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: value }), signal: controller.signal,
@@ -256,25 +258,20 @@ export default function EcommerceInspection() {
   }
 
   function addManualViolation() {
-    const selectedRule = ENGINE_RULE_OPTIONS.find(([code]) => code === manualRuleCode);
+    const isCustom = manualRuleCode === "CUSTOM";
+    const selectedRule = selectedManualRule;
+    const number = isCustom ? manualRuleNumber.trim() : selectedRule?.[1];
+    const title = isCustom ? "Custom / other Legal Metrology rule" : selectedRule?.[2];
+    const statement = isCustom ? "Rule statement supplied by the inspector for the selected custom rule number." : selectedRule?.[3];
+    const code = isCustom ? `CUSTOM-${number || "OTHER"}` : selectedRule?.[0];
     const reason = manualViolationReason.trim();
-    if (!selectedRule) return setError("Select a Rules Engine category before adding a violation.");
+    if (!number) return setError("Enter the custom rule number, such as 32.");
+    if (!selectedRule && !isCustom) return setError("Select a Rules Engine category before adding a violation.");
     if (!reason) return setError("Describe the observed violation before adding it.");
     const findingId = `MANUAL-${crypto.randomUUID()}`;
-    setManualViolations((current) => [...current, {
-      findingId,
-      ruleCode: selectedRule[0],
-      ruleNumber: selectedRule[1],
-      title: selectedRule[2],
-      ruleStatement: selectedRule[3],
-      status: "VIOLATION",
-      severity: "REVIEW",
-      message: reason,
-      violationReason: reason,
-    }]);
-    setManualRuleCode("");
-    setManualViolationReason("");
-    setMessage(`Manual violation added under Rule ${selectedRule[1]}.`);
+    setManualViolations((current) => [...current, { findingId, ruleCode: code, ruleNumber: number, title, ruleStatement: statement, status: "VIOLATION", severity: "REVIEW", message: reason, violationReason: reason }]);
+    setManualRuleCode(""); setManualRuleNumber(""); setManualViolationReason("");
+    setMessage(`Manual violation added under Rule ${number}.`);
   }
 
   function removeManualViolation(id) {
@@ -330,11 +327,7 @@ export default function EcommerceInspection() {
 
     <form className="ecommerce-panel ecommerce-url-form" onSubmit={inspectListing}>
       <label className="ecommerce-url-field"><span>Product listing URL</span><input className="ecommerce-url-input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/product/..." disabled={busy || saving} /></label>
-      <div className="ecommerce-edit-actions">
-        <button className="primary-button ecommerce-inspect-button" type="submit" disabled={busy || saving}>{busy ? "Inspecting listing..." : "Inspect Listing"}</button>
-        {busy && <button className="secondary-action" type="button" onClick={cancelInspection}>Cancel</button>}
-        <button className="secondary-action" type="button" onClick={() => resetState()} disabled={busy || saving}>Reset</button>
-      </div>
+      <div className="ecommerce-edit-actions"><button className="primary-button ecommerce-inspect-button" type="submit" disabled={busy || saving}>{busy ? "Inspecting listing..." : "Inspect Listing"}</button>{busy && <button className="secondary-action" type="button" onClick={cancelInspection}>Cancel</button>}<button className="secondary-action" type="button" onClick={() => resetState()} disabled={busy || saving}>Reset</button></div>
       <small>Use public pages and sources that permit automated retrieval. Protected pages, private URLs and login-only content are not accessed.</small>
     </form>
 
@@ -366,10 +359,11 @@ export default function EcommerceInspection() {
 
       <div className="ecommerce-manual-rule-panel">
         <h3>Add violation by Rules Engine category</h3>
-        <p>Select the rule number/category first, then describe what was observed. This creates an auditable manual finding instead of an unlabelled note.</p>
-        <label><span>Rules Engine category</span><select value={manualRuleCode} onChange={(event) => setManualRuleCode(event.target.value)}><option value="">Select a rule category</option>{ENGINE_RULE_OPTIONS.map(([code, number, title]) => <option key={code} value={code}>Rule {number} · {title} ({code})</option>)}<option value="CUSTOM">Custom / other rule</option></select></label>
-        {manualRuleCode && manualRuleCode !== "CUSTOM" && (() => { const meta = ENGINE_RULE_OPTIONS.find(([code]) => code === manualRuleCode); return meta ? <div className="ecommerce-rule-statement"><strong>Rule statement</strong><span>{meta[3]}</span></div> : null; })()}
-        {manualRuleCode === "CUSTOM" && <label><span>Custom rule number / category</span><input placeholder="Example: 32" onChange={(event) => setManualRuleCode(`CUSTOM:${event.target.value.trim() || "OTHER"}`)} /></label>}
+        <p>Select the rule number/category first, then describe what was observed. This creates an auditable finding with the rule reference instead of an unlabelled note.</p>
+        <label><span>Rules Engine category</span><select value={manualRuleCode} onChange={(event) => { setManualRuleCode(event.target.value); if (event.target.value !== "CUSTOM") setManualRuleNumber(""); }}><option value="">Select a rule category</option>{ENGINE_RULE_OPTIONS.map(([code, number, title]) => <option key={code} value={code}>Rule {number} · {title} ({code})</option>)}<option value="CUSTOM">Custom / other rule number</option></select></label>
+        {selectedManualRule && <div className="ecommerce-rule-statement"><strong>Rule {selectedManualRule[1]} statement</strong><span>{selectedManualRule[3]}</span></div>}
+        {manualRuleCode === "CUSTOM" && <label><span>Custom rule number / category</span><input value={manualRuleNumber} onChange={(event) => setManualRuleNumber(event.target.value)} placeholder="Example: 32" /></label>}
+        {manualRuleCode === "CUSTOM" && <div className="ecommerce-rule-statement"><strong>Custom rule statement</strong><span>Enter the exact applicable statement in the observation field below. PARAKH will not invent legal wording for a rule that is not in the configured engine.</span></div>}
         <label><span>Violation statement / observation</span><textarea value={manualViolationReason} onChange={(event) => setManualViolationReason(event.target.value)} placeholder="Example: Country of origin is not shown in the mandatory online product information." /></label>
         <button type="button" className="secondary-action" onClick={addManualViolation}>Add violation</button>
         {manualViolations.map((finding) => <details className="ecommerce-finding-row manual" key={finding.findingId}>
