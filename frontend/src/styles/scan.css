@@ -36,6 +36,22 @@
 .analysis-timer { display:inline-flex; align-items:center; gap:6px; padding:10px 12px; border:1px solid #dbeafe; border-radius:8px; background:#eff6ff; color:#1e3a8a; font-variant-numeric:tabular-nums; }
 .manual-violation-panel textarea { min-height:100px; margin-top:12px; }
 .rule-review-row.manual { grid-template-columns: 1fr auto; align-items:center; }
+.rule-review-dropdown { margin-top:10px; border:1px solid #e5e7eb; border-radius:10px; background:#fff; overflow:hidden; }
+.rule-review-dropdown summary { list-style:none; display:grid; grid-template-columns:auto 1fr; align-items:center; gap:10px; padding:13px; cursor:pointer; }
+.rule-review-dropdown summary::-webkit-details-marker { display:none; }
+.rule-review-dropdown summary::after { content:"▾"; justify-self:end; color:#6b7280; transition:transform .15s ease; }
+.rule-review-dropdown[open] summary::after { transform:rotate(180deg); }
+.rule-review-dropdown summary input { width:auto; margin:0; }
+.rule-review-dropdown summary span { display:grid; gap:3px; min-width:0; }
+.rule-review-dropdown summary strong { font-size:14px; color:#111827; }
+.rule-review-dropdown summary small { color:#6b7280; font-weight:500; line-height:1.35; }
+.rule-review-dropdown-body { padding:0 13px 13px 43px; border-top:1px solid #eef2f7; }
+.rule-review-dropdown-body p { margin:12px 0 0; color:#374151; line-height:1.5; }
+.rule-review-dropdown-body p strong { display:block; margin-bottom:3px; color:#111827; }
+.rule-reference-preview { margin-top:12px; padding:12px; border:1px solid #dbeafe; border-radius:9px; background:#f8fbff; }
+.rule-reference-preview strong,.rule-reference-preview span { display:block; }
+.rule-reference-preview strong { color:#1e3a8a; }
+.rule-reference-preview span { margin-top:4px; color:#374151; line-height:1.45; font-size:13px; }
 .camera-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, .75); box-sizing: border-box; }
 .camera-modal { width: min(900px, 100%); background: #fff; border-radius: 16px; padding: 18px; box-sizing: border-box; }
 .camera-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
@@ -58,4 +74,4 @@
 .registration-form .registration-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.registration-form .registration-grid label{margin-top:0}.registration-form .span-2{grid-column:1/-1}
 @media (max-width:800px) { .check-grid { grid-template-columns: repeat(2, 1fr); } .scan-image-grid { grid-template-columns: repeat(2, 1fr); } .ocr-fields-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:600px) { .check-grid, .ocr-status-grid, .registration-form .registration-grid, .image-editor-crop-controls { grid-template-columns: 1fr; } .scan-image-grid,.ocr-fields-grid { grid-template-columns: repeat(2, 1fr); } .scan-suggestion { flex-direction: column; align-items: stretch; } .camera-actions { flex-direction: column; } .registration-form .span-2 { grid-column:auto; } }
-@media (max-width:420px){.scan-image-grid,.ocr-fields-grid{grid-template-columns:1fr}.rule-review-row{grid-template-columns:auto 1fr}.rule-review-row.manual{grid-template-columns:1fr}}
+@media (max-width:420px){.scan-image-grid,.ocr-fields-grid{grid-template-columns:1fr}.rule-review-row{grid-template-columns:auto 1fr}.rule-review-row.manual{grid-template-columns:1fr}.rule-review-dropdown-body{padding-left:13px}}
