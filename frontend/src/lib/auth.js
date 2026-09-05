@@ -61,6 +61,10 @@ async function cacheResponse(url, response) {
   return response;
 }
 
+function isTransientPost(url) {
+  return /\/api\/(ocr\/|translate(?:\/|$)|products\/ecommerce\/(?:analyze-url|evaluate))/.test(url);
+}
+
 async function optimizeOcrBody(body) {
   if (!(body instanceof FormData)) return body;
   const entries = [...body.entries()];
@@ -101,7 +105,7 @@ export async function apiFetch(url, options = {}) {
   const body = resolvedUrl.includes("/api/ocr/analyze") ? await optimizeOcrBody(options.body) : options.body;
   const response = await fetch(resolvedUrl, { ...options, body, headers: { ...authHeaders(Boolean(body && typeof body === "string")), ...(options.headers || {}) } });
   if (response.status === 401) clearSession();
-  if (response.ok && !isRead) invalidateApiCache();
+  if (response.ok && !isRead && !isTransientPost(resolvedUrl)) invalidateApiCache();
   if (response.ok && isRead) await cacheResponse(resolvedUrl, response);
   return response;
 }
