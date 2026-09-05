@@ -1,19 +1,39 @@
-/* Rainbow theme: each major interface section gets its own accent family while sharing the same surfaces. */
+/* Rainbow + gradient themes: colorful backgrounds, section accents, and soft glass-like depth. */
 html[data-theme="rainbow"]{
   --theme-primary:#6366f1;
   --theme-primary-dark:#4f46e5;
   --theme-primary-light:#eef2ff;
-  --theme-background:#f8fafc;
-  --theme-surface:#ffffff;
+  --theme-background:#f7f8ff;
+  --theme-surface:rgba(255,255,255,.88);
   --theme-text:#111827;
   --theme-muted:#475569;
-  --theme-border:#dbe4ef;
+  --theme-border:rgba(148,163,184,.34);
   --theme-sidebar:#111827;
   --theme-sidebar-text:#f8fafc;
-  --theme-input:#ffffff;
+  --theme-input:rgba(255,255,255,.94);
   --theme-input-text:#111827;
-  --theme-soft:#f1f5f9;
-  --theme-shadow:0 10px 30px rgba(15,23,42,.07);
+  --theme-soft:rgba(255,255,255,.66);
+  --theme-shadow:0 14px 40px rgba(79,70,229,.10);
+  background:
+    radial-gradient(circle at 8% 8%, rgba(59,130,246,.18), transparent 24%),
+    radial-gradient(circle at 88% 12%, rgba(236,72,153,.16), transparent 24%),
+    radial-gradient(circle at 52% 92%, rgba(16,185,129,.14), transparent 28%),
+    linear-gradient(135deg,#f8fbff 0%,#f7f3ff 42%,#fff7fb 72%,#f2fffb 100%);
+  background-attachment:fixed;
+}
+
+html[data-theme="rainbow"] body{
+  background:
+    radial-gradient(circle at 4% 22%, rgba(59,130,246,.10), transparent 20%),
+    radial-gradient(circle at 96% 48%, rgba(245,158,11,.08), transparent 22%),
+    linear-gradient(135deg,#f9fbff 0%,#faf7ff 48%,#fff9fc 100%);
+}
+
+html[data-theme="rainbow"] .app,
+html[data-theme="rainbow"] main,
+html[data-theme="rainbow"] .page-shell,
+html[data-theme="rainbow"] .content-area{
+  background:transparent;
 }
 
 html[data-theme="rainbow"] .dashboard-stat-grid .user-stat-card:nth-child(1),
@@ -34,6 +54,9 @@ html[data-theme="rainbow"] .shop-summary>div,
 html[data-theme="rainbow"] .product-card,
 html[data-theme="rainbow"] .category-card{
   border-top:3px solid var(--section-accent,var(--theme-primary));
+  background:rgba(255,255,255,.86);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
 }
 
 html[data-theme="rainbow"] .user-stat-card strong,
@@ -45,7 +68,8 @@ html[data-theme="rainbow"] .card-kicker{
 }
 
 html[data-theme="rainbow"] .dashboard-feature-card.dashboard-inspection-card{
-  background:linear-gradient(135deg,#4f46e5,#7c3aed 52%,#ec4899);
+  background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 42%,#ec4899 74%,#f59e0b 100%);
+  box-shadow:0 22px 48px rgba(99,102,241,.24);
 }
 
 html[data-theme="rainbow"] .shop-card:nth-child(6n+1){--section-accent:#3b82f6}
@@ -60,7 +84,7 @@ html[data-theme="rainbow"] .shop-summary>div:nth-child(2){--section-accent:#10b9
 html[data-theme="rainbow"] .shop-summary>div:nth-child(3){--section-accent:#ef4444}
 html[data-theme="rainbow"] .shop-summary>div:nth-child(4){--section-accent:#f59e0b}
 html[data-theme="rainbow"] .shop-source-tabs button.active{background:linear-gradient(135deg,#4f46e5,#ec4899);color:#fff}
-html[data-theme="rainbow"] .shop-card:hover{border-color:var(--section-accent,var(--theme-primary));box-shadow:0 18px 38px color-mix(in srgb,var(--section-accent,var(--theme-primary)) 18%,transparent)}
+html[data-theme="rainbow"] .shop-card:hover{border-color:var(--section-accent,var(--theme-primary));box-shadow:0 18px 38px color-mix(in srgb,var(--section-accent,var(--theme-primary)) 18%,transparent);transform:translateY(-3px)}
 
 html[data-theme="rainbow"] .category-card:nth-child(5n+1){--section-accent:#3b82f6}
 html[data-theme="rainbow"] .category-card:nth-child(5n+2){--section-accent:#10b981}
@@ -75,4 +99,70 @@ html[data-theme="rainbow"] .product-card:nth-child(5n){--section-accent:#8b5cf6}
 
 html[data-theme="rainbow"] .category-card:hover,
 html[data-theme="rainbow"] .product-card:hover,
-html[data-theme="rainbow"] .dashboard-quick-links>a:hover{border-color:var(--section-accent,var(--theme-primary));box-shadow:0 16px 34px color-mix(in srgb,var(--section-accent,var(--theme-primary)) 15%,transparent)}
+html[data-theme="rainbow"] .dashboard-quick-links>a:hover{border-color:var(--section-accent,var(--theme-primary));box-shadow:0 16px 34px color-mix(in srgb,var(--section-accent,var(--theme-primary)) 15%,transparent);transform:translateY(-3px)}
+
+/* Selectable gradient palettes. Solid values in theme.js act as fallbacks for components that require color values. */
+html[data-theme="sunset-gradient"]{
+  background:linear-gradient(135deg,#fff7ed 0%,#ffe4e6 45%,#fce7f3 72%,#ffedd5 100%);
+  background-attachment:fixed;
+}
+html[data-theme="sunset-gradient"] body{background:linear-gradient(135deg,#fffaf5 0%,#fff1f2 50%,#fff7ed 100%);background-attachment:fixed}
+html[data-theme="sunset-gradient"] .app,
+html[data-theme="sunset-gradient"] main,
+html[data-theme="sunset-gradient"] .page-shell,
+html[data-theme="sunset-gradient"] .content-area{background:transparent}
+html[data-theme="sunset-gradient"] .user-stat-card,
+html[data-theme="sunset-gradient"] .dashboard-module-card,
+html[data-theme="sunset-gradient"] .shop-card,
+html[data-theme="sunset-gradient"] .product-card,
+html[data-theme="sunset-gradient"] .category-card{background:rgba(255,255,255,.84);backdrop-filter:blur(12px)}
+
+html[data-theme="ocean-gradient"]{
+  background:linear-gradient(135deg,#eff9ff 0%,#dbeafe 38%,#cffafe 66%,#ecfeff 100%);
+  background-attachment:fixed;
+}
+html[data-theme="ocean-gradient"] body{background:linear-gradient(135deg,#f8fcff 0%,#eaf6ff 48%,#ecfeff 100%);background-attachment:fixed}
+html[data-theme="ocean-gradient"] .app,
+html[data-theme="ocean-gradient"] main,
+html[data-theme="ocean-gradient"] .page-shell,
+html[data-theme="ocean-gradient"] .content-area{background:transparent}
+html[data-theme="ocean-gradient"] .user-stat-card,
+html[data-theme="ocean-gradient"] .dashboard-module-card,
+html[data-theme="ocean-gradient"] .shop-card,
+html[data-theme="ocean-gradient"] .product-card,
+html[data-theme="ocean-gradient"] .category-card{background:rgba(255,255,255,.84);backdrop-filter:blur(12px)}
+
+html[data-theme="aurora-gradient"]{
+  background:linear-gradient(135deg,#ecfdf5 0%,#dff7ef 34%,#e0e7ff 68%,#f0fdfa 100%);
+  background-attachment:fixed;
+}
+html[data-theme="aurora-gradient"] body{background:linear-gradient(135deg,#f5fffb 0%,#effcf8 45%,#f5f3ff 100%);background-attachment:fixed}
+html[data-theme="aurora-gradient"] .app,
+html[data-theme="aurora-gradient"] main,
+html[data-theme="aurora-gradient"] .page-shell,
+html[data-theme="aurora-gradient"] .content-area{background:transparent}
+html[data-theme="aurora-gradient"] .user-stat-card,
+html[data-theme="aurora-gradient"] .dashboard-module-card,
+html[data-theme="aurora-gradient"] .shop-card,
+html[data-theme="aurora-gradient"] .product-card,
+html[data-theme="aurora-gradient"] .category-card{background:rgba(255,255,255,.84);backdrop-filter:blur(12px)}
+
+html[data-theme="candy-gradient"]{
+  background:linear-gradient(135deg,#fff1f2 0%,#fce7f3 34%,#ede9fe 67%,#e0f2fe 100%);
+  background-attachment:fixed;
+}
+html[data-theme="candy-gradient"] body{background:linear-gradient(135deg,#fff8fb 0%,#fff4fa 46%,#f7f3ff 100%);background-attachment:fixed}
+html[data-theme="candy-gradient"] .app,
+html[data-theme="candy-gradient"] main,
+html[data-theme="candy-gradient"] .page-shell,
+html[data-theme="candy-gradient"] .content-area{background:transparent}
+html[data-theme="candy-gradient"] .user-stat-card,
+html[data-theme="candy-gradient"] .dashboard-module-card,
+html[data-theme="candy-gradient"] .shop-card,
+html[data-theme="candy-gradient"] .product-card,
+html[data-theme="candy-gradient"] .category-card{background:rgba(255,255,255,.84);backdrop-filter:blur(12px)}
+
+html[data-theme="sunset-gradient"] .dashboard-feature-card.dashboard-inspection-card{background:linear-gradient(135deg,#f97316,#ef4444,#ec4899)}
+html[data-theme="ocean-gradient"] .dashboard-feature-card.dashboard-inspection-card{background:linear-gradient(135deg,#0284c7,#06b6d4,#2563eb)}
+html[data-theme="aurora-gradient"] .dashboard-feature-card.dashboard-inspection-card{background:linear-gradient(135deg,#059669,#14b8a6,#6366f1)}
+html[data-theme="candy-gradient"] .dashboard-feature-card.dashboard-inspection-card{background:linear-gradient(135deg,#ec4899,#8b5cf6,#38bdf8)}
