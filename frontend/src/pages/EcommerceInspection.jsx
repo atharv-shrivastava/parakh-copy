@@ -16,6 +16,25 @@ const EDITABLE_FIELDS = [
   ["fssaiLicenseNumber", "FSSAI license"], ["description", "Description"],
 ];
 
+const ENGINE_RULE_OPTIONS = [
+  ["PCR-R4", "4", "Mandatory declarations on pre-packaged commodities", "Packages must carry the declarations required by the Rules before being pre-packed for sale, distribution or delivery, subject to the rule explanations."],
+  ["PCR-R6-1-A", "6(1)(a)", "Manufacturer, packer and importer declaration", "The package must declare the responsible manufacturer/packer identity and applicable importer information."],
+  ["PCR-R6-1-B", "6(1)(b)", "Common or generic name", "The package shall bear the common or generic name of the commodity."],
+  ["PCR-R6-1-C", "6(1)(c)", "Net quantity declaration", "The package shall declare net quantity in the prescribed standard unit or by number where appropriate."],
+  ["PCR-R6-1-D", "6(1)(d)", "Month and year declaration", "The package shall declare the month and year of manufacture, pre-packing or import, subject to commodity-specific exceptions."],
+  ["PCR-R6-1-E", "6(1)(e)", "Retail sale price", "The package shall bear the retail sale price in the manner required by the Rules."],
+  ["PCR-R6-1-F", "6(1)(f)", "Dimensions where relevant", "Where size is relevant, the prescribed dimensions shall be declared."],
+  ["PCR-R6-2", "6(2)", "Consumer complaint contact", "Consumer complaint contact details shall be declared as prescribed."],
+  ["PCR-R6-3", "6(3)", "Restrictions on separate stickers", "Required declarations shall not be made by prohibited separate stickers; permitted revised MRP stickers are subject to their own conditions."],
+  ["PCR-R7", "7", "Principal display panel and declaration dimensions", "Declarations on the principal display panel must meet the prescribed presentation and size requirements."],
+  ["PCR-R8", "8", "Declarations on principal display panel", "Required declarations shall appear on the principal display panel in the prescribed manner."],
+  ["PCR-R9", "9", "Legibility and language of declarations", "Declarations must be legible, prominent and presented in the permitted manner."],
+  ["PCR-R10", "10", "Manufacturer/packer/importer address presentation", "The responsible entity name and complete address shall be declared in the prescribed manner."],
+  ["PCR-R12-6", "12(6)", "Quantity expression must not be exaggerated or misleading", "Quantity expressions must not create an exaggerated, misleading or inadequate impression."],
+  ["PCR-R6-10A-2026", "6(10A)", "Country-of-origin filter for imported products on e-commerce", "The e-commerce country-of-origin filter requirement is governed by dated 2026 amendments."],
+  ["PCR-R26-A-PAN-MASALA", "26(a)", "Pan masala exception", "The specified Rule 26(a) clause does not apply to pan masala."],
+];
+
 function flatten(nodes, path = []) {
   return nodes.flatMap((node) => {
     const next = [...path, node];
@@ -24,6 +43,18 @@ function flatten(nodes, path = []) {
 }
 
 function displayFindingStatus(finding) { return String(finding?.status || "").toUpperCase(); }
+
+function ruleMeta(finding) {
+  const code = String(finding?.ruleCode || "");
+  const number = String(finding?.ruleNumber || "");
+  const known = ENGINE_RULE_OPTIONS.find(([knownCode, knownNumber]) => knownCode === code || knownNumber === number);
+  return {
+    code: known?.[0] || code || number || "RULE",
+    number: known?.[1] || number,
+    title: known?.[2] || finding?.title || "Legal Metrology requirement",
+    statement: known?.[3] || finding?.description || finding?.message || "Applicable legal requirement must be satisfied.",
+  };
+}
 
 function firstMatch(text, patterns) {
   for (const pattern of patterns) {
@@ -93,6 +124,9 @@ export default function EcommerceInspection() {
   const [categoryId, setCategoryId] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [selectedViolations, setSelectedViolations] = useState([]);
+  const [manualViolations, setManualViolations] = useState([]);
+  const [manualRuleCode, setManualRuleCode] = useState("");
+  const [manualViolationReason, setManualViolationReason] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -124,7 +158,8 @@ export default function EcommerceInspection() {
     controllerRef.current = null;
     if (clearUrl) setUrl("");
     setListing(null); setOcr(null); setCompliance(null); setCategoryId(""); setCategoryFilter("");
-    setSelectedViolations([]); setError(""); setMessage(text); setBusy(false);
+    setSelectedViolations([]); setManualViolations([]); setManualRuleCode(""); setManualViolationReason("");
+    setError(""); setMessage(text); setBusy(false);
   }
 
   function cancelInspection() { resetState({ clearUrl: false, text: "Inspection cancelled. The current draft was discarded." }); }
@@ -140,7 +175,7 @@ export default function EcommerceInspection() {
     const controller = new AbortController();
     controllerRef.current?.abort(); controllerRef.current = controller;
     setBusy(true); setError(""); setMessage("Fetching listing data and product images...");
-    setListing(null); setOcr(null); setCompliance(null); setCategoryId(""); setCategoryFilter(""); setSelectedViolations([]);
+    setListing(null); setOcr(null); setCompliance(null); setCategoryId(""); setCategoryFilter(""); setSelectedViolations([]); setManualViolations([]); setManualRuleCode(""); setManualViolationReason("");
     try {
       const response = await apiFetch(`${API_URL}/products/ecommerce/analyze-url`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: value }), signal: controller.signal,
@@ -157,7 +192,7 @@ export default function EcommerceInspection() {
 
       const sourceImages = Array.isArray(listingWithWritten.imageUrls) ? listingWithWritten.imageUrls.slice(0, MAX_IMAGES) : [];
       if (sourceImages.length) {
-        setMessage(`Running shared Fast OCR on ${sourceImages.length} product image${sourceImages.length === 1 ? "" : "s"}...`);
+        setMessage(`Running shared Fast OCR + AI semantic analysis on ${sourceImages.length} product image${sourceImages.length === 1 ? "" : "s"}...`);
         const ocrResponse = await apiFetch(`${API_URL}/products/ecommerce-ocr/images`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imageUrls: sourceImages }), signal: controller.signal,
         });
@@ -171,7 +206,7 @@ export default function EcommerceInspection() {
 
       const mergedListing = mergeListingWithOcr(listingWithWritten, extractedOcr);
       setOcr(extractedOcr); setListing(mergedListing);
-      setMessage("OCR extraction completed. Filling the combined product data and checking compliance...");
+      setMessage("OCR + AI semantic extraction completed. Checking the combined listing against the Rules Engine...");
 
       const overrides = Object.fromEntries(EDITABLE_FIELDS.map(([key]) => [key, mergedListing[key] ?? ""]));
       const check = await apiFetch(`${API_URL}/products/ecommerce/evaluate`, {
@@ -183,7 +218,7 @@ export default function EcommerceInspection() {
       setListing(checked.listing || mergedListing);
       setCompliance(checked.compliance || data.compliance || null);
       setSelectedDefaults(checked.compliance || data.compliance);
-      setMessage("E-commerce analysis complete. OCR-extracted fields have been populated and remain editable.");
+      setMessage("E-commerce analysis complete. Website data, OCR and AI semantic evidence are combined; review the rule findings before registration.");
     } catch (e) {
       if (e?.name === "AbortError") return;
       setError(e.message || "E-commerce inspection failed.");
@@ -220,6 +255,32 @@ export default function EcommerceInspection() {
     setSelectedViolations(allViolationsSelected ? [] : violationFindings.map((f) => String(f.findingId)));
   }
 
+  function addManualViolation() {
+    const selectedRule = ENGINE_RULE_OPTIONS.find(([code]) => code === manualRuleCode);
+    const reason = manualViolationReason.trim();
+    if (!selectedRule) return setError("Select a Rules Engine category before adding a violation.");
+    if (!reason) return setError("Describe the observed violation before adding it.");
+    const findingId = `MANUAL-${crypto.randomUUID()}`;
+    setManualViolations((current) => [...current, {
+      findingId,
+      ruleCode: selectedRule[0],
+      ruleNumber: selectedRule[1],
+      title: selectedRule[2],
+      ruleStatement: selectedRule[3],
+      status: "VIOLATION",
+      severity: "REVIEW",
+      message: reason,
+      violationReason: reason,
+    }]);
+    setManualRuleCode("");
+    setManualViolationReason("");
+    setMessage(`Manual violation added under Rule ${selectedRule[1]}.`);
+  }
+
+  function removeManualViolation(id) {
+    setManualViolations((current) => current.filter((finding) => finding.findingId !== id));
+  }
+
   async function saveProduct() {
     if (!listing?.url) return;
     const selected = finalCategories.find((c) => c.id === categoryId);
@@ -228,6 +289,7 @@ export default function EcommerceInspection() {
     setSaving(true); setError(""); setMessage("Registering the reviewed e-commerce product...");
     try {
       const website = listing.websiteName || new URL(listing.url).hostname.replace(/^www\./i, "");
+      const finalViolationIds = [...selectedViolations, ...manualViolations.map((finding) => finding.findingId)];
       const payload = {
         categoryId,
         brandName: listing.brand || ocrValue(ocr, "brandName") || "",
@@ -238,11 +300,16 @@ export default function EcommerceInspection() {
         mrp: listing.mrp || ocrValue(ocr, "mrp") || "",
         barcode: listing.gtin || ocrValue(ocr, "barcode") || "",
         imageUrls,
-        ocrData: { provider: "ecommerce_shared_fast_ocr", ocr, compliance, listing, writtenListingText: listing.listingText || listing.text || "", complianceReview: { selectedViolationIds: selectedViolations } },
-        acceptedFindingIds: selectedViolations,
+        ocrData: { provider: "ecommerce_shared_fast_ocr_ai", ocr, compliance, listing, writtenListingText: listing.listingText || listing.text || "", complianceReview: { selectedViolationIds: finalViolationIds, manualViolations } },
+        acceptedFindingIds: finalViolationIds,
         shopName: website, shopAddress: "", shopCity: "", shopState: "",
         notes: `E-commerce listing reviewed from ${listing.url}. Final category: ${selected.path?.map((x) => x.name).join(" → ") || selected.name}`,
         sourceType: "ECOMMERCE", sourceUrl: listing.url, sourceWebsiteName: website,
+        complianceStatus: finalViolationIds.length ? "VIOLATION" : "OKAY",
+        violationReason: [...findings.filter((f) => selectedViolations.includes(String(f.findingId))), ...manualViolations].map((finding) => {
+          const meta = ruleMeta(finding);
+          return `Rule ${meta.number || meta.code}: ${finding.message || finding.violationReason || meta.title}`;
+        }).join(" | "),
       };
       const response = await apiFetch(`${API_URL}/products`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await response.json().catch(() => ({}));
@@ -257,7 +324,7 @@ export default function EcommerceInspection() {
   return <div className="ecommerce-page">
     <div className="page-header">
       <p className="eyebrow">E-COMMERCE INSPECTION</p><h1>Inspect Product Listing</h1>
-      <p>Enter a public listing URL. PARAKH reads website data and runs the same Fast OCR engine used by package scanning on the listing images.</p>
+      <p>Enter a public listing URL. PARAKH combines website data with the same RapidOCR + AI semantic pipeline used for package scanning, then sends the evidence to the Rules Engine.</p>
       <p><Link to="/ecommerce-products">View saved e-commerce products →</Link></p>
     </div>
 
@@ -274,7 +341,7 @@ export default function EcommerceInspection() {
     {error && <div className="status-message error">{error}</div>}{message && !error && <div className="status-message">{message}</div>}
 
     {listing && <section className="ecommerce-panel">
-      <div className="section-heading"><div><h2>Combined Product Data</h2><p>Website-stated and OCR-extracted values are combined here. Every field remains editable before registration.</p></div></div>
+      <div className="section-heading"><div><h2>Combined Product Data</h2><p>Website-stated, OCR-extracted and AI-interpreted values are combined here. Every field remains editable before registration.</p></div></div>
       <div className="ecommerce-edit-grid">
         {EDITABLE_FIELDS.map(([key, label]) => <label key={key} className={key === "description" ? "full-width" : ""}><span>{label}</span>{key === "description" ? <textarea value={listing[key] || ""} onChange={(e) => updateListing(key, e.target.value)} /> : <input value={listing[key] || ""} onChange={(e) => updateListing(key, e.target.value)} />}</label>)}
         <label><span>Website</span><input value={listing.websiteName || ""} readOnly /></label>
@@ -285,10 +352,34 @@ export default function EcommerceInspection() {
       <div className="ecommerce-edit-actions"><button type="button" className="secondary-action" onClick={reevaluate} disabled={busy || saving}>Re-run Rules Engine</button><button type="button" className="primary-button" onClick={saveProduct} disabled={saving || busy}>{saving ? "Registering..." : "Register E-commerce Product"}</button></div>
     </section>}
 
-    {imageUrls.length > 0 && <section className="ecommerce-panel"><div className="section-heading"><div><h2>Listing Images</h2><p>These images are also sent through the shared Fast OCR engine.</p></div></div><div className="ecommerce-images">{imageUrls.map((imageUrl, index) => <div className="ecommerce-image" key={imageUrl}><img src={imageUrl} alt={`Listing product ${index + 1}`} /><span>Image {index + 1}</span></div>)}</div></section>}
+    {imageUrls.length > 0 && <section className="ecommerce-panel"><div className="section-heading"><div><h2>Listing Images</h2><p>These images are sent through the shared RapidOCR + AI semantic pipeline.</p></div></div><div className="ecommerce-images">{imageUrls.map((imageUrl, index) => <div className="ecommerce-image" key={imageUrl}><img src={imageUrl} alt={`Listing product ${index + 1}`} /><span>Image {index + 1}</span></div>)}</div></section>}
 
-    {ocr && <section className="ecommerce-panel"><div className="section-heading"><div><h2>Shared Fast OCR Extraction</h2><p>PaddleOCR detection plus PARAKH semantic and reconciliation processing.</p></div></div><div className="ecommerce-fields">{["productName", "brandName", "manufacturer", "manufacturerAddress", "countryOfOrigin", "mrp", "netQuantity", "unit", "batchNumber", "dateOfManufacture", "dateOfPacking", "bestBefore", "expiryDate", "barcode", "consumerCarePhone", "consumerCareEmail", "fssaiLicenseNumber"].map((key) => <div key={key}><strong>{key.replace(/([A-Z])/g, " $1")}</strong><span>{ocrValue(ocr, key) || "Not established"}</span></div>)}</div></section>}
+    {ocr && <section className="ecommerce-panel"><div className="section-heading"><div><h2>RapidOCR + AI Semantic Extraction</h2><p>Raw package text is combined with AI semantic interpretation so values can be inferred from context, not just exact adjacent labels.</p></div></div><div className="ecommerce-fields">{["productName", "brandName", "manufacturer", "manufacturerAddress", "countryOfOrigin", "mrp", "netQuantity", "unit", "batchNumber", "dateOfManufacture", "dateOfPacking", "bestBefore", "expiryDate", "barcode", "consumerCarePhone", "consumerCareEmail", "fssaiLicenseNumber"].map((key) => <div key={key}><strong>{key.replace(/([A-Z])/g, " $1")}</strong><span>{ocrValue(ocr, key) || "Not established"}</span></div>)}</div></section>}
 
-    {compliance && <section className="ecommerce-panel"><div className="section-heading"><div><h2>Rules Engine Result</h2><p>Findings use the combined website and OCR evidence and remain inspection support information.</p></div></div><div className="ecommerce-result-summary"><div><span>Status</span><strong>{compliance.overallStatus || "REVIEW"}</strong></div><div><span>Violations selected</span><strong>{selectedViolations.length}</strong></div><div><span>Unable to verify</span><strong>{compliance.summary?.unableToVerify ?? 0}</strong></div></div>{violationFindings.length > 0 && <div className="ecommerce-selection-bar"><button type="button" className="violation-select-button" onClick={toggleAllViolations}>{allViolationsSelected ? "Deselect all violations" : "Select all violations"}</button><span>{selectedViolations.length} of {violationFindings.length} violations selected</span></div>}<div className="ecommerce-findings">{findings.map((finding, index) => { const isViolation = displayFindingStatus(finding) === "VIOLATION"; const selectedFinding = selectedViolations.includes(String(finding.findingId)); return <article className={`${isViolation ? "ecommerce-finding-row violation" : "ecommerce-finding-row"} ${selectedFinding ? "selected" : ""}`} key={finding.findingId || index}>{isViolation && <button type="button" className={`violation-row-toggle ${selectedFinding ? "selected" : ""}`} onClick={() => toggleViolation(finding.findingId)} aria-pressed={selectedFinding}>{selectedFinding ? "Selected" : "Select"}</button>}<div><strong>{finding.ruleNumber || finding.ruleCode || "Rule"}</strong><span>{finding.message}</span>{finding.violationReason && <small>{finding.violationReason}</small>}</div></article>; })}</div></section>}
+    {compliance && <section className="ecommerce-panel">
+      <div className="section-heading"><div><h2>Rules Engine Result</h2><p>Detected violations use the actual Rules Engine category and rule number. Extracted MRP, quantity and other values are data; they are not violations by themselves.</p></div></div>
+      <div className="ecommerce-result-summary"><div><span>Status</span><strong>{(selectedViolations.length || manualViolations.length) ? "VIOLATION" : (compliance.overallStatus || "REVIEW")}</strong></div><div><span>Violations selected</span><strong>{selectedViolations.length + manualViolations.length}</strong></div><div><span>Unable to verify</span><strong>{compliance.summary?.unableToVerify ?? 0}</strong></div></div>
+
+      {violationFindings.length > 0 && <div className="ecommerce-selection-bar"><button type="button" className="violation-select-button" onClick={toggleAllViolations}>{allViolationsSelected ? "Deselect all violations" : "Select all violations"}</button><span>{selectedViolations.length} of {violationFindings.length} engine violations selected</span></div>}
+
+      {violationFindings.length > 0 && <div className="ecommerce-findings"><h3>Detected engine violations</h3>{violationFindings.map((finding, index) => { const meta = ruleMeta(finding); const selectedFinding = selectedViolations.includes(String(finding.findingId)); return <details className="ecommerce-finding-row violation" key={finding.findingId || index} open={selectedFinding}><summary><input type="checkbox" checked={selectedFinding} onChange={() => toggleViolation(finding.findingId)} onClick={(event) => event.stopPropagation()} /><span><strong>Rule {meta.number || meta.code}</strong><small>{meta.code} · {finding.severity || "REVIEW"}</small><em>{meta.title}</em></span></summary><div className="ecommerce-rule-detail"><strong>Rule statement</strong><p>{meta.statement}</p><strong>Detected issue</strong><p>{finding.message || finding.violationReason || "The Rules Engine detected a non-compliance condition."}</p></div></details>; })}</div>}
+
+      <div className="ecommerce-manual-rule-panel">
+        <h3>Add violation by Rules Engine category</h3>
+        <p>Select the rule number/category first, then describe what was observed. This creates an auditable manual finding instead of an unlabelled note.</p>
+        <label><span>Rules Engine category</span><select value={manualRuleCode} onChange={(event) => setManualRuleCode(event.target.value)}><option value="">Select a rule category</option>{ENGINE_RULE_OPTIONS.map(([code, number, title]) => <option key={code} value={code}>Rule {number} · {title} ({code})</option>)}<option value="CUSTOM">Custom / other rule</option></select></label>
+        {manualRuleCode && manualRuleCode !== "CUSTOM" && (() => { const meta = ENGINE_RULE_OPTIONS.find(([code]) => code === manualRuleCode); return meta ? <div className="ecommerce-rule-statement"><strong>Rule statement</strong><span>{meta[3]}</span></div> : null; })()}
+        {manualRuleCode === "CUSTOM" && <label><span>Custom rule number / category</span><input placeholder="Example: 32" onChange={(event) => setManualRuleCode(`CUSTOM:${event.target.value.trim() || "OTHER"}`)} /></label>}
+        <label><span>Violation statement / observation</span><textarea value={manualViolationReason} onChange={(event) => setManualViolationReason(event.target.value)} placeholder="Example: Country of origin is not shown in the mandatory online product information." /></label>
+        <button type="button" className="secondary-action" onClick={addManualViolation}>Add violation</button>
+        {manualViolations.map((finding) => <details className="ecommerce-finding-row manual" key={finding.findingId}>
+          <summary><span><strong>Rule {finding.ruleNumber}</strong><small>{finding.ruleCode} · Inspector/manual finding</small><em>{finding.title}</em></span></summary>
+          <div className="ecommerce-rule-detail"><strong>Rule statement</strong><p>{finding.ruleStatement}</p><strong>Observation</strong><p>{finding.message}</p><button type="button" className="secondary-action" onClick={() => removeManualViolation(finding.findingId)}>Remove</button></div>
+        </details>)}
+        <div className="ecommerce-selection-count">Manual violations: <strong>{manualViolations.length}</strong></div>
+      </div>
+
+      {findings.length === 0 && <div className="ecommerce-findings"><p>No Rules Engine findings were returned. This is not the same thing as proof of compliance.</p></div>}
+    </section>}
   </div>;
 }
