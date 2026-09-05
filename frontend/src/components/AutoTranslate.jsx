@@ -5,6 +5,7 @@ import { useLanguage } from "./LanguageProvider";
 const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT"]);
 const SKIP_SELECTOR = "[data-no-auto-translate=\"true\"], .language-picker";
 const TRANSLATABLE_ATTRIBUTES = ["placeholder", "aria-label", "title"];
+const CACHE_VERSION = "v2";
 
 function shouldSkip(node) {
   const parent = node.parentElement;
@@ -40,7 +41,7 @@ export default function AutoTranslate() {
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
-    const cacheKey = `parakh_translation_cache_${language}`;
+    const cacheKey = `parakh_translation_cache_${CACHE_VERSION}_${language}`;
     try {
       const stored = JSON.parse(localStorage.getItem(cacheKey) || "{}");
       cache.current = new Map(Object.entries(stored));
@@ -99,6 +100,22 @@ export default function AutoTranslate() {
       for (const item of nodes) addMissing(originals.current.get(item) || "");
       for (const item of elements) addMissing(item.original);
 
+      if (!missing.length) {
+        for (const item of nodes) {
+          const original = originals.current.get(item);
+          if (!original) continue;
+          const { leading, core, trailing } = splitWhitespace(original);
+          const translated = cache.current.get(core);
+          if (translated) item.nodeValue = `${leading}${translated}${trailing}`;
+        }
+        for (const item of elements) {
+          const { leading, core, trailing } = splitWhitespace(item.original);
+          const translated = cache.current.get(core);
+          if (translated) item.element.setAttribute(item.attribute, `${leading}${translated}${trailing}`);
+        }
+        return;
+      }
+
       busy.current = true;
       try {
         for (let offset = 0; offset < missing.length; offset += 50) {
@@ -108,8 +125,15 @@ export default function AutoTranslate() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ target: language, texts: batch }),
           });
+          if (!response.ok) throw new Error(`Translation request failed (${response.status}).`);
           const data = await response.json().catch(() => null);
-          for (const text of batch) cache.current.set(text, data?.translations?.[text] || text);
+          const failedTexts = new Set(Array.isArray(data?.failures) ? data.failures.map((item) => String(item?.text || "")) : []);
+          for (const text of batch) {
+            const translated = data?.translations?.[text];
+            if (!failedTexts.has(text) && typeof translated === "string" && translated.trim()) {
+              cache.current.set(text, translated);
+            }
+          }
           if (cancelled) return;
         }
 
