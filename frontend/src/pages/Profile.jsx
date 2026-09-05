@@ -6,6 +6,16 @@ import { LANGUAGES } from "../lib/language";
 import { useLanguage } from "../components/LanguageProvider";
 import "../styles/profile.css";
 
+const THEME_GROUPS = [
+  { id: "light", label: "Light", icon: "☀", ids: ["royal-blue", "emerald", "violet", "rose", "orange", "cyan", "indigo", "teal", "amber", "slate", "crimson", "plum"] },
+  { id: "dark", label: "Dark", icon: "◐", ids: ["dark", "dark-emerald", "dark-violet", "ruby-dark", "purple-dark", "obsidian", "graphite", "black-grey", "red-black"] },
+  { id: "gradient", label: "Gradient", icon: "✦", ids: ["rainbow", "sunset-gradient", "ocean-gradient", "aurora-gradient", "candy-gradient"] },
+];
+
+function ThemeIcon({ kind }) {
+  return <span className={`theme-group-icon ${kind}`} aria-hidden="true" />;
+}
+
 function Profile() {
   const navigate = useNavigate();
   const [user] = useState(getUser());
@@ -39,11 +49,25 @@ function Profile() {
         </select>
       </div>
       <div className="theme-settings">
-        <div><h2>{t("setTheme")}</h2><p>{t("themeHelp")}</p></div>
+        <div className="theme-settings-heading"><div><h2>{t("setTheme")}</h2><p>{t("themeHelp")}</p></div><span className="theme-current-badge">{THEMES.find((item) => item.id === theme)?.name || theme}</span></div>
         <select className="theme-select" value={theme} onChange={changeTheme} aria-label="Application theme">
           {THEMES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
-        <div className="theme-preview">{THEMES.map((item) => <button key={item.id} type="button" className={`theme-swatch ${theme === item.id ? "active" : ""}`} style={{ background: item.primary }} title={item.name} aria-label={`Use ${item.name} theme`} onClick={() => { setTheme(applyTheme(item.id)); }} />)}</div>
+        <div className="theme-groups">
+          {THEME_GROUPS.map((group) => {
+            const items = THEMES.filter((item) => group.ids.includes(item.id));
+            return <div className={`theme-group theme-group-${group.id}`} key={group.id}>
+              <div className="theme-group-heading"><ThemeIcon kind={group.id} /><div><strong>{group.label}</strong><span>{items.length} themes</span></div></div>
+              <div className="theme-grid">
+                {items.map((item) => <button key={item.id} type="button" className={`theme-tile ${theme === item.id ? "active" : ""} theme-tile-${item.id}`} style={{ "--theme-chip": item.primary }} title={item.name} aria-label={`Use ${item.name} theme`} onClick={() => { setTheme(applyTheme(item.id)); }}>
+                  <span className="theme-tile-preview" />
+                  <span className="theme-tile-name">{item.name}</span>
+                  {theme === item.id && <span className="theme-check" aria-hidden="true">✓</span>}
+                </button>)}
+              </div>
+            </div>;
+          })}
+        </div>
       </div>
       <button className="secondary-action" type="button" onClick={logout}>{t("signOut")}</button>
     </section>
