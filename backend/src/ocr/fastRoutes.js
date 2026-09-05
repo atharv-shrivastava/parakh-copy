@@ -8,6 +8,9 @@ import { authenticate } from "../middleware/auth.js";
 import { getOcrConfig } from "./config.js";
 import { interpretOcrFields } from "./ocrFieldInterpreter.js";
 import { interpretPackageWithGemini } from "./geminiPackageInterpreter.js";
+import { interpretPackageWithMistral } from "./mistralPackageInterpreter.js";
+import { interpretPackageWithCloudflare } from "./cloudflarePackageInterpreter.js";
+import { reconcileSemanticResults } from "./semanticConsensus.js";
 
 const router = express.Router();
 const config = getOcrConfig();
@@ -101,40 +104,40 @@ function normalizeField(field) {
     evidence: field.evidence ?? field.raw ?? null,
     status,
     ...(field.imageIndex != null ? { imageIndex: Number(field.imageIndex) } : {}),
+    ...(field.source ? { source: field.source } : {}),
+    ...(field.verification ? { verification: field.verification } : {}),
+    ...(field.votes ? { votes: field.votes } : {}),
   };
 }
 
-function aiFieldUsable(field) {
-  return field && typeof field === "object" && field.status === "found" && field.value != null && String(field.value).trim() !== "";
-}
+function mergeSemanticFields(deterministicFields, aiFields, aiEnabled) {
+  if (aiEnabled) {
+    return Object.fromEntries(Object.keys(aiFields || {}).map((key) => [key, normalizeField(aiFields[key])]));
+  }
 
-function mergeSemanticFields(deterministicFields, aiFields) {
   const merged = {};
   const keys = new Set([...Object.keys(deterministicFields || {}), ...Object.keys(aiFields || {})]);
   for (const key of keys) {
     const local = normalizeField(deterministicFields?.[key]);
     const ai = aiFields?.[key];
-    const aiConfidence = Number(ai?.confidence || 0);
-    const localConfidence = Number(local?.confidence || 0);
-    if (aiFieldUsable(ai) && (
-      local.status === "absent" ||
-      local.status === "unreadable" ||
-      local.status === "ambiguous" ||
-      localConfidence < 0.65 && aiConfidence >= localConfidence + 0.12
-    )) {
-      merged[key] = {
-        value: ai.value,
-        raw: ai.raw || ai.value,
-        confidence: aiConfidence,
-        evidence: ai.evidence || ai.raw || ai.value,
-        status: ai.status,
-        ...(Number.isInteger(ai.imageIndex) ? { imageIndex: ai.imageIndex } : {}),
-        source: "GEMINI_SEMANTIC_ASSIST",
-        deterministicFallback: local.value ?? null,
-      };
-    } else {
-      merged[key] = local;
+    if (ai && ai.status === "found" && ai.value != null) {
+      const aiConfidence = Number(ai.confidence || 0);
+      const localConfidence = Number(local.confidence || 0);
+      if (local.status === "absent" || local.status === "unreadable" || local.status === "ambiguous" || (localConfidence < 0.65 && aiConfidence >= localConfidence + 0.12)) {
+        merged[key] = {
+          value: ai.value,
+          raw: ai.raw || ai.value,
+          confidence: aiConfidence,
+          evidence: ai.evidence || ai.raw || ai.value,
+          status: ai.status,
+          ...(Number.isInteger(ai.imageIndex) ? { imageIndex: ai.imageIndex } : {}),
+          source: "SEMANTIC_FIELD_MAPPING",
+          deterministicFallback: local.value ?? null,
+        };
+        continue;
+      }
     }
+    merged[key] = local;
   }
   return merged;
 }
@@ -154,7 +157,8 @@ function buildSemanticDeclarationEvidence(fields) {
         value,
         confidence: normalized.confidence,
         status: normalized.status,
-        source: field?.source || "SEMANTIC_FIELD_MAPPING",
+        source: field?.source || "SEMANTIC_CONSENSUS",
+        ...(field?.verification ? { verification: field.verification } : {}),
       };
     })
     .filter(Boolean);
@@ -166,7 +170,11 @@ function buildStructuredResult(rapid, aiSemantic = null) {
     rawText: rapid.rawText,
   });
 
-  const fields = mergeSemanticFields(reconciliation?.fields || {}, aiSemantic?.fields || {});
+  const fields = mergeSemanticFields(
+    reconciliation?.fields || {},
+    aiSemantic?.fields || {},
+    Boolean(aiSemantic?.enabled),
+  );
   const result = {};
   for (const key of [
     "productName", "brandName", "manufacturer", "manufacturerAddress", "packer", "packerAddress",
@@ -194,7 +202,10 @@ function buildStructuredResult(rapid, aiSemantic = null) {
     warnings.push("Package text refers to an individual/inner pack for additional batch, date, price, or related details.");
   }
   if (!aiSemantic?.enabled) {
-    warnings.push("AI semantic assist unavailable; using local deterministic field mapping only.");
+    warnings.push("All remote AI semantic providers unavailable; using local deterministic field mapping only.");
+  }
+  if (aiSemantic?.enabled && aiSemantic.providerCount < 3) {
+    warnings.push(`Semantic verification used ${aiSemantic.providerCount} available AI provider(s); unavailable providers did not block the scan.`);
   }
 
   const needsReview = Object.values(result).some((field) =>
@@ -211,11 +222,15 @@ function buildStructuredResult(rapid, aiSemantic = null) {
     warnings,
     unreadableFields: Object.entries(result).filter(([, field]) => field?.status === "unreadable").map(([key]) => key),
     needsReview,
-    semanticReconciliation: reconciliation?.metadata || null,
+    semanticReconciliation: aiSemantic?.enabled ? {
+      providerCount: aiSemantic.providerCount,
+      providers: aiSemantic.providers,
+    } : reconciliation?.metadata || null,
     candidateEvidence: reconciliation?.candidateEvidence || {},
     aiSemantic: aiSemantic?.enabled ? {
-      provider: aiSemantic.provider,
-      model: aiSemantic.model,
+      providerCount: aiSemantic.providerCount,
+      providers: aiSemantic.providers,
+      suggestedCategory: aiSemantic.suggestedCategory,
     } : null,
   };
 }
@@ -225,6 +240,45 @@ async function readImages(files) {
     base64: (await fs.readFile(file.path)).toString("base64"),
     mediaType: file.mimetype,
   })));
+}
+
+async function runSemanticProviders({ images, rapid, categoryOptions }) {
+  const providers = [
+    { name: "gemini", fn: interpretPackageWithGemini },
+    { name: "mistral", fn: interpretPackageWithMistral },
+    { name: "cloudflare", fn: interpretPackageWithCloudflare },
+  ];
+
+  const settled = await Promise.all(providers.map(async ({ name, fn }) => {
+    const started = Date.now();
+    try {
+      const providerResult = await fn({
+        images,
+        detections: rapid.evidence,
+        rawText: rapid.rawText,
+        categoryOptions,
+      });
+      return {
+        ...providerResult,
+        provider: providerResult?.provider || name,
+        timingMs: Date.now() - started,
+      };
+    } catch (error) {
+      return {
+        enabled: false,
+        provider: name,
+        model: null,
+        reason: error?.message || `${name} semantic provider failed.`,
+        timingMs: Date.now() - started,
+      };
+    }
+  }));
+
+  const consensus = reconcileSemanticResults(settled, categoryOptions);
+  return {
+    ...consensus,
+    timing: Object.fromEntries(settled.map((provider) => [provider.provider, provider.timingMs])),
+  };
 }
 
 async function handleFastAnalyze(req, res, files) {
@@ -249,20 +303,20 @@ async function handleFastAnalyze(req, res, files) {
     const rapid = await analyzeWithRapid(images);
     const rapidMs = Date.now() - rapidStart;
 
-    const geminiStart = Date.now();
-    const aiSemantic = await interpretPackageWithGemini({
-      images,
-      detections: rapid.evidence,
-      rawText: rapid.rawText,
-      categoryOptions,
-    });
-    const geminiMs = Date.now() - geminiStart;
+    const semanticStart = Date.now();
+    const aiSemantic = await runSemanticProviders({ images, rapid, categoryOptions });
+    const semanticMs = Date.now() - semanticStart;
 
     const result = buildStructuredResult(rapid, aiSemantic);
     const totalMs = Date.now() - startedAt;
     const parallelMs = totalMs - uploadMs;
 
-    console.log(`[ocr:fast] images=${files.length} evidence=${rapid.evidence.length} rapid=${rapidMs}ms gemini=${geminiMs}ms total=${totalMs}ms aiEnabled=${Boolean(aiSemantic.enabled)}`);
+    console.log(
+      `[ocr:fast] images=${files.length} evidence=${rapid.evidence.length} rapid=${rapidMs}ms `
+      + `semantic=${semanticMs}ms gemini=${aiSemantic.timing?.gemini ?? 0}ms `
+      + `mistral=${aiSemantic.timing?.mistral ?? 0}ms cloudflare=${aiSemantic.timing?.cloudflare ?? 0}ms `
+      + `providers=${aiSemantic.providerCount} total=${totalMs}ms`,
+    );
 
     res.json({
       result,
@@ -271,16 +325,26 @@ async function handleFastAnalyze(req, res, files) {
       detectionProvider: "rapidocr",
       detectionProviders: ["rapidocr"],
       rawText: rapid.rawText,
-      semantic: aiSemantic?.enabled ? {
-        provider: aiSemantic.provider,
-        model: aiSemantic.model,
+      semantic: aiSemantic.enabled ? {
+        provider: "consensus",
+        providers: aiSemantic.providers,
+        providerCount: aiSemantic.providerCount,
         enabled: true,
       } : null,
-      aiSuggestedCategory: aiSemantic?.suggestedCategory || null,
-      aiSemanticEnabled: Boolean(aiSemantic?.enabled),
-      aiSemanticError: aiSemantic?.enabled ? null : aiSemantic?.reason || null,
-      timing: { uploadMs, rapidMs, geminiMs, totalMs, parallelMs },
-      fallbackReason: result.warnings?.find((item) => item.includes("AI semantic assist unavailable")) || null,
+      aiSuggestedCategory: aiSemantic.suggestedCategory || null,
+      aiSemanticEnabled: Boolean(aiSemantic.enabled),
+      aiSemanticError: aiSemantic.enabled ? null : "No semantic AI provider was available.",
+      timing: {
+        uploadMs,
+        rapidMs,
+        semanticMs,
+        geminiMs: aiSemantic.timing?.gemini ?? 0,
+        mistralMs: aiSemantic.timing?.mistral ?? 0,
+        cloudflareMs: aiSemantic.timing?.cloudflare ?? 0,
+        totalMs,
+        parallelMs,
+      },
+      fallbackReason: result.warnings?.find((item) => item.includes("remote AI semantic providers unavailable")) || null,
     });
   } catch (error) {
     console.error("[ocr:fast]", error);
