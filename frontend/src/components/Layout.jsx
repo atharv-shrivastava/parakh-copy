@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { clearSession, getUser } from "../lib/auth";
 import { useLanguage } from "./LanguageProvider";
 import ScanVisualCheck from "./ScanVisualCheck";
+import DashboardInsights from "./DashboardInsights";
 
 const NAV_ITEMS = [
   ["/", "dashboard", "⌂"],
@@ -25,6 +26,7 @@ function Layout() {
   const navigate = useNavigate();
   const { t } = useLanguage();
   function logout() { clearSession(); navigate("/login", { replace: true }); }
+  const showDashboardInsights = location.pathname === "/" || location.pathname === "/admin";
 
   return <div className="app-layout">
     <aside className="sidebar">
@@ -48,7 +50,7 @@ function Layout() {
       </nav>
       <div className="sidebar-user"><strong>{user?.name || "User"}</strong><span>{user?.role || "USER"}</span><button type="button" onClick={logout}><span className="nav-icon" aria-hidden="true">↪</span>{t("signOut")}</button></div>
     </aside>
-    <main className="main-content"><Outlet />{location.pathname === "/scan" && <ScanVisualCheck />}</main>
+    <main className="main-content">{showDashboardInsights && <DashboardInsights />}<Outlet />{location.pathname === "/scan" && <ScanVisualCheck />}</main>
   </div>;
 }
 export default Layout;
