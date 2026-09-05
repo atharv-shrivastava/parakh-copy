@@ -11,6 +11,25 @@ const MAX_IMAGES = 4;
 const OCR_FIELDS = ["productName", "brandName", "manufacturer", "manufacturerAddress", "marketer", "packer", "packerAddress", "importer", "importerAddress", "netQuantity", "unit", "mrp", "currency", "dateOfManufacture", "dateOfPacking", "bestBefore", "expiryDate", "batchNumber", "consumerCarePhone", "consumerCareEmail", "countryOfOrigin", "fssaiLicenseNumber", "barcode"];
 const EMPTY_FORM = { brandName: "", productName: "", description: "", netQuantity: "", unit: "", mrp: "", barcode: "", shopName: "", shopAddress: "", shopCity: "", shopState: "", notes: "" };
 
+const RULE_OPTIONS = [
+  { ruleNumber: "3", title: "Applicability and exclusions", statement: "Chapter II applicability depends on package and consumer categories specified by Rule 3." },
+  { ruleNumber: "4", title: "Mandatory declarations", statement: "Packages must carry the declarations required by the Rules before being pre-packed for sale, distribution or delivery, subject to applicable exceptions." },
+  { ruleNumber: "6(1)(a)", title: "Manufacturer, packer and importer declaration", statement: "The package must declare the responsible manufacturer/packer identity and applicable importer information." },
+  { ruleNumber: "6(1)(b)", title: "Common or generic name", statement: "The package shall bear the common or generic name of the commodity." },
+  { ruleNumber: "6(1)(c)", title: "Net quantity declaration", statement: "The package shall declare net quantity in the prescribed standard unit or by number where appropriate." },
+  { ruleNumber: "6(1)(d)", title: "Month and year declaration", statement: "The package shall declare the month and year of manufacture, pre-packing or import, subject to commodity-specific exceptions." },
+  { ruleNumber: "6(1)(e)", title: "Retail sale price", statement: "The package shall bear the retail sale price in the manner required by the Rules." },
+  { ruleNumber: "6(1)(f)", title: "Dimensions where relevant", statement: "Where size is relevant, the prescribed dimensions shall be declared." },
+  { ruleNumber: "6(2)", title: "Consumer complaint contact", statement: "Consumer complaint contact details shall be declared as prescribed." },
+  { ruleNumber: "6(3)", title: "Restrictions on separate stickers", statement: "Required declarations shall not be made by prohibited separate stickers; the permitted revised MRP sticker is subject to its own conditions." },
+  { ruleNumber: "7", title: "Principal display panel and declaration dimensions", statement: "Declarations on the principal display panel must meet the prescribed presentation and size requirements." },
+  { ruleNumber: "8", title: "Declarations on principal display panel", statement: "Required declarations shall appear on the principal display panel in the prescribed manner." },
+  { ruleNumber: "9", title: "Legibility and language of declarations", statement: "Declarations must be legible, prominent and presented in the permitted manner." },
+  { ruleNumber: "10", title: "Manufacturer/packer/importer address presentation", statement: "The responsible entity name and complete address shall be declared in the prescribed manner." },
+  { ruleNumber: "12(6)", title: "Non-misleading quantity expression", statement: "Quantity expressions must not create an exaggerated, misleading or inadequate impression." },
+  { ruleNumber: "26(a)", title: "Pan masala exception", statement: "The specified Rule 26(a) clause does not apply to pan masala from 1 February 2026." },
+];
+
 function flattenCategories(nodes, path = []) {
   return nodes.flatMap((node) => {
     const next = [...path, node];
@@ -129,6 +148,7 @@ export default function ScanV2() {
   const [acceptedFindingIds, setAcceptedFindingIds] = useState([]);
   const [manualViolations, setManualViolations] = useState([]);
   const [manualViolationReason, setManualViolationReason] = useState("");
+  const [manualRuleNumber, setManualRuleNumber] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
   const [providerInfo, setProviderInfo] = useState(null);
@@ -168,7 +188,6 @@ export default function ScanV2() {
 
   const flat = flattenCategories(categories);
   const finalCategories = flat.filter((category) => category.isFinalProductType);
-  const selected = flat.find((category) => category.id === selectedCategoryId);
   const violations = compliance?.findings?.filter((finding) => finding.status === "VIOLATION") || [];
   const accepted = compliance?.findings?.filter((finding) => acceptedFindingIds.includes(finding.findingId)) || [];
   const selectedViolations = [...accepted, ...manualViolations];
@@ -204,6 +223,7 @@ export default function ScanV2() {
     setAcceptedFindingIds([]);
     setManualViolations([]);
     setManualViolationReason("");
+    setManualRuleNumber("");
     setProviderInfo(null);
     setAiSuggestedCategory(null);
     setSelectedCategoryId("");
@@ -336,6 +356,7 @@ export default function ScanV2() {
       setAcceptedFindingIds((data.compliance?.findings || []).filter((finding) => finding.status === "VIOLATION").map((finding) => finding.findingId));
       setManualViolations([]);
       setManualViolationReason("");
+      setManualRuleNumber("");
       setForm(EMPTY_FORM);
       setSelectedCategoryId("");
       setShowRegistration(false);
@@ -392,22 +413,38 @@ export default function ScanV2() {
 
   function addManualViolation() {
     const reason = manualViolationReason.trim();
+    const rule = RULE_OPTIONS.find((item) => item.ruleNumber === manualRuleNumber);
+    if (!rule) return setMessage("Select the applicable Rules Engine category before adding a manual violation.");
     if (!reason) return setMessage("Enter a reason before adding a manual violation.");
     setManualViolations((current) => [...current, {
       findingId: `MANUAL-${crypto.randomUUID()}`,
-      ruleCode: "MANUAL",
-      ruleNumber: "Inspector override",
+      ruleCode: `MANUAL-R${rule.ruleNumber}`,
+      ruleNumber: rule.ruleNumber,
+      ruleTitle: rule.title,
+      ruleStatement: rule.statement,
       status: "VIOLATION",
       severity: "REVIEW",
       message: reason,
       violationReason: reason,
     }]);
     setManualViolationReason("");
+    setManualRuleNumber("");
     setMessage("Manual violation added. It will be included in the registration audit record.");
   }
 
   function removeManualViolation(id) {
     setManualViolations((current) => current.filter((finding) => finding.findingId !== id));
+  }
+
+  function ruleDetails(finding) {
+    const match = RULE_OPTIONS.find((item) => item.ruleNumber === String(finding.ruleNumber));
+    return {
+      code: finding.ruleCode || `R${finding.ruleNumber || "-"}`,
+      number: finding.ruleNumber || "Unspecified",
+      title: finding.ruleTitle || match?.title || "Rules Engine finding",
+      statement: finding.ruleStatement || match?.statement || "The Rules Engine reported a legal compliance issue for this rule.",
+      issue: finding.violationReason || finding.message || "Violation detected.",
+    };
   }
 
   async function save(event) {
@@ -488,8 +525,8 @@ export default function ScanV2() {
       <div className="ocr-fields-grid">{Object.entries(ocr).filter(([key, value]) => key !== "rawText" && key !== "semantic" && key !== "aiSemantic" && key !== "aiSuggestedCategory" && value && typeof value === "object" && ["found", "absent", "unreadable", "ambiguous"].includes(value.status)).map(([key, value]) => <label key={key} className="ocr-edit-field"><strong>{key.replace(/([A-Z])/g, " $1")}</strong><input value={value.value ?? ""} placeholder={value.status === "found" ? "Review value" : value.status} onChange={(event) => updateOcrField(key, event.target.value)} /><small>{value.status === "found" ? `${Math.round(Number(value.confidence || 0) * 100)}% confidence` : value.status}</small></label>)}</div>
       {complianceError && <div className="status-message">Rules Engine: {complianceError.message || complianceError}</div>}
       {compliance?.summary && <div className="ocr-summary">Rules: {compliance.summary.totalRulesEvaluated} · Passed: {compliance.summary.passed} · Violations: {compliance.summary.violations} · Unable to verify: {compliance.summary.unableToVerify}</div>}
-      {violations.length > 0 && <div className="rule-review-panel"><div className="section-heading"><div><h3>Engine violations</h3><p>These are the violations the Rules Engine actually produced. Uncheck any false positive before registration.</p></div></div>{violations.map((finding) => <label className="rule-review-row" key={finding.findingId}><input type="checkbox" checked={acceptedFindingIds.includes(finding.findingId)} onChange={() => toggle(finding.findingId)} /><span><strong>{finding.ruleCode || finding.ruleNumber}</strong><small>{finding.ruleNumber ? `Rule ${finding.ruleNumber} · ` : ""}{finding.severity || "REVIEW"}</small><em>{finding.message || finding.violationReason || "Violation detected"}</em></span></label>)}<div className="ocr-summary">Selected engine violations: <strong>{accepted.length}</strong> of {violations.length}</div></div>}
-      <div className="rule-review-panel manual-violation-panel"><div className="section-heading"><div><h3>Add a manual violation</h3><p>Use this only when the inspector identifies a violation that the automated rules did not capture.</p></div></div><textarea value={manualViolationReason} onChange={(event) => setManualViolationReason(event.target.value)} placeholder="Describe the observed violation and, where applicable, the relevant declaration/rule." /><button type="button" className="secondary-button" onClick={addManualViolation}>Add violation</button>{manualViolations.map((finding) => <div className="rule-review-row manual" key={finding.findingId}><span><strong>MANUAL</strong><small>Inspector override</small><em>{finding.message}</em></span><button type="button" className="secondary-button" onClick={() => removeManualViolation(finding.findingId)}>Remove</button></div>)}<div className="ocr-summary">Manual violations: <strong>{manualViolations.length}</strong></div></div>
+      {violations.length > 0 && <div className="rule-review-panel"><div className="section-heading"><div><h3>Engine violations</h3><p>Every detected violation is shown as a dropdown. The header gives the engine code/category; open it to see the rule statement and exactly what failed.</p></div></div>{violations.map((finding) => { const details = ruleDetails(finding); return <details className="rule-review-dropdown" key={finding.findingId}><summary><input type="checkbox" checked={acceptedFindingIds.includes(finding.findingId)} onChange={(event) => { event.preventDefault(); toggle(finding.findingId); }} onClick={(event) => event.stopPropagation()} /><span><strong>{details.code}</strong><small>Rule {details.number} · {details.title} · {finding.severity || "REVIEW"}</small></span></summary><div className="rule-review-dropdown-body"><p><strong>Rule statement</strong>{details.statement}</p><p><strong>Detected issue</strong>{details.issue}</p><p><strong>Engine category</strong>{details.code} · {details.number}</p></div></details>; })}<div className="ocr-summary">Selected engine violations: <strong>{accepted.length}</strong> of {violations.length}</div></div>}
+      <div className="rule-review-panel manual-violation-panel"><div className="section-heading"><div><h3>Add a violation</h3><p>Select the Rules Engine category, then describe the observed issue. The selected rule number, statement and your reason are stored together.</p></div></div><label><strong>Rules Engine category</strong><select value={manualRuleNumber} onChange={(event) => setManualRuleNumber(event.target.value)}><option value="">Select rule / category</option>{RULE_OPTIONS.map((rule) => <option value={rule.ruleNumber} key={rule.ruleNumber}>Rule {rule.ruleNumber} · {rule.title}</option>)}</select></label>{manualRuleNumber && <div className="rule-reference-preview"><strong>Rule {manualRuleNumber} statement</strong><span>{RULE_OPTIONS.find((rule) => rule.ruleNumber === manualRuleNumber)?.statement}</span></div>}<textarea value={manualViolationReason} onChange={(event) => setManualViolationReason(event.target.value)} placeholder="Describe the observed violation, what was missing/incorrect, and any relevant evidence." /><button type="button" className="secondary-button" onClick={addManualViolation}>Add violation</button>{manualViolations.map((finding) => <details className="rule-review-dropdown" key={finding.findingId}><summary><span><strong>{finding.ruleCode}</strong><small>Rule {finding.ruleNumber} · {finding.ruleTitle} · Inspector override</small></span></summary><div className="rule-review-dropdown-body"><p><strong>Rule statement</strong>{finding.ruleStatement}</p><p><strong>Inspector finding</strong>{finding.message}</p><button type="button" className="secondary-button" onClick={() => removeManualViolation(finding.findingId)}>Remove</button></div></details>)}<div className="ocr-summary">Manual violations: <strong>{manualViolations.length}</strong></div></div>
       <label>Raw OCR<textarea value={ocr.rawText || ""} onChange={(event) => setOcr((current) => ({ ...current, rawText: event.target.value }))} /></label>
       <div className="extracted-action-panel"><div><strong>Registration actions</strong><span>Use the reviewed OCR details to prefill the final editable registration form, or register manually.</span></div><div className="scan-upload-actions"><button type="button" className="primary-button" onClick={applyExtractedData}>Use extracted details</button><button type="button" className="secondary-button" onClick={openManualRegistration}>Register manually</button></div></div>
     </section>}
