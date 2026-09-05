@@ -74,7 +74,7 @@ export async function interpretPackageWithGemini({ images = [], detections = [],
     return { enabled: false, reason: "GEMINI_API_KEY is not configured." };
   }
 
-  const model = process.env.GEMINI_SEMANTIC_MODEL || "gemini-2.5-flash-lite";
+  const model = process.env.GEMINI_SEMANTIC_MODEL || "gemini-3.5-flash-lite";
   const ai = new GoogleGenAI({ apiKey });
   const prompt = buildPrompt({ detections, rawText, categoryOptions });
 
