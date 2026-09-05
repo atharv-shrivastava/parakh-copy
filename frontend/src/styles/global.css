@@ -571,6 +571,27 @@ img {
   animation: parakhPulse 1.5s cubic-bezier(.4,0,.6,1) infinite;
 }
 
+/* Navigation, page and control motion */
+.app-layout { animation: appReveal .5s cubic-bezier(.16,1,.3,1) both; }
+.sidebar { animation: sidebarReveal .55s cubic-bezier(.16,1,.3,1) both; }
+.navigation a { position:relative; overflow:hidden; transition:transform .18s ease, background .2s ease, color .2s ease; }
+.navigation a::after { content:""; position:absolute; left:12px; right:12px; bottom:4px; height:2px; border-radius:99px; background:currentColor; transform:scaleX(0); transform-origin:center; transition:transform .22s ease; opacity:.55; }
+.navigation a:hover { transform:translateX(2px); }
+.navigation a:hover::after,.navigation a.active::after { transform:scaleX(1); }
+.sidebar-user button { transition:transform .18s ease, background .18s ease, color .18s ease; }
+.sidebar-user button:hover { transform:translateY(-1px); }
+.scan-button,.primary-button,.secondary-action { position:relative; overflow:hidden; }
+.scan-button::before,.primary-button::before,.secondary-action::before { content:""; position:absolute; inset:0; background:linear-gradient(110deg,transparent 20%,rgba(255,255,255,.22) 48%,transparent 76%); transform:translateX(-120%); transition:transform .55s ease; pointer-events:none; }
+.scan-button:hover::before,.primary-button:hover::before,.secondary-action:hover::before { transform:translateX(120%); }
+.page-header { animation: headerRise .45s .06s cubic-bezier(.16,1,.3,1) both; }
+.dashboard-section { animation: sectionRise .5s cubic-bezier(.16,1,.3,1) both; }
+.dashboard-section:nth-of-type(2){animation-delay:.05s}.dashboard-section:nth-of-type(3){animation-delay:.1s}.dashboard-section:nth-of-type(4){animation-delay:.15s}
+
+@keyframes appReveal { from{opacity:0} to{opacity:1} }
+@keyframes sidebarReveal { from{opacity:0;transform:translateX(-10px)} to{opacity:1;transform:translateX(0)} }
+@keyframes headerRise { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+@keyframes sectionRise { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+
 @media (prefers-reduced-motion: reduce) {
   .scan-review,
   .ecommerce-panel,
@@ -581,7 +602,11 @@ img {
   .shop-card,
   .status-message,
   .presentation-check-panel,
-  .analyze-action-row .analysis-timer {
+  .analyze-action-row .analysis-timer,
+  .app-layout,
+  .sidebar,
+  .page-header,
+  .dashboard-section {
     animation: none;
   }
   .scan-review,
@@ -590,7 +615,12 @@ img {
   .history-item,
   .inspection-card,
   .shop-card,
-  .quick-card {
+  .quick-card,
+  .navigation a,
+  .sidebar-user button,
+  .scan-button,
+  .primary-button,
+  .secondary-action {
     transition: none;
   }
 }
