@@ -36,7 +36,7 @@ async function buildContactSheet(images) {
 }
 
 export async function interpretPackageWithCloudflare({ images = [], detections = [], rawText = "", categoryOptions = [], signal } = {}) {
-  const apiToken = process.env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_AUTH_TOKEN || "";
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_AUTH_TOKEN || process.env.CLOUDFLARE_API_KEY || "";
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || "";
   if (!apiToken || !accountId) {
     return {
