@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { saveSession } from "../lib/auth";
 import { LANGUAGES } from "../lib/language";
+import { getUserLanguagePreference } from "../lib/userLanguage";
 import { useLanguage } from "../components/LanguageProvider";
 import "../styles/auth.css";
 
@@ -23,7 +24,8 @@ function Login() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Login failed");
       saveSession(data.token, data.user);
-      setLanguage(language);
+      const savedUserLanguage = getUserLanguagePreference(data.user.id);
+      setLanguage(savedUserLanguage || language);
       navigate(location.state?.from || "/", { replace: true });
     } catch (err) { setError(err.message); } finally { setLoading(false); }
   }
