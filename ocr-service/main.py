@@ -5,18 +5,13 @@ import hashlib
 import time
 from typing import Any
 
-# Keep oneDNN disabled on this Windows/PaddlePaddle combination because it has
-# previously triggered PIR/oneDNN conversion errors during inference.
-os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
-os.environ.setdefault("FLAGS_use_mkldnn", "0")
-
 import numpy as np
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, ImageOps
-from paddleocr import PaddleOCR
+from rapidocr import RapidOCR
 
-app = FastAPI(title="PARAKH PaddleOCR Service")
+app = FastAPI(title="PARAKH RapidOCR Service")
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,22 +26,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_lang = os.getenv("PADDLEOCR_LANG", "en")
-_max_ocr_side = max(768, int(os.getenv("PADDLEOCR_MAX_SIDE", "1024")))
-_cache_ttl = max(5, int(os.getenv("PADDLEOCR_CACHE_TTL_SECONDS", "30")))
-_cache_limit = max(1, int(os.getenv("PADDLEOCR_CACHE_ITEMS", "8")))
-_cpu_threads = max(1, int(os.getenv("PADDLEOCR_CPU_THREADS", "10")))
-_text_recognition_batch_size = max(1, min(int(os.getenv("PADDLEOCR_TEXT_RECOGNITION_BATCH_SIZE", "6")), 16))
-_paddle_warmup = os.getenv("PADDLEOCR_WARMUP", "true").lower() == "true"
+_lang_type = os.getenv("RAPIDOCR_LANG_TYPE", "en")
+_max_ocr_side = max(768, int(os.getenv("RAPIDOCR_MAX_SIDE", "1024")))
+_cache_ttl = max(5, int(os.getenv("RAPIDOCR_CACHE_TTL_SECONDS", "30")))
+_cache_limit = max(1, int(os.getenv("RAPIDOCR_CACHE_ITEMS", "8")))
+_use_cls = os.getenv("RAPIDOCR_USE_CLS", "false").lower() == "true"
+_text_score = max(0.0, min(1.0, float(os.getenv("RAPIDOCR_TEXT_SCORE", "0.5"))))
 
-# PARAKH uses PaddleOCR as the primary and only normal hot-path OCR engine.
-# RapidOCR code was removed from the hot path so a stale OCR_ENGINE setting
-# cannot silently route scans through a different engine.
-_engine_name = "paddleocr"
-_paddle_ocr = None
+# RapidOCR is the primary and only normal hot-path OCR engine.
+# ONNX Runtime CPU is RapidOCR's default inference engine when no alternative
+# engine is explicitly selected.
+_engine_name = "rapidocr"
+_rapid_ocr = None
 
 _result_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _inflight: dict[str, asyncio.Task] = {}
+
+
+def _get_rapidocr():
+    global _rapid_ocr
+    if _rapid_ocr is None:
+        _rapid_ocr = RapidOCR(
+            params={
+                "Global.use_cls": _use_cls,
+                "Global.text_score": _text_score,
+                "Rec.lang_type": _lang_type,
+            }
+        )
+    return _rapid_ocr
 
 
 def to_float(value: Any, default: float = 0.0) -> float:
@@ -54,52 +61,6 @@ def to_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
-
-
-def extract_result(result: Any, image_index: int):
-    data = getattr(result, "json", None)
-    if callable(data):
-        data = data()
-    if not isinstance(data, dict):
-        data = result if isinstance(result, dict) else {}
-
-    payload = data.get("res", data)
-    if not isinstance(payload, dict):
-        return []
-
-    texts = payload.get("rec_texts") or payload.get("texts") or []
-    scores = payload.get("rec_scores") or payload.get("scores") or []
-
-    entries = []
-    for index, value in enumerate(texts):
-        text_value = str(value or "").strip()
-        if not text_value:
-            continue
-        confidence = max(0.0, min(1.0, to_float(scores[index], 0.0) if index < len(scores) else 0.0))
-        entries.append({
-            "imageIndex": image_index + 1,
-            "type": "OCR_TEXT",
-            "text": text_value,
-            "confidence": confidence,
-            "source": "paddleocr",
-        })
-    return entries
-
-
-def _get_paddleocr():
-    global _paddle_ocr
-    if _paddle_ocr is None:
-        _paddle_ocr = PaddleOCR(
-            lang=_lang,
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
-            enable_mkldnn=False,
-            device="cpu",
-            cpu_threads=_cpu_threads,
-            text_recognition_batch_size=_text_recognition_batch_size,
-        )
-    return _paddle_ocr
 
 
 def _prepare_image(content: bytes):
@@ -140,6 +101,31 @@ def _store_cached(key: str, result: dict[str, Any]):
         _result_cache.pop(oldest_key, None)
 
 
+def extract_result(result: Any, image_index: int):
+    if result is None:
+        return []
+
+    texts = getattr(result, "txts", None)
+    scores = getattr(result, "scores", None)
+    if texts is None or scores is None:
+        return []
+
+    entries = []
+    for index, value in enumerate(texts):
+        text_value = str(value or "").strip()
+        if not text_value:
+            continue
+        confidence = max(0.0, min(1.0, to_float(scores[index], 0.0) if index < len(scores) else 0.0))
+        entries.append({
+            "imageIndex": image_index + 1,
+            "type": "OCR_TEXT",
+            "text": text_value,
+            "confidence": confidence,
+            "source": "rapidocr",
+        })
+    return entries
+
+
 async def _analyze_contents(items: list[tuple[bytes, str]]):
     started_at = time.monotonic()
 
@@ -149,28 +135,27 @@ async def _analyze_contents(items: list[tuple[bytes, str]]):
             pil_image = _prepare_image(content)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid image {image_index + 1}: {exc}") from exc
-        width, height = pil_image.size
-        prepared.append((np.asarray(pil_image), width, height))
+        prepared.append(np.asarray(pil_image))
 
-    arrays = [item[0] for item in prepared]
-    paddle = _get_paddleocr()
-
-    # PaddleOCR supports list inputs. One pipeline invocation avoids repeatedly
-    # paying per-image pipeline overhead and lets text recognition batch work.
-    results = await asyncio.to_thread(lambda: list(paddle.predict(arrays)))
-
+    rapid = _get_rapidocr()
     all_entries = []
     raw_text_parts = []
-    for image_index, (result, (_array, _width, _height)) in enumerate(zip(results, prepared)):
+    engine_ms = 0
+
+    for image_index, array in enumerate(prepared):
+        image_started = time.monotonic()
+        result = await asyncio.to_thread(lambda arr=array: rapid(arr))
+        engine_ms += round((time.monotonic() - image_started) * 1000)
         entries = extract_result(result, image_index)
         all_entries.extend(entries)
         raw_text_parts.append("\n".join(entry["text"] for entry in entries))
 
     elapsed_ms = round((time.monotonic() - started_at) * 1000)
     return {
-        "provider": "paddleocr",
-        "model": "PaddleOCR",
+        "provider": "rapidocr",
+        "model": "RapidOCR",
         "timingMs": elapsed_ms,
+        "engineTimingMs": engine_ms,
         "result": {
             "declarationEvidence": all_entries,
             "rawText": "\n\n".join(part for part in raw_text_parts if part).strip(),
@@ -183,23 +168,20 @@ async def _analyze_contents(items: list[tuple[bytes, str]]):
 
 @app.on_event("startup")
 async def warmup():
-    if not _paddle_warmup:
-        return
     try:
         started_at = time.monotonic()
-        paddle = _get_paddleocr()
+        rapid = _get_rapidocr()
         warm_image = np.full((256, 256, 3), 255, dtype=np.uint8)
-        await asyncio.to_thread(lambda: list(paddle.predict([warm_image])))
+        await asyncio.to_thread(lambda: rapid(warm_image))
         elapsed_ms = round((time.monotonic() - started_at) * 1000)
-        print(f"[ocr:paddle] warmup complete in {elapsed_ms}ms threads={_cpu_threads} recBatch={_text_recognition_batch_size}")
+        print(f"[ocr:rapid] warmup complete in {elapsed_ms}ms useCls={_use_cls} textScore={_text_score}")
     except Exception as exc:
-        # Do not prevent the HTTP service from starting if warmup fails.
-        print(f"[ocr:paddle] warmup skipped: {exc}")
+        print(f"[ocr:rapid] warmup skipped: {exc}")
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "parakh-paddleocr", "engine": "PaddleOCR"}
+    return {"status": "ok", "service": "parakh-rapidocr", "engine": "RapidOCR"}
 
 
 @app.post("/api/ocr/analyze")
