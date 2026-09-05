@@ -36,21 +36,35 @@ async function buildContactSheet(images) {
   return `data:image/jpeg;base64,${sheet.toString("base64")}`;
 }
 
-export async function interpretPackageWithCloudflare({ images = [], detections = [], rawText = "", categoryOptions = [], signal } = {}) {
-  const apiToken = process.env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_AUTH_TOKEN || process.env.CLOUDFLARE_API_KEY || "";
+export async function interpretPackageWithCloudflare({
+  images = [],
+  detections = [],
+  rawText = "",
+  categoryOptions = [],
+  signal,
+  modelOverride = null,
+  providerName = "cloudflare",
+} = {}) {
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN
+    || process.env.CLOUDFLARE_AUTH_TOKEN
+    || process.env.CLOUDFLARE_API_KEY
+    || "";
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || "";
+  const model = modelOverride
+    || process.env.CLOUDFLARE_SEMANTIC_MODEL
+    || "@cf/meta/llama-3.2-11b-vision-instruct";
+
   if (!apiToken || !accountId) {
     return {
       enabled: false,
-      provider: "cloudflare",
-      model: process.env.CLOUDFLARE_SEMANTIC_MODEL || "@cf/meta/llama-3.2-11b-vision-instruct",
+      provider: providerName,
+      model,
       reason: "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required.",
     };
   }
 
-  const model = process.env.CLOUDFLARE_SEMANTIC_MODEL || "@cf/meta/llama-3.2-11b-vision-instruct";
   if (!images.length) {
-    return { enabled: false, provider: "cloudflare", model, reason: "No package images supplied." };
+    return { enabled: false, provider: providerName, model, reason: "No package images supplied." };
   }
 
   try {
@@ -97,17 +111,17 @@ export async function interpretPackageWithCloudflare({ images = [], detections =
     const normalized = normalizeSemanticResult(parsed, categoryOptions);
     return {
       enabled: true,
-      provider: "cloudflare",
+      provider: providerName,
       model,
       fields: normalized.fields,
       suggestedCategory: normalized.suggestedCategory,
     };
   } catch (error) {
     if (error?.name === "AbortError") throw error;
-    console.error("[ocr:cloudflare-semantic]", error);
+    console.error(`[ocr:${providerName}-semantic]`, error);
     return {
       enabled: false,
-      provider: "cloudflare",
+      provider: providerName,
       model,
       reason: error?.message || "Cloudflare semantic interpretation failed.",
     };
