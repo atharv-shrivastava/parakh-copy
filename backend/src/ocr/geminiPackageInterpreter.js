@@ -7,9 +7,7 @@ import {
 
 export async function interpretPackageWithGemini({ images = [], detections = [], rawText = "", categoryOptions = [], signal } = {}) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.OCR_AI_API_KEY || "";
-  if (!apiKey) {
-    return { enabled: false, provider: "gemini", reason: "GEMINI_API_KEY is not configured." };
-  }
+  if (!apiKey) return { enabled: false, provider: "gemini", reason: "GEMINI_API_KEY is not configured." };
 
   const model = process.env.GEMINI_SEMANTIC_MODEL || "gemini-3.7-flash";
   const ai = new GoogleGenAI({ apiKey });
@@ -28,27 +26,14 @@ export async function interpretPackageWithGemini({ images = [], detections = [],
         responseMimeType: "application/json",
         responseSchema: buildSemanticSchema(categoryOptions),
         thinkingConfig: { thinkingLevel: "low" },
-        maxOutputTokens: 1800,
+        maxOutputTokens: 1200,
       },
     });
-
-    const parsed = JSON.parse(response.text || "{}");
-    const normalized = normalizeSemanticResult(parsed, categoryOptions);
-    return {
-      enabled: true,
-      provider: "gemini",
-      model,
-      fields: normalized.fields,
-      suggestedCategory: normalized.suggestedCategory,
-    };
+    const normalized = normalizeSemanticResult(JSON.parse(response.text || "{}"), categoryOptions);
+    return { enabled: true, provider: "gemini", model, fields: normalized.fields, suggestedCategory: normalized.suggestedCategory };
   } catch (error) {
     if (error?.name === "AbortError") throw error;
     console.error("[ocr:gemini-semantic]", error);
-    return {
-      enabled: false,
-      provider: "gemini",
-      model,
-      reason: error?.message || "Gemini semantic interpretation failed.",
-    };
+    return { enabled: false, provider: "gemini", model, reason: error?.message || "Gemini semantic interpretation failed." };
   }
 }
