@@ -18,9 +18,26 @@ function fieldSource(fieldName) {
   return map[fieldName] || fieldName.toUpperCase();
 }
 
+function addEvidence(evidence, field, item, sourceType = "OCR", explicitField = field) {
+  if (!item || typeof item !== "object" || item.status !== "found" || item.value == null || String(item.value).trim() === "") return;
+  evidence.push({
+    evidenceId: `ocr-${field}-${crypto.randomUUID()}`,
+    field: explicitField,
+    rawValue: item.raw ?? item.evidence ?? item.value,
+    normalizedValue: item.value,
+    unit: field === "unit" ? String(item.value) : undefined,
+    confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0.45)),
+    source: sourceType,
+    sourceImageRef: item.imageIndex != null ? `image-${Number(item.imageIndex) + 1}` : undefined,
+    timestamp: new Date().toISOString(),
+    reliability: "HIGH",
+  });
+}
+
 function makeRulesEvidence(ocr) {
   const declarations = Array.isArray(ocr?.declarationEvidence) ? ocr.declarationEvidence : [];
   const evidence = [];
+
   for (const [field, item] of Object.entries(ocr || {})) {
     if (!item || typeof item !== "object" || item.status !== "found" || item.value == null || field === "semantic") continue;
     const type = fieldSource(field);
@@ -34,11 +51,40 @@ function makeRulesEvidence(ocr) {
       confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0.45)),
       source: "OCR",
       sourceImageRef: declaration ? `image-${Number(declaration.imageIndex) + 1}` : undefined,
-      boundingBox: declaration?.boundingBox || undefined,
       timestamp: new Date().toISOString(),
-      reliability: declaration?.source === "LOCAL_RULES" ? "HIGH" : "MEDIUM",
+      reliability: "HIGH",
     });
   }
+
+  // Supply canonical legal-rule aliases for the structured extraction fields.
+  // A field being present is evidence of presence, not a violation.
+  addEvidence(evidence, "mrp", ocr.mrp, "OCR", "declarations.retailSalePrice");
+  addEvidence(evidence, "netQuantity", ocr.netQuantity, "OCR", "declarations.netQuantity");
+  addEvidence(evidence, "unit", ocr.unit, "OCR", "declarations.netQuantityUnit");
+  addEvidence(evidence, "productName", ocr.productName, "OCR", "declarations.commonOrGenericName");
+  addEvidence(evidence, "manufacturer", ocr.manufacturer, "OCR", "declarations.manufacturerOrPacker");
+  addEvidence(evidence, "manufacturerAddress", ocr.manufacturerAddress, "OCR", "declarations.completeAddress");
+  addEvidence(evidence, "packerAddress", ocr.packerAddress, "OCR", "declarations.completeAddress");
+  addEvidence(evidence, "importerAddress", ocr.importerAddress, "OCR", "declarations.completeAddress");
+  addEvidence(evidence, "dateOfManufacture", ocr.dateOfManufacture, "OCR", "declarations.manufactureOrImportDate");
+  addEvidence(evidence, "dateOfPacking", ocr.dateOfPacking, "OCR", "declarations.manufactureOrImportDate");
+
+  const consumerContactEvidence = ocr.consumerCarePhone?.status === "found" || ocr.consumerCareEmail?.status === "found";
+  if (consumerContactEvidence) {
+    const phone = ocr.consumerCarePhone?.value || "";
+    const email = ocr.consumerCareEmail?.value || "";
+    evidence.push({
+      evidenceId: `ocr-consumer-contact-${crypto.randomUUID()}`,
+      field: "declarations.consumerComplaintContact",
+      rawValue: [phone, email].filter(Boolean).join(" / "),
+      normalizedValue: [phone, email].filter(Boolean).join(" / "),
+      confidence: Math.max(Number(ocr.consumerCarePhone?.confidence || 0), Number(ocr.consumerCareEmail?.confidence || 0)),
+      source: "OCR",
+      timestamp: new Date().toISOString(),
+      reliability: "HIGH",
+    });
+  }
+
   return evidence;
 }
 
