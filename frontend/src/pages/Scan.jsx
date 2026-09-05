@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../lib/auth";
 import "../styles/scan.css";
+import "../styles/scan-theme.css";
 
 const API_URL = "http://localhost:5000/api";
 const PUTER_EVALUATE_URL = "http://localhost:8080/api/ocr/evaluate-structured";
@@ -262,7 +263,6 @@ function Scan() {
     };
   }, [images]);
 
-
   useEffect(() => {
     if (!analyzing || !analysisStartedAt) return undefined;
     const timer = window.setInterval(() => setAnalysisElapsedMs(Date.now() - analysisStartedAt), 100);
@@ -302,7 +302,11 @@ function Scan() {
     setImages((current) => {
       const remaining = MAX_IMAGES - current.length;
       if (remaining <= 0) return current;
-      const accepted = selected.slice(0, remaining).map((file) => ({ file, url: URL.createObjectURL(file) }));
+      const accepted = selected.slice(0, remaining).map((file) => ({
+        file,
+        url: URL.createObjectURL(file),
+        dataUrlPromise: fileToDataUrl(file).catch(() => null),
+      }));
       return [...current, ...accepted];
     });
     if (images.length + selected.length > MAX_IMAGES) setMessage(`You can retain a maximum of ${MAX_IMAGES} images.`);
@@ -506,15 +510,13 @@ function Scan() {
     setManualViolations((items) => items.filter((item) => item.findingId !== id));
   }
 
-
-
   async function saveProduct(event) {
     event.preventDefault();
     if (!selectedCategoryId || !selectedCategory) return setMessage("Final category is required.");
     if (!form.shopName.trim()) return setMessage("Shop name is required.");
     setSaving(true);
     try {
-      const imageUrls = await Promise.all(images.map(({ file }) => fileToDataUrl(file)));
+      const imageUrls = (await Promise.all(images.map(({ file, dataUrlPromise }) => dataUrlPromise || fileToDataUrl(file)))).filter(Boolean);
       const effectiveViolationIds = [...acceptedFindingIds, ...manualViolations.map((item) => item.findingId)];
       const presentationNeedsReview = Number(ocr?.presentationChecks?.summary?.smallTextReview || 0) > 0 || Number(ocr?.presentationChecks?.summary?.notLocated || 0) > 0;
       const rulesStatus = compliance?.overallStatus;
