@@ -250,23 +250,22 @@ async function handleFastAnalyze(req, res, files) {
     }
 
     const uploadMs = Date.now() - startedAt;
-    const paddleStartedAt = Date.now();
-    const paddle = await analyzeWithPaddle(images);
-    const paddleMs = Date.now() - paddleStartedAt;
-
-    const aiStartedAt = Date.now();
-    const aiSemantic = await interpretPackageWithGemini({
-      images,
-      detections: paddle.evidence,
-      rawText: paddle.rawText,
-      categoryOptions,
-    });
-    const aiMs = Date.now() - aiStartedAt;
+    const parallelStartedAt = Date.now();
+    const [paddle, aiSemantic] = await Promise.all([
+      analyzeWithPaddle(images),
+      interpretPackageWithGemini({
+        images,
+        categoryOptions,
+      }),
+    ]);
+    const parallelMs = Date.now() - parallelStartedAt;
+    const paddleMs = null;
+    const aiMs = null;
 
     const result = buildStructuredResult(paddle, aiSemantic);
     const totalMs = Date.now() - startedAt;
 
-    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} upload=${uploadMs}ms paddle=${paddleMs}ms ai=${aiMs}ms total=${totalMs}ms aiEnabled=${Boolean(aiSemantic.enabled)}`);
+    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} parallel=${parallelMs}ms total=${totalMs}ms aiEnabled=${Boolean(aiSemantic.enabled)}`);
 
     res.json({
       result,
@@ -283,7 +282,7 @@ async function handleFastAnalyze(req, res, files) {
       aiSuggestedCategory: aiSemantic?.suggestedCategory || null,
       aiSemanticEnabled: Boolean(aiSemantic?.enabled),
       aiSemanticError: aiSemantic?.enabled ? null : aiSemantic?.reason || null,
-      timing: { uploadMs, paddleMs, aiMs, totalMs },
+      timing: { uploadMs, parallelMs, paddleMs, aiMs, totalMs },
       fallbackReason: result.warnings?.find((item) => item.includes("AI semantic assist unavailable")) || null,
     });
   } catch (error) {
