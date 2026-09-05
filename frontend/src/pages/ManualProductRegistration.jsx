@@ -14,6 +14,14 @@ function flatten(nodes, path = []) {
   });
 }
 
+function getRuleViolationReason(rule) {
+  const versions = Array.isArray(rule?.definition?.versions) ? rule.definition.versions : [];
+  const activeVersion = versions.find((version) => String(version?.status || "").toUpperCase() === "ACTIVE") || versions[0];
+  const conditions = Array.isArray(activeVersion?.conditions) ? activeVersion.conditions : [];
+  const condition = conditions.find((item) => item?.violationReason || item?.errorMessage);
+  return String(condition?.violationReason || condition?.errorMessage || rule?.title || "Manual compliance violation selected by inspector.").trim();
+}
+
 async function fileToDataUrl(file) {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, 960 / Math.max(bitmap.width, bitmap.height));
@@ -31,19 +39,30 @@ function ManualProductRegistration() {
   const navigate = useNavigate();
   const videoRef = useRef(null);
   const [categories, setCategories] = useState([]);
+  const [rules, setRules] = useState([]);
   const [categoryId, setCategoryId] = useState("");
   const [form, setForm] = useState(emptyForm);
   const [images, setImages] = useState([]);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [complianceStatus, setComplianceStatus] = useState("NEEDS_REVIEW");
+  const [violationRuleId, setViolationRuleId] = useState("");
+  const [violationReason, setViolationReason] = useState("");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    apiFetch(`${API_URL}/categories/tree/all`).then(async (r) => {
-      const data = await r.json().catch(() => []);
-      if (!r.ok) throw new Error(data.error || "Could not load categories");
-      setCategories(data);
-    }).catch((e) => setMessage(e.message));
+    Promise.all([
+      apiFetch(`${API_URL}/categories/tree/all`).then(async (r) => {
+        const data = await r.json().catch(() => []);
+        if (!r.ok) throw new Error(data.error || "Could not load categories");
+        setCategories(data);
+      }),
+      apiFetch(`${API_URL}/rules/active`).then(async (r) => {
+        const data = await r.json().catch(() => []);
+        if (!r.ok) throw new Error(data.error || "Could not load compliance violations");
+        setRules(Array.isArray(data) ? data : []);
+      }),
+    ]).catch((e) => setMessage(e.message));
   }, []);
 
   function update(key, value) { setForm((current) => ({ ...current, [key]: value })); }
@@ -89,6 +108,20 @@ function ManualProductRegistration() {
     canvas.toBlob((blob) => { if (blob) addFiles([new File([blob], `manual-${Date.now()}.jpg`, { type: "image/jpeg" })]); closeCamera(); }, "image/jpeg", 0.80);
   }
 
+  function changeComplianceStatus(value) {
+    setComplianceStatus(value);
+    if (value !== "VIOLATION") {
+      setViolationRuleId("");
+      setViolationReason("");
+    }
+  }
+
+  function changeViolationRule(ruleId) {
+    setViolationRuleId(ruleId);
+    const rule = rules.find((item) => item.id === ruleId);
+    setViolationReason(rule ? getRuleViolationReason(rule) : "");
+  }
+
   async function save(event) {
     event.preventDefault();
     const selected = flatten(categories).find((c) => c.id === categoryId);
@@ -96,13 +129,25 @@ function ManualProductRegistration() {
     if (!form.productName.trim()) return setMessage("Product name is required.");
     if (!form.shopName.trim()) return setMessage("Shop name is required.");
     if (!images.length) return setMessage("Take or upload at least one package image.");
+    if (complianceStatus === "VIOLATION" && !violationRuleId) return setMessage("Select the violation found during manual inspection.");
     setSaving(true); setMessage("");
     try {
       const imageUrls = await Promise.all(images.map(({ file }) => fileToDataUrl(file)));
       const response = await apiFetch(`${API_URL}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, categoryId, imageUrls, ocrData: { provider: "manual", ocr: null, compliance: null }, complianceStatus: "NEEDS_REVIEW", violationReason: "Manual registration without OCR; inspect and verify declarations." }),
+        body: JSON.stringify({
+          ...form,
+          categoryId,
+          imageUrls,
+          complianceStatus,
+          violationReason: complianceStatus === "VIOLATION"
+            ? violationReason || "Manual compliance violation selected by inspector."
+            : complianceStatus === "OKAY"
+              ? "Manual inspection completed; no violation selected."
+              : "Manual registration requires further compliance review.",
+          ocrData: { provider: "manual", ocr: null, compliance: null },
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not register product");
@@ -133,6 +178,9 @@ function ManualProductRegistration() {
         <label>Unit<input value={form.unit} onChange={(e) => update("unit", e.target.value)} placeholder="g, kg, ml, L, pcs..." /></label>
         <label>MRP<input type="number" min="0" step="0.01" value={form.mrp} onChange={(e) => update("mrp", e.target.value)} /></label>
         <label>Barcode<input value={form.barcode} onChange={(e) => update("barcode", e.target.value)} /></label>
+        <label>Compliance status *<select value={complianceStatus} onChange={(e) => changeComplianceStatus(e.target.value)} required><option value="NEEDS_REVIEW">Needs review</option><option value="OKAY">No violation</option><option value="VIOLATION">Violation found</option></select></label>
+        {complianceStatus === "VIOLATION" && <label>Violation found *<select value={violationRuleId} onChange={(e) => changeViolationRule(e.target.value)} required><option value="">Select violation</option>{rules.map((rule) => <option key={rule.id} value={rule.id}>{rule.ruleCode} · {rule.title}</option>)}</select></label>}
+        {complianceStatus === "VIOLATION" && violationRuleId && <label className="full-width">Violation details<textarea value={violationReason} onChange={(e) => setViolationReason(e.target.value)} placeholder="Describe what was found on the package." /></label>}
         <label>Shop name *<input required value={form.shopName} onChange={(e) => update("shopName", e.target.value)} /></label>
         <label>Shop address<input value={form.shopAddress} onChange={(e) => update("shopAddress", e.target.value)} /></label>
         <label>City<input value={form.shopCity} onChange={(e) => update("shopCity", e.target.value)} /></label>
