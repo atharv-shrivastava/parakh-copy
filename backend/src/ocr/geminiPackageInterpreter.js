@@ -3,12 +3,12 @@ import {
   buildSemanticPrompt,
   buildSemanticSchema,
   normalizeSemanticResult,
+  parseJsonContent,
 } from "./semanticPackageCommon.js";
 
 export async function interpretPackageWithGemini({ images = [], detections = [], rawText = "", categoryOptions = [], signal } = {}) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.OCR_AI_API_KEY || "";
   if (!apiKey) return { enabled: false, provider: "gemini", reason: "GEMINI_API_KEY is not configured." };
-
   const model = process.env.GEMINI_SEMANTIC_MODEL || "gemini-3.7-flash";
   const ai = new GoogleGenAI({ apiKey });
   const prompt = buildSemanticPrompt({ detections, rawText, categoryOptions });
@@ -16,7 +16,6 @@ export async function interpretPackageWithGemini({ images = [], detections = [],
     ...images.map(({ base64, mediaType }) => ({ inlineData: { mimeType: mediaType, data: base64 } })),
     { text: prompt },
   ];
-
   try {
     if (signal?.aborted) throw new DOMException("The request was aborted.", "AbortError");
     const response = await ai.models.generateContent({
@@ -26,10 +25,11 @@ export async function interpretPackageWithGemini({ images = [], detections = [],
         responseMimeType: "application/json",
         responseSchema: buildSemanticSchema(categoryOptions),
         thinkingConfig: { thinkingLevel: "low" },
-        maxOutputTokens: 1200,
+        maxOutputTokens: 1800,
       },
     });
-    const normalized = normalizeSemanticResult(JSON.parse(response.text || "{}"), categoryOptions);
+    const parsed = parseJsonContent(response.text || "", { recoverTruncated: true });
+    const normalized = normalizeSemanticResult(parsed, categoryOptions);
     return { enabled: true, provider: "gemini", model, fields: normalized.fields, suggestedCategory: normalized.suggestedCategory };
   } catch (error) {
     if (error?.name === "AbortError") throw error;
