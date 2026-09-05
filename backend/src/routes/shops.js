@@ -18,28 +18,70 @@ router.get("/", async (req, res) => {
         ...(sourceType !== "ALL" ? { sourceType: sourceType === "ECOMMERCE" ? "ECOMMERCE" : "OFFLINE" } : {}),
         ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { city: { contains: q, mode: "insensitive" } }, { address: { contains: q, mode: "insensitive" } }] } : {}),
       },
-      select: {
-        id: true,
-        name: true,
-        address: true,
-        city: true,
-        state: true,
-        sourceType: true,
-        inspections: {
-          select: { productId: true, status: true, inspectedAt: true },
-          orderBy: { inspectedAt: "desc" },
-        },
-      },
+      select: { id: true, name: true, address: true, city: true, state: true, sourceType: true },
       orderBy: { name: "asc" },
     });
+
+    if (!shops.length) return res.json([]);
+
+    const shopIds = shops.map((shop) => shop.id);
+    const [productPairs, statusGroups, latestInspections] = await Promise.all([
+      prisma.inspection.findMany({
+        where: { shopId: { in: shopIds } },
+        select: { shopId: true, productId: true },
+        distinct: ["shopId", "productId"],
+      }),
+      prisma.inspection.groupBy({
+        by: ["shopId", "status"],
+        where: { shopId: { in: shopIds } },
+        _count: { _all: true },
+      }),
+      prisma.inspection.groupBy({
+        by: ["shopId"],
+        where: { shopId: { in: shopIds } },
+        _max: { inspectedAt: true },
+      }),
+    ]);
+
+    const productCounts = new Map();
+    for (const row of productPairs) productCounts.set(row.shopId, (productCounts.get(row.shopId) || 0) + 1);
+
+    const inspectionCounts = new Map();
+    const statusFlags = new Map();
+    for (const row of statusGroups) {
+      const count = Number(row._count?._all || 0);
+      inspectionCounts.set(row.shopId, (inspectionCounts.get(row.shopId) || 0) + count);
+      if (!statusFlags.has(row.shopId)) statusFlags.set(row.shopId, new Set());
+      statusFlags.get(row.shopId).add(row.status);
+    }
+
+    const lastInspection = new Map(latestInspections.map((row) => [row.shopId, row._max?.inspectedAt || null]));
     const data = shops.map((shop) => {
-      const products = new Set(shop.inspections.map((i) => i.productId));
-      const statuses = shop.inspections.map((i) => i.status);
-      const computedStatus = statuses.includes("VIOLATION") ? "NON_COMPLIANT" : statuses.includes("NEEDS_REVIEW") || statuses.includes("UNABLE_TO_VERIFY") ? "REVIEW" : "COMPLIANT";
-      return { id: shop.id, name: shop.name, address: shop.address, city: shop.city, state: shop.state, sourceType: shop.sourceType || "OFFLINE", productCount: products.size, inspectionCount: shop.inspections.length, lastInspection: shop.inspections[0]?.inspectedAt || null, status: computedStatus };
+      const flags = statusFlags.get(shop.id) || new Set();
+      const computedStatus = flags.has("VIOLATION")
+        ? "NON_COMPLIANT"
+        : flags.has("NEEDS_REVIEW") || flags.has("UNABLE_TO_VERIFY")
+          ? "REVIEW"
+          : "COMPLIANT";
+      return {
+        id: shop.id,
+        name: shop.name,
+        address: shop.address,
+        city: shop.city,
+        state: shop.state,
+        sourceType: shop.sourceType || "OFFLINE",
+        productCount: productCounts.get(shop.id) || 0,
+        inspectionCount: inspectionCounts.get(shop.id) || 0,
+        lastInspection: lastInspection.get(shop.id) || null,
+        status: computedStatus,
+      };
     });
-    res.json(status === "ALL" ? data : data.filter((x) => x.status === status));
-  } catch (error) { console.error(error); res.status(500).json({ error: error?.message || "Failed to fetch shops" }); }
+
+    res.json(status === "ALL" ? data : data.filter((item) => item.status === status));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error?.message || "Failed to fetch shops" });
+  }
 });
 
 router.get("/:id", async (req, res) => {
