@@ -427,7 +427,7 @@ function Scan() {
     } catch (e) {
       setMessage(e.message || "Puter OCR analysis failed.");
     } finally {
-      const elapsed = analysisStartedAt ? Date.now() - analysisStartedAt : 0;
+      const elapsed = startedAt ? Date.now() - startedAt : 0;
       setAnalysisElapsedMs(elapsed);
       setAnalysisDurationMs(elapsed);
       setAnalysisStartedAt(null);
