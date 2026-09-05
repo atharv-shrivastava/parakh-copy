@@ -38,12 +38,24 @@ export async function interpretPackageWithCloudflare({
   if (!apiToken || !accountId) return { enabled: false, provider: providerName, model, reason: "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required." };
   if (!images.length) return { enabled: false, provider: providerName, model, reason: "No package images supplied." };
 
+  let timeoutId = null;
+  let requestSignal = signal;
+  const isMoondream = model === "@cf/moondream/moondream3.1-9B-A2B";
+  if (isMoondream) {
+    const timeoutController = new AbortController();
+    timeoutId = setTimeout(() => timeoutController.abort(), 6500);
+    if (signal && typeof AbortSignal?.any === "function") {
+      requestSignal = AbortSignal.any([signal, timeoutController.signal]);
+    } else {
+      requestSignal = timeoutController.signal;
+    }
+  }
+
   try {
     const image = await buildContactSheet(images);
     const prompt = buildSemanticPrompt({ detections, rawText, categoryOptions });
-    if (signal?.aborted) throw new DOMException("The request was aborted.", "AbortError");
+    if (requestSignal?.aborted) throw new DOMException("The request was aborted.", "AbortError");
 
-    const isMoondream = model === "@cf/moondream/moondream3.1-9B-A2B";
     const body = isMoondream
       ? { task: "query", image, question: `${prompt}\n\nReturn only compact JSON.`, reasoning: false, temperature: 0, max_tokens: 900, stream: false }
       : {
@@ -62,7 +74,7 @@ export async function interpretPackageWithCloudflare({
       method: "POST",
       headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal,
+      signal: requestSignal,
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data?.success === false) {
@@ -83,8 +95,12 @@ export async function interpretPackageWithCloudflare({
     const normalized = normalizeSemanticResult(parsed, categoryOptions);
     return { enabled: true, provider: providerName, model, fields: normalized.fields, suggestedCategory: normalized.suggestedCategory };
   } catch (error) {
-    if (error?.name === "AbortError") throw error;
-    console.error(`[ocr:${providerName}-semantic]`, error);
+    if (error?.name === "AbortError") {
+      return { enabled: false, provider: providerName, model, reason: isMoondream ? "Cloudflare Moondream semantic provider timed out after 6500ms." : "Cloudflare semantic provider request was aborted." };
+    }
+    console.warn(`[ocr:${providerName}-semantic] ${error?.message || "Cloudflare semantic interpretation failed."}`);
     return { enabled: false, provider: providerName, model, reason: error?.message || "Cloudflare semantic interpretation failed." };
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
