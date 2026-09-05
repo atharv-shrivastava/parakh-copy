@@ -25,6 +25,11 @@ export const THEMES = [
   { id: "ocean-gradient", name: "Ocean Gradient", primary: "#0ea5e9", background: "#eff9ff", surface: "#ffffff", text: "#082f49", muted: "#46677a", border: "#cfeaf6", sidebar: "#082f49" },
   { id: "aurora-gradient", name: "Aurora Gradient", primary: "#10b981", background: "#f0fdfa", surface: "#ffffff", text: "#102722", muted: "#526f69", border: "#d3ebe5", sidebar: "#12332d" },
   { id: "candy-gradient", name: "Candy Gradient", primary: "#ec4899", background: "#fff5fb", surface: "#ffffff", text: "#31152b", muted: "#72596e", border: "#f3d6ea", sidebar: "#3b1734" },
+  { id: "midnight-gradient", name: "Midnight Gradient", primary: "#38bdf8", background: "#080d1b", surface: "#11182b", text: "#f4f7ff", muted: "#aebcd3", border: "#293956", sidebar: "#030712" },
+  { id: "nebula-gradient", name: "Nebula Gradient", primary: "#c084fc", background: "#0d0818", surface: "#19112c", text: "#fbf7ff", muted: "#bdafd0", border: "#3a2a50", sidebar: "#05030a" },
+  { id: "ember-gradient", name: "Ember Gradient", primary: "#fb7185", background: "#160908", surface: "#241312", text: "#fff5f3", muted: "#cbb0aa", border: "#4a2b27", sidebar: "#070303" },
+  { id: "ocean-night-gradient", name: "Ocean Night", primary: "#22d3ee", background: "#06131b", surface: "#0d202b", text: "#ecfeff", muted: "#a1c2cb", border: "#234451", sidebar: "#02080d" },
+  { id: "cyber-gradient", name: "Cyber Gradient", primary: "#a3e635", background: "#080f12", surface: "#101d20", text: "#f2ffe4", muted: "#b9c6b4", border: "#294236", sidebar: "#020607" },
 ];
 
 const KEY = "parakh_theme";
@@ -37,7 +42,7 @@ export function getTheme() {
 
 export function applyTheme(themeId) {
   const id = THEMES.some((theme) => theme.id === themeId) ? themeId : DEFAULT_THEME;
-  const darkThemes = new Set(["dark", "dark-emerald", "dark-violet", "ruby-dark", "purple-dark", "obsidian", "graphite", "black-grey", "red-black"]);
+  const darkThemes = new Set(["dark", "dark-emerald", "dark-violet", "ruby-dark", "purple-dark", "obsidian", "graphite", "black-grey", "red-black", "midnight-gradient", "nebula-gradient", "ember-gradient", "ocean-night-gradient", "cyber-gradient"]);
   document.documentElement.dataset.theme = id;
   document.documentElement.style.colorScheme = darkThemes.has(id) ? "dark" : "light";
   localStorage.setItem(KEY, id);
