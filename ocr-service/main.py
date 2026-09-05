@@ -95,11 +95,33 @@ def _store_cached(key: str, result: dict[str, Any]):
         _result_cache.pop(oldest_key, None)
 
 
-def extract_result(result: Any, image_index: int):
+def _box_to_rect(box):
+    try:
+        points = np.asarray(box, dtype=float)
+        if points.shape != (4, 2):
+            return None
+        xs = points[:, 0]
+        ys = points[:, 1]
+        left = float(xs.min())
+        top = float(ys.min())
+        right = float(xs.max())
+        bottom = float(ys.max())
+        return {
+            "left": round(left, 2),
+            "top": round(top, 2),
+            "width": round(max(0.0, right - left), 2),
+            "height": round(max(0.0, bottom - top), 2),
+        }
+    except Exception:
+        return None
+
+
+def extract_result(result: Any, image_index: int, image_width: int, image_height: int):
     if result is None:
         return []
     texts = getattr(result, "txts", None)
     scores = getattr(result, "scores", None)
+    boxes = getattr(result, "boxes", None)
     if texts is None or scores is None:
         return []
     entries = []
@@ -108,13 +130,20 @@ def extract_result(result: Any, image_index: int):
         if not text_value:
             continue
         confidence = max(0.0, min(1.0, to_float(scores[index], 0.0) if index < len(scores) else 0.0))
-        entries.append({
+        entry = {
             "imageIndex": image_index + 1,
             "type": "OCR_TEXT",
             "text": text_value,
             "confidence": confidence,
             "source": "rapidocr",
-        })
+            "imageWidth": int(image_width),
+            "imageHeight": int(image_height),
+        }
+        if boxes is not None and index < len(boxes):
+            rect = _box_to_rect(boxes[index])
+            if rect:
+                entry["boundingBox"] = rect
+        entries.append(entry)
     return entries
 
 
@@ -135,7 +164,7 @@ async def _analyze_contents(items: list[tuple[bytes, str]]):
         image_started = time.monotonic()
         result = await asyncio.to_thread(lambda arr=array: rapid(arr))
         engine_ms += round((time.monotonic() - image_started) * 1000)
-        entries = extract_result(result, image_index)
+        entries = extract_result(result, image_index, array.shape[1], array.shape[0])
         all_entries.extend(entries)
         raw_text_parts.append("\n".join(entry["text"] for entry in entries))
 
