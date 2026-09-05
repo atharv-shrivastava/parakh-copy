@@ -62,6 +62,7 @@ export function buildSemanticPrompt({ detections = [], rawText = "", categoryOpt
     path: text(item.path),
   }));
 
+  const outputKeys = [...FIELD_KEYS, "suggestedCategory"];
   return `You are PARAKH's package interpretation assistant. Your task is semantic reasoning over photographed packaged commodity images.
 
 The supplied package image(s) are primary evidence. The supplied RapidOCR transcription is a supporting evidence layer. ALWAYS use BOTH the image(s) and the RapidOCR text together.
@@ -94,6 +95,15 @@ STRICT RULES:
 - suggestedCategory MUST be selected only from the supplied final-category list. Never invent a categoryId.
 - Choose the most specific category supported by the visible product identity. Lower confidence is preferable to an unsupported guess.
 
+REQUIRED OUTPUT KEYS:
+${JSON.stringify(outputKeys)}
+
+Each field key above except suggestedCategory MUST be an object with exactly these conceptual properties:
+{"value": string|null, "raw": string|null, "evidence": string|null, "confidence": number(0..1), "status": "found"|"absent"|"unreadable"|"ambiguous", "imageIndex": integer|null}
+
+suggestedCategory MUST be an object with:
+{"categoryId": string|null, "categoryName": string|null, "categoryPath": string|null, "confidence": number(0..1), "reason": string|null}
+
 RAPIDOCR DETECTIONS:
 ${JSON.stringify(compactDetections)}
 
@@ -103,7 +113,7 @@ ${text(rawText)}
 AVAILABLE FINAL CATEGORIES:
 ${JSON.stringify(categories)}
 
-Return ONLY JSON matching the supplied output schema.`;
+Return ONLY one valid JSON object with all required keys. No markdown. No commentary.`;
 }
 
 export function normalizeSemanticResult(parsed, categoryOptions = []) {
@@ -141,6 +151,6 @@ export function parseJsonContent(content) {
   if (typeof content === "object" && content) return content;
   const raw = text(content);
   if (!raw) throw new Error("Semantic model returned an empty response.");
-  const fenced = raw.match(/```(?:json)?\\s*([\\s\\S]*?)\\s*```/i);
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   return JSON.parse(fenced ? fenced[1] : raw);
 }
