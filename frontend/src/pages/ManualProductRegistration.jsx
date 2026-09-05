@@ -16,7 +16,7 @@ function flatten(nodes, path = []) {
 
 async function fileToDataUrl(file) {
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));
+  const scale = Math.min(1, 960 / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(bitmap.width * scale));
   canvas.height = Math.max(1, Math.round(bitmap.height * scale));
@@ -24,7 +24,7 @@ async function fileToDataUrl(file) {
   if (!context) { bitmap.close(); throw new Error("Could not prepare image."); }
   context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
-  return canvas.toDataURL("image/jpeg", 0.72);
+  return canvas.toDataURL("image/jpeg", 0.62);
 }
 
 function ManualProductRegistration() {
@@ -86,7 +86,7 @@ function ManualProductRegistration() {
     const canvas = document.createElement("canvas"); canvas.width = video.videoWidth; canvas.height = video.videoHeight;
     const context = canvas.getContext("2d"); if (!context) return;
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob((blob) => { if (blob) addFiles([new File([blob], `manual-${Date.now()}.jpg`, { type: "image/jpeg" })]); closeCamera(); }, "image/jpeg", 0.88);
+    canvas.toBlob((blob) => { if (blob) addFiles([new File([blob], `manual-${Date.now()}.jpg`, { type: "image/jpeg" })]); closeCamera(); }, "image/jpeg", 0.80);
   }
 
   async function save(event) {
