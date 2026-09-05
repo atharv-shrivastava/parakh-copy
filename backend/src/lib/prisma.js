@@ -2,8 +2,18 @@ import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../generated/prisma/client.ts";
 
+// Prefer the runtime/pooler URL when provided. Keep DIRECT_URL as a local/CLI fallback.
+const connectionString = process.env.DATABASE_URL || process.env.DIRECT_URL || "";
+
+if (!connectionString) {
+  throw new Error("DATABASE_URL or DIRECT_URL must be configured for PARAKH backend database access.");
+}
+
 const adapter = new PrismaPg({
-  connectionString: process.env.DIRECT_URL,
+  connectionString,
+  max: 5,
+  connectionTimeoutMillis: 10000,
+  idleTimeoutMillis: 60000,
 });
 
 const prisma = new PrismaClient({
