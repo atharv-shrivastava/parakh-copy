@@ -160,6 +160,9 @@
 
 @media (max-width:480px) {
   .logo-full { line-height:1.3; }
+  .navigation { overflow-x:auto!important; }
+  .navigation .nav-label { display:inline!important; }
+  .navigation a { flex:0 0 auto!important; }
   .dashboard-hero-actions { flex-direction:column; }
   .dashboard-stat-grid { gap:9px!important; }
   .user-stat-card { min-height:110px; padding:15px; }
