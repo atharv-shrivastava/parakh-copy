@@ -18,7 +18,7 @@ async function buildContactSheet(images) {
       .toBuffer();
     const meta = await sharp(output).metadata();
     const height = Number(meta.height || 1);
-    rendered.push({ input: output, top: totalHeight });
+    rendered.push({ input: output, left: 0, top: totalHeight });
     totalHeight += height + 24;
   }
   const sheet = await sharp({
@@ -58,7 +58,7 @@ export async function interpretPackageWithCloudflare({ images = [], detections =
     if (signal?.aborted) throw new DOMException("The request was aborted.", "AbortError");
 
     const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`,
+      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${encodeURIComponent(model)}`,
       {
         method: "POST",
         headers: {
