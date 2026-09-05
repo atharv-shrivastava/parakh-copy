@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import {
   buildSemanticPrompt,
+  buildSemanticSchema,
   normalizeSemanticResult,
   parseJsonContent,
 } from "./semanticPackageCommon.js";
@@ -58,7 +59,7 @@ export async function interpretPackageWithCloudflare({ images = [], detections =
     if (signal?.aborted) throw new DOMException("The request was aborted.", "AbortError");
 
     const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${encodeURIComponent(model)}`,
+      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`,
       {
         method: "POST",
         headers: {
@@ -71,6 +72,10 @@ export async function interpretPackageWithCloudflare({ images = [], detections =
             { role: "user", content: prompt },
           ],
           image,
+          response_format: {
+            type: "json_schema",
+            json_schema: buildSemanticSchema(categoryOptions),
+          },
           max_tokens: 4096,
           temperature: 0.1,
         }),
