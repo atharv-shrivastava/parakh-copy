@@ -282,10 +282,17 @@ function Scan() {
     return findings.filter((finding) => finding?.status === "VIOLATION" || !finding?.status);
   }, [compliance]);
   const suggestedCategory = useMemo(() => {
-    const text = `${ocr?.rawText || ""} ${fieldValue(ocr, "productName")} ${fieldValue(ocr, "brandName")}`.toLowerCase();
+    const ai = ocr?.suggestedCategory || ocr?.aiSemantic?.suggestedCategory || null;
+    const aiId = ai?.categoryId ? String(ai.categoryId) : "";
+    if (aiId) {
+      const exact = finalCategories.find((category) => String(category.id) === aiId);
+      if (exact) return exact;
+    }
+    const sourceText = String(ocr?.rawText || "") + " " + fieldValue(ocr, "productName") + " " + fieldValue(ocr, "brandName");
+    const text = sourceText.toLowerCase();
     if (!text.trim()) return null;
     return finalCategories
-      .filter((c) => text.includes(c.name.toLowerCase()) || text.includes(c.slug.replaceAll("-", " ")))
+      .filter((category) => text.includes(String(category.name || "").toLowerCase()) || text.includes(String(category.slug || "").replaceAll("-", " ").toLowerCase()))
       .sort((a, b) => b.name.length - a.name.length)[0] || null;
   }, [ocr, finalCategories]);
 
