@@ -41,15 +41,12 @@ function History() {
   async function deleteSelected() {
     if (!selected.length || deleting || !window.confirm(`Delete ${selected.length} selected product record(s)? This also removes their inspection history.`)) return;
     setMessage(""); setDeleting(true);
-    try {
-      const response = await apiFetch(`${API_URL}/products/bulk`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: selected }) });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.error || "Delete failed");
-      setMessage(`${data.deletedCount ?? selected.length} selected record(s) deleted successfully.`);
-      await load();
-    } catch (error) {
-      setMessage(error?.message || "Some records could not be deleted.");
-    } finally { setDeleting(false); }
+    const ids = [...selected];
+    const results = await Promise.allSettled(ids.map((id) => apiFetch(`${API_URL}/products/${id}`, { method: "DELETE" })));
+    const failed = results.filter((result) => result.status === "rejected" || !result.value?.ok).length;
+    if (failed) setMessage(`${failed} record(s) could not be deleted.`); else setMessage("Selected records deleted successfully.");
+    await load();
+    setDeleting(false);
   }
 
   function clear() { setQuery(""); setStatus("ALL"); setSourceType("ALL"); setBrand(""); setShop(""); setDateFrom(""); setDateTo(""); setSelected([]); setMessage(""); }
