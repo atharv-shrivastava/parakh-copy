@@ -3,6 +3,21 @@ import { clearSession, getUser } from "../lib/auth";
 import { useLanguage } from "./LanguageProvider";
 import ScanVisualCheck from "./ScanVisualCheck";
 
+const NAV_ITEMS = [
+  ["/", "dashboard", "⌂"],
+  ["/scan", "scan", "⌁"],
+  ["/ecommerce-inspection", "ecommerce", "▣"],
+  ["/shops", "shops", "⌂"],
+  ["/products", "products", "◇"],
+  ["/history", "history", "↺"],
+  ["/reports", "reports", "▤"],
+  ["/profile", "account", "◉"],
+];
+
+function NavIcon({ children }) {
+  return <span className="nav-icon" aria-hidden="true">{children}</span>;
+}
+
 function Layout() {
   const user = getUser();
   const location = useLocation();
@@ -13,17 +28,14 @@ function Layout() {
     <aside className="sidebar">
       <div className="logo"><h2>PARAKH</h2><span>{t("compliancePlatform")}</span></div>
       <nav className="navigation">
-        <NavLink to="/" end>{t("dashboard")}</NavLink>
-        <NavLink to="/scan">{t("scan")}</NavLink>
-        <NavLink to="/ecommerce-inspection">{t("ecommerce")}</NavLink>
-        <NavLink to="/shops">{t("shops")}</NavLink>
-        <NavLink to="/products" end>{t("products")}</NavLink>
-        <NavLink to="/history">{t("history")}</NavLink>
-        <NavLink to="/reports">{t("reports")}</NavLink>
-        <NavLink to="/profile">{t("account")}</NavLink>
-        {user?.role === "ADMIN" && <><NavLink to="/admin">{t("adminDashboard")}</NavLink><NavLink to="/admin/categories">{t("globalCategories")}</NavLink><NavLink to="/admin/rules">{t("complianceRules")}</NavLink></>}
+        {NAV_ITEMS.map(([to, label, icon]) => <NavLink key={to} to={to} end={to === "/" || to === "/products"}><NavIcon>{icon}</NavIcon><span className="nav-label">{t(label)}</span></NavLink>)}
+        {user?.role === "ADMIN" && <>
+          <NavLink to="/admin"><NavIcon>⚙</NavIcon><span className="nav-label">{t("adminDashboard")}</span></NavLink>
+          <NavLink to="/admin/categories"><NavIcon>▦</NavIcon><span className="nav-label">{t("globalCategories")}</span></NavLink>
+          <NavLink to="/admin/rules"><NavIcon>✓</NavIcon><span className="nav-label">{t("complianceRules")}</span></NavLink>
+        </>}
       </nav>
-      <div className="sidebar-user"><strong>{user?.name || "User"}</strong><span>{user?.role || "USER"}</span><button type="button" onClick={logout}>{t("signOut")}</button></div>
+      <div className="sidebar-user"><strong>{user?.name || "User"}</strong><span>{user?.role || "USER"}</span><button type="button" onClick={logout}><span className="nav-icon" aria-hidden="true">↪</span>{t("signOut")}</button></div>
     </aside>
     <main className="main-content"><Outlet />{location.pathname === "/scan" && <ScanVisualCheck />}</main>
   </div>;
