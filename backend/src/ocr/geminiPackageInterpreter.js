@@ -27,8 +27,8 @@ export async function interpretPackageWithGemini({ images = [], detections = [],
       config: {
         responseMimeType: "application/json",
         responseSchema: buildSemanticSchema(categoryOptions),
-        temperature: 0.1,
-        maxOutputTokens: 4096,
+        thinkingConfig: { thinkingLevel: "low" },
+        maxOutputTokens: 1800,
       },
     });
 
