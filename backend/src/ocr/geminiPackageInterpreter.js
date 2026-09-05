@@ -8,8 +8,11 @@ import {
 
 export async function interpretPackageWithGemini({ images = [], detections = [], rawText = "", categoryOptions = [], signal } = {}) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.OCR_AI_API_KEY || "";
-  if (!apiKey) return { enabled: false, provider: "gemini", reason: "GEMINI_API_KEY is not configured." };
   const model = process.env.GEMINI_SEMANTIC_MODEL || "gemini-3.7-flash";
+  if (!apiKey) {
+    console.warn(`[ocr:gemini-semantic] SKIPPED model=${model} reason=GEMINI_API_KEY is not configured.`);
+    return { enabled: false, provider: "gemini", model, reason: "GEMINI_API_KEY is not configured." };
+  }
   const ai = new GoogleGenAI({ apiKey });
   const prompt = buildSemanticPrompt({ detections, rawText, categoryOptions });
   const contents = [
@@ -33,7 +36,7 @@ export async function interpretPackageWithGemini({ images = [], detections = [],
     return { enabled: true, provider: "gemini", model, fields: normalized.fields, suggestedCategory: normalized.suggestedCategory };
   } catch (error) {
     if (error?.name === "AbortError") throw error;
-    console.error("[ocr:gemini-semantic]", error);
+    console.error(`[ocr:gemini-semantic] FAILED model=${model} reason=${error?.message || "Gemini semantic interpretation failed."}`, error);
     return { enabled: false, provider: "gemini", model, reason: error?.message || "Gemini semantic interpretation failed." };
   }
 }
