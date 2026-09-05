@@ -56,26 +56,7 @@ def to_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def normalize_box(points: Any, width: int, height: int):
-    if not points:
-        return None
-    try:
-        xs = [to_float(point[0]) for point in points]
-        ys = [to_float(point[1]) for point in points]
-        if not xs or not ys:
-            return None
-        left = max(0.0, min(xs)) / max(1, width)
-        top = max(0.0, min(ys)) / max(1, height)
-        right = min(float(width), max(xs)) / max(1, width)
-        bottom = min(float(height), max(ys)) / max(1, height)
-        if right <= left or bottom <= top:
-            return None
-        return {"left": left, "top": top, "width": right - left, "height": bottom - top}
-    except (TypeError, IndexError, ValueError):
-        return None
-
-
-def extract_result(result: Any, image_index: int, width: int, height: int):
+def extract_result(result: Any, image_index: int):
     data = getattr(result, "json", None)
     if callable(data):
         data = data()
@@ -88,7 +69,6 @@ def extract_result(result: Any, image_index: int, width: int, height: int):
 
     texts = payload.get("rec_texts") or payload.get("texts") or []
     scores = payload.get("rec_scores") or payload.get("scores") or []
-    boxes = payload.get("rec_polys") or payload.get("dt_polys") or payload.get("polys") or []
 
     entries = []
     for index, value in enumerate(texts):
@@ -96,13 +76,11 @@ def extract_result(result: Any, image_index: int, width: int, height: int):
         if not text_value:
             continue
         confidence = max(0.0, min(1.0, to_float(scores[index], 0.0) if index < len(scores) else 0.0))
-        box = normalize_box(boxes[index], width, height) if index < len(boxes) else None
         entries.append({
             "imageIndex": image_index + 1,
             "type": "OCR_TEXT",
             "text": text_value,
             "confidence": confidence,
-            "boundingBox": box,
             "source": "paddleocr",
         })
     return entries
@@ -183,8 +161,8 @@ async def _analyze_contents(items: list[tuple[bytes, str]]):
 
     all_entries = []
     raw_text_parts = []
-    for image_index, (result, (_array, width, height)) in enumerate(zip(results, prepared)):
-        entries = extract_result(result, image_index, width, height)
+    for image_index, (result, (_array, _width, _height)) in enumerate(zip(results, prepared)):
+        entries = extract_result(result, image_index)
         all_entries.extend(entries)
         raw_text_parts.append("\n".join(entry["text"] for entry in entries))
 
