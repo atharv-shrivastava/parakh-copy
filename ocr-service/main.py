@@ -38,15 +38,12 @@ app.add_middleware(
 _lang = os.getenv("PADDLEOCR_LANG", "en")
 _use_doc_orientation = os.getenv("PADDLEOCR_DOC_ORIENTATION", "false").lower() == "true"
 _use_doc_unwarping = os.getenv("PADDLEOCR_DOC_UNWARPING", "false").lower() == "true"
-# Upright package photos are the normal case. Orientation classification is opt-in
-# for the PaddleOCR engine because it adds CPU work to every scan.
-_use_textline_orientation = os.getenv("PADDLEOCR_TEXTLINE_ORIENTATION", "false").lower() == "true"
+_use_textline_orientation = os.getenv("PADDLEOCR_TEXTLINE_ORIENTATION", "true").lower() == "true"
 _max_ocr_side = max(800, int(os.getenv("PADDLEOCR_MAX_SIDE", "1200")))
 _cache_ttl = max(5, int(os.getenv("PADDLEOCR_CACHE_TTL_SECONDS", "30")))
 _cache_limit = max(1, int(os.getenv("PADDLEOCR_CACHE_ITEMS", "8")))
 
-# PaddleOCR is the default production path. RapidOCR remains available only as an
-# explicit alternative through OCR_ENGINE=rapidocr.
+# PaddleOCR is the preferred engine. RapidOCR remains available only as an explicit fallback.
 _engine_name = os.getenv("OCR_ENGINE", "paddleocr").lower()
 _rapid_use_cls = os.getenv("RAPIDOCR_TEXT_ORIENTATION", "true").lower() == "true"
 _skew_rescue_enabled = os.getenv("PADDLEOCR_SKEW_RESCUE", "true").lower() == "true"
@@ -172,7 +169,6 @@ def extract_rapid_result(result: Any, image_index: int, width: int, height: int)
 
 
 def estimate_skew_degrees(image_array: np.ndarray) -> float:
-    """Estimate dominant near-horizontal text skew without changing normal images."""
     try:
         gray = cv2.cvtColor(image_array, cv2.COLOR_RGB2GRAY)
         height, width = gray.shape[:2]
@@ -270,24 +266,23 @@ async def _run_rapid_with_skew_rescue(image_array: np.ndarray, image_index: int,
 
 async def _run_ocr_engine(image_array: np.ndarray, image_index: int, width: int, height: int):
     if _engine_name == "paddleocr":
-        result = _get_paddleocr().predict(image_array)
+        result = await asyncio.to_thread(_get_paddleocr().predict, image_array)
         entries = []
         for item in result:
             entries.extend(extract_result(item, image_index, width, height))
         return entries, "paddleocr"
 
-    if _engine_name != "rapidocr":
-        raise RuntimeError(f"Unsupported OCR_ENGINE '{_engine_name}'. Use rapidocr or paddleocr.")
+    if _engine_name == "rapidocr":
+        entries = await _run_rapid_with_skew_rescue(image_array, image_index, width, height)
+        if entries:
+            return entries, "rapidocr"
+        result = await asyncio.to_thread(_get_paddleocr().predict, image_array)
+        paddle_entries = []
+        for item in result:
+            paddle_entries.extend(extract_result(item, image_index, width, height))
+        return paddle_entries, "paddleocr-fallback"
 
-    entries = await _run_rapid_with_skew_rescue(image_array, image_index, width, height)
-    if entries:
-        return entries, "rapidocr"
-
-    paddle_entries = []
-    result = await asyncio.to_thread(_get_paddleocr().predict, image_array)
-    for item in result:
-        paddle_entries.extend(extract_result(item, image_index, width, height))
-    return paddle_entries, "paddleocr-fallback"
+    raise RuntimeError(f"Unsupported OCR_ENGINE '{_engine_name}'. Use paddleocr or rapidocr.")
 
 
 def _cache_key(items: list[tuple[bytes, str]]) -> str:
@@ -377,17 +372,18 @@ async def analyze(images: list[UploadFile] = File(...)):
     key = _cache_key(items)
     cached = _get_cached(key)
     if cached is not None:
-        return cached
+        return {**cached, "cached": True}
 
     existing = _inflight.get(key)
     if existing is not None:
-        return await existing
+        result = await existing
+        return {**result, "cached": True}
 
     task = asyncio.create_task(_analyze_contents(items))
     _inflight[key] = task
     try:
         result = await task
         _store_cached(key, result)
-        return result
+        return {**result, "cached": False}
     finally:
         _inflight.pop(key, None)
