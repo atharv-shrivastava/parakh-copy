@@ -242,8 +242,8 @@ async function readImages(files) {
 }
 
 async function runSemanticProviders({ images, rapid, categoryOptions }) {
-  const cloudflareLlama = "@cf/meta/llama-3.2-11b-vision-instruct";
   const cloudflareGemma = "@cf/google/gemma-4-26b-a4b-it";
+  const cloudflareLlama = "@cf/meta/llama-4-scout-17b-16e-instruct";
   const providers = [
     { name: "gemini", fn: interpretPackageWithGemini, args: {} },
     { name: "cloudflare-gemma", fn: interpretPackageWithCloudflare, args: { modelOverride: cloudflareGemma, providerName: "cloudflare-gemma" } },
