@@ -9,7 +9,7 @@ import "../styles/profile.css";
 const THEME_GROUPS = [
   { id: "light", label: "Light", icon: "☀", ids: ["royal-blue", "emerald", "violet", "rose", "orange", "cyan", "indigo", "teal", "amber", "slate", "crimson", "plum"] },
   { id: "dark", label: "Dark", icon: "◐", ids: ["dark", "dark-emerald", "dark-violet", "ruby-dark", "purple-dark", "obsidian", "graphite", "black-grey", "red-black"] },
-  { id: "gradient", label: "Gradient", icon: "✦", ids: ["rainbow", "sunset-gradient", "ocean-gradient", "aurora-gradient", "candy-gradient"] },
+  { id: "gradient", label: "Gradient", icon: "✦", ids: ["rainbow", "sunset-gradient", "ocean-gradient", "aurora-gradient", "candy-gradient", "midnight-gradient", "nebula-gradient", "ember-gradient", "ocean-night-gradient", "cyber-gradient"] },
 ];
 
 function ThemeIcon({ kind }) {
