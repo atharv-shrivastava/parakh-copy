@@ -15,6 +15,7 @@ import "./styles/visual-polish.css";
 import "./styles/theme-backgrounds.css";
 import "./styles/rainbow-theme.css";
 import "./styles/dark-contrast-final.css";
+import "./styles/motion-polish.css";
 import { applyTheme, getTheme } from "./lib/theme";
 import { LanguageProvider } from "./components/LanguageProvider";
 
