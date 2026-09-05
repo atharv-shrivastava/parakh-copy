@@ -8,30 +8,30 @@ import {
 
 async function buildContactSheet(images) {
   if (!images.length) return null;
-  const width = 1400;
+  const width = 1000;
   const rendered = [];
   let totalHeight = 0;
   for (const image of images) {
     const buffer = Buffer.from(image.base64, "base64");
     const output = await sharp(buffer, { failOn: "none" })
       .resize({ width, height: width, fit: "inside", withoutEnlargement: false })
-      .png()
+      .jpeg({ quality: 76, chromaSubsampling: "4:2:0" })
       .toBuffer();
     const meta = await sharp(output).metadata();
     const height = Number(meta.height || 1);
     rendered.push({ input: output, left: 0, top: totalHeight });
-    totalHeight += height + 24;
+    totalHeight += height + 8;
   }
   const sheet = await sharp({
     create: {
       width,
       height: Math.max(1, totalHeight),
       channels: 3,
-      background: { r: 245, g: 245, b: 245 },
+      background: { r: 255, g: 255, b: 255 },
     },
   })
     .composite(rendered)
-    .jpeg({ quality: 88, chromaSubsampling: "4:4:4" })
+    .jpeg({ quality: 76, chromaSubsampling: "4:2:0" })
     .toBuffer();
   return `data:image/jpeg;base64,${sheet.toString("base64")}`;
 }
@@ -52,17 +52,11 @@ export async function interpretPackageWithCloudflare({
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || "";
   const model = modelOverride
     || process.env.CLOUDFLARE_SEMANTIC_MODEL
-    || "@cf/meta/llama-3.2-11b-vision-instruct";
+    || "@cf/google/gemma-4-26b-a4b-it";
 
   if (!apiToken || !accountId) {
-    return {
-      enabled: false,
-      provider: providerName,
-      model,
-      reason: "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required.",
-    };
+    return { enabled: false, provider: providerName, model, reason: "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required." };
   }
-
   if (!images.length) {
     return { enabled: false, provider: providerName, model, reason: "No package images supplied." };
   }
@@ -72,27 +66,39 @@ export async function interpretPackageWithCloudflare({
     const prompt = buildSemanticPrompt({ detections, rawText, categoryOptions });
     if (signal?.aborted) throw new DOMException("The request was aborted.", "AbortError");
 
+    let body;
+    if (model === "@cf/moondream/moondream3.1-9B-A2B") {
+      body = {
+        task: "query",
+        image,
+        question: `${prompt}\n\nReturn ONLY the JSON object. Do not include markdown fences or explanation.`,
+        reasoning: false,
+        temperature: 0,
+        max_tokens: 1400,
+      };
+    } else {
+      body = {
+        messages: [
+          { role: "system", content: "Return only valid JSON matching the requested package-field structure. Do not add commentary." },
+          { role: "user", content: prompt },
+        ],
+        image,
+        response_format: {
+          type: "json_schema",
+          json_schema: buildSemanticSchema(categoryOptions),
+        },
+        chat_template_kwargs: { enable_thinking: false },
+        max_tokens: 1800,
+        temperature: 0,
+      };
+    }
+
     const response = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`,
       {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: "Return only valid JSON matching the requested package-field structure. Do not add commentary." },
-            { role: "user", content: prompt },
-          ],
-          image,
-          response_format: {
-            type: "json_schema",
-            json_schema: buildSemanticSchema(categoryOptions),
-          },
-          max_tokens: 4096,
-          temperature: 0.1,
-        }),
+        headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
         signal,
       },
     );
@@ -106,7 +112,11 @@ export async function interpretPackageWithCloudflare({
       );
     }
 
-    const content = data?.result?.response ?? data?.result?.content ?? data?.result?.text ?? data?.response;
+    const content = data?.result?.response
+      ?? data?.result?.content
+      ?? data?.result?.text
+      ?? data?.result?.answer
+      ?? data?.response;
     const parsed = parseJsonContent(content);
     const normalized = normalizeSemanticResult(parsed, categoryOptions);
     return {
