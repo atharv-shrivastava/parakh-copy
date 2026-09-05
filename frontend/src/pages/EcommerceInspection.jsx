@@ -116,6 +116,7 @@ function mergeListingWithOcr(listing, ocr) {
 export default function EcommerceInspection() {
   const navigate = useNavigate();
   const controllerRef = useRef(null);
+  const analysisStartedRef = useRef(null);
   const [url, setUrl] = useState("");
   const [listing, setListing] = useState(null);
   const [ocr, setOcr] = useState(null);
@@ -131,6 +132,8 @@ export default function EcommerceInspection() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [analysisElapsedMs, setAnalysisElapsedMs] = useState(0);
+  const [analysisDurationMs, setAnalysisDurationMs] = useState(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -144,6 +147,14 @@ export default function EcommerceInspection() {
     return () => controllerRef.current?.abort();
   }, []);
 
+  useEffect(() => {
+    if (!busy) return undefined;
+    const tick = () => setAnalysisElapsedMs(Math.max(0, Date.now() - (analysisStartedRef.current || Date.now())));
+    tick();
+    const timer = window.setInterval(tick, 100);
+    return () => window.clearInterval(timer);
+  }, [busy]);
+
   const imageUrls = (listing?.imageUrls || []).slice(0, MAX_IMAGES);
   const findings = useMemo(() => compliance?.findings || [], [compliance]);
   const violationFindings = useMemo(() => findings.filter((f) => displayFindingStatus(f) === "VIOLATION"), [findings]);
@@ -155,13 +166,23 @@ export default function EcommerceInspection() {
   }, [categoryFilter, finalCategories]);
   const selectedManualRule = useMemo(() => ENGINE_RULE_OPTIONS.find(([code]) => code === manualRuleCode) || null, [manualRuleCode]);
 
+  function formatElapsed(ms) {
+    const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  const displayedAnalysisTime = formatElapsed(busy ? analysisElapsedMs : (analysisDurationMs ?? analysisElapsedMs));
+
   function resetState({ clearUrl = true, text = "E-commerce analyzer reset." } = {}) {
     controllerRef.current?.abort();
     controllerRef.current = null;
+    analysisStartedRef.current = null;
     if (clearUrl) setUrl("");
     setListing(null); setOcr(null); setCompliance(null); setCategoryId(""); setCategoryFilter("");
     setSelectedViolations([]); setManualViolations([]); setManualRuleCode(""); setManualRuleNumber(""); setManualViolationReason("");
-    setError(""); setMessage(text); setBusy(false);
+    setError(""); setMessage(text); setBusy(false); setAnalysisElapsedMs(0); setAnalysisDurationMs(null);
   }
 
   function cancelInspection() { resetState({ clearUrl: false, text: "Inspection cancelled. The current draft was discarded." }); }
@@ -176,6 +197,8 @@ export default function EcommerceInspection() {
     if (!/^https?:\/\/\S+$/i.test(value)) return setError("Enter a valid public product listing URL.");
     const controller = new AbortController();
     controllerRef.current?.abort(); controllerRef.current = controller;
+    analysisStartedRef.current = Date.now();
+    setAnalysisElapsedMs(0); setAnalysisDurationMs(null);
     setBusy(true); setError(""); setMessage("Fetching listing data and product images...");
     setListing(null); setOcr(null); setCompliance(null); setCategoryId(""); setCategoryFilter(""); setSelectedViolations([]); setManualViolations([]); setManualRuleCode(""); setManualRuleNumber(""); setManualViolationReason("");
     try {
@@ -225,7 +248,11 @@ export default function EcommerceInspection() {
       if (e?.name === "AbortError") return;
       setError(e.message || "E-commerce inspection failed.");
     } finally {
+      const elapsed = analysisStartedRef.current ? Date.now() - analysisStartedRef.current : 0;
       if (controllerRef.current === controller) controllerRef.current = null;
+      setAnalysisElapsedMs(elapsed);
+      setAnalysisDurationMs(elapsed);
+      analysisStartedRef.current = null;
       setBusy(false);
     }
   }
@@ -234,7 +261,7 @@ export default function EcommerceInspection() {
 
   async function reevaluate() {
     if (!listing?.url) return;
-    setBusy(true); setError("");
+    setBusy(true); setError(""); analysisStartedRef.current = Date.now(); setAnalysisElapsedMs(0); setMessage("Re-running the Rules Engine...");
     try {
       const overrides = Object.fromEntries(EDITABLE_FIELDS.map(([key]) => [key, listing[key] ?? ""]));
       const response = await apiFetch(`${API_URL}/products/ecommerce/evaluate`, {
@@ -245,7 +272,10 @@ export default function EcommerceInspection() {
       setListing(data.listing || listing); setCompliance(data.compliance || null); setSelectedDefaults(data.compliance);
       setMessage("Edited product data was re-checked by the Rules Engine.");
     } catch (e) { setError(e.message || "Rules Engine re-check failed."); }
-    finally { setBusy(false); }
+    finally {
+      const elapsed = analysisStartedRef.current ? Date.now() - analysisStartedRef.current : 0;
+      analysisStartedRef.current = null; setAnalysisElapsedMs(elapsed); setAnalysisDurationMs(elapsed); setBusy(false);
+    }
   }
 
   function toggleViolation(id) {
@@ -327,7 +357,12 @@ export default function EcommerceInspection() {
 
     <form className="ecommerce-panel ecommerce-url-form" onSubmit={inspectListing}>
       <label className="ecommerce-url-field"><span>Product listing URL</span><input className="ecommerce-url-input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/product/..." disabled={busy || saving} /></label>
-      <div className="ecommerce-edit-actions"><button className="primary-button ecommerce-inspect-button" type="submit" disabled={busy || saving}>{busy ? "Inspecting listing..." : "Inspect Listing"}</button>{busy && <button className="secondary-action" type="button" onClick={cancelInspection}>Cancel</button>}<button className="secondary-action" type="button" onClick={() => resetState()} disabled={busy || saving}>Reset</button></div>
+      <div className="ecommerce-edit-actions inspect-action-row">
+        <button className="primary-button ecommerce-inspect-button" type="submit" disabled={busy || saving}>{busy ? "Inspecting listing..." : "Inspect Listing"}</button>
+        {busy && <button className="secondary-action" type="button" onClick={cancelInspection}>Cancel</button>}
+        <button className="secondary-action" type="button" onClick={() => resetState()} disabled={busy || saving}>Reset</button>
+        {(busy || analysisDurationMs != null) && <span className="ecommerce-analysis-timer" aria-live="polite">Analysis time: <strong>{displayedAnalysisTime}</strong></span>}
+      </div>
       <small>Use public pages and sources that permit automated retrieval. Protected pages, private URLs and login-only content are not accessed.</small>
     </form>
 
