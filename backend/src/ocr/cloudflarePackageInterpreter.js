@@ -35,8 +35,14 @@ export async function interpretPackageWithCloudflare({
   const apiToken = process.env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_AUTH_TOKEN || process.env.CLOUDFLARE_API_KEY || "";
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || "";
   const model = modelOverride || process.env.CLOUDFLARE_SEMANTIC_MODEL || "@cf/google/gemma-4-26b-a4b-it";
-  if (!apiToken || !accountId) return { enabled: false, provider: providerName, model, reason: "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required." };
-  if (!images.length) return { enabled: false, provider: providerName, model, reason: "No package images supplied." };
+  if (!apiToken || !accountId) {
+    console.warn(`[ocr:${providerName}-semantic] SKIPPED model=${model} reason=CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID is not configured.`);
+    return { enabled: false, provider: providerName, model, reason: "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required." };
+  }
+  if (!images.length) {
+    console.warn(`[ocr:${providerName}-semantic] SKIPPED model=${model} reason=No package images supplied.`);
+    return { enabled: false, provider: providerName, model, reason: "No package images supplied." };
+  }
 
   let timeoutId = null;
   let requestSignal = signal;
@@ -78,7 +84,13 @@ export async function interpretPackageWithCloudflare({
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data?.success === false) {
-      throw new Error(data?.errors?.map((item) => item?.message).filter(Boolean).join("; ") || data?.result?.error || `Cloudflare Workers AI failed (${response.status}).`);
+      const providerError = data?.errors?.map((item) => item?.message).filter(Boolean).join("; ")
+        || data?.result?.error
+        || `Cloudflare Workers AI failed (${response.status}).`;
+      const error = new Error(providerError);
+      error.statusCode = response.status;
+      error.providerCode = data?.errors?.find((item) => item?.code != null)?.code ?? null;
+      throw error;
     }
 
     let content;
@@ -96,10 +108,14 @@ export async function interpretPackageWithCloudflare({
     return { enabled: true, provider: providerName, model, fields: normalized.fields, suggestedCategory: normalized.suggestedCategory };
   } catch (error) {
     if (error?.name === "AbortError") {
-      return { enabled: false, provider: providerName, model, reason: isMoondream ? "Cloudflare Moondream semantic provider timed out after 6500ms." : "Cloudflare semantic provider request was aborted." };
+      const reason = isMoondream ? "Cloudflare Moondream semantic provider timed out after 6500ms." : "Cloudflare semantic provider request was aborted.";
+      console.error(`[ocr:${providerName}-semantic] FAILED model=${model} reason=${reason}`);
+      return { enabled: false, provider: providerName, model, reason };
     }
-    console.warn(`[ocr:${providerName}-semantic] ${error?.message || "Cloudflare semantic interpretation failed."}`);
-    return { enabled: false, provider: providerName, model, reason: error?.message || "Cloudflare semantic interpretation failed." };
+    const status = error?.statusCode ? ` status=${error.statusCode}` : "";
+    const code = error?.providerCode != null ? ` code=${error.providerCode}` : "";
+    console.error(`[ocr:${providerName}-semantic] FAILED model=${model}${status}${code} reason=${error?.message || "Cloudflare semantic interpretation failed."}`);
+    return { enabled: false, provider: providerName, model, reason: error?.message || "Cloudflare semantic interpretation failed.", statusCode: error?.statusCode ?? null, providerCode: error?.providerCode ?? null };
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
   }
