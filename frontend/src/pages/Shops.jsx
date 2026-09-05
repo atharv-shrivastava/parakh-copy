@@ -184,7 +184,7 @@ function Shops() {
 
     <div className="shop-source-tabs" role="tablist" aria-label="Shop source">
       <button type="button" className={view === "OFFLINE" ? "active" : ""} onClick={() => setView("OFFLINE")}>{copy.offlineShops}</button>
-      <button type="button" className={view === "ECOMMERCE" ? "active" : ""} onClick={() => setView("ECOMMERCE")}>{copy.ecommerce}</button>
+      <button type="button" className={view === "ECOMMERCE" ? "active" : ""} onClick={() => setView("ECOMMERCE")}>{copy.ecommerceShops}</button>
     </div>
 
     <div className="shop-summary">
