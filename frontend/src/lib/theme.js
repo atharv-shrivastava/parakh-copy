@@ -20,6 +20,7 @@ export const THEMES = [
   { id: "graphite", name: "Graphite", primary: "#94a3b8", background: "#17191d", surface: "#22252a", text: "#f1f5f9", muted: "#a8b0bd", border: "#353941", sidebar: "#0c0e11" },
   { id: "black-grey", name: "Black & Grey", primary: "#d1d5db", background: "#101112", surface: "#1b1d20", text: "#f5f5f5", muted: "#a1a1aa", border: "#303237", sidebar: "#000000" },
   { id: "red-black", name: "Red & Black", primary: "#f43f5e", background: "#11090b", surface: "#1b1013", text: "#ffe4e6", muted: "#c59aa1", border: "#432129", sidebar: "#050304" },
+  { id: "rainbow", name: "Rainbow", primary: "#6366f1", background: "#f8fafc", surface: "#ffffff", text: "#111827", muted: "#475569", border: "#dbe4ef", sidebar: "#111827" },
 ];
 
 const KEY = "parakh_theme";
@@ -32,8 +33,8 @@ export function getTheme() {
 
 export function applyTheme(themeId) {
   const id = THEMES.some((theme) => theme.id === themeId) ? themeId : DEFAULT_THEME;
-  document.documentElement.dataset.theme = id;
   const darkThemes = new Set(["dark", "dark-emerald", "dark-violet", "ruby-dark", "purple-dark", "obsidian", "graphite", "black-grey", "red-black"]);
+  document.documentElement.dataset.theme = id;
   document.documentElement.style.colorScheme = darkThemes.has(id) ? "dark" : "light";
   localStorage.setItem(KEY, id);
   return id;
