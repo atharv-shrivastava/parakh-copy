@@ -12,6 +12,7 @@ function Shops() {
   const [status, setStatus] = useState("ALL");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -43,6 +44,25 @@ function Shops() {
   function resetFilters() {
     setQuery("");
     setStatus("ALL");
+  }
+
+  async function deleteShop(event, shop) {
+    event.preventDefault();
+    event.stopPropagation();
+    const confirmed = window.confirm(`Delete ${shop.name}? This will also delete its inspection records.`);
+    if (!confirmed) return;
+    setDeletingId(shop.id);
+    setError("");
+    try {
+      const response = await apiFetch(`${API_URL}/shops/${shop.id}`, { method: "DELETE" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || "Could not delete shop");
+      setShops((current) => current.filter((item) => item.id !== shop.id));
+    } catch (e) {
+      setError(e?.message || "Could not delete shop");
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return <div className="shops-page">
@@ -80,18 +100,23 @@ function Shops() {
     {!loading && !error && !shops.length && <div className="status-message">No {ecommerce ? "e-commerce websites" : "offline shops"} match the current filters.</div>}
 
     {!loading && !error && shops.length > 0 && <div className="shop-grid">
-      {shops.map((shop) => <Link key={shop.id} to={`/shops/${shop.id}`} className="shop-card">
-        <div className="shop-card-header">
-          <h2>{shop.name}</h2>
-          <span className={`shop-status ${String(shop.status || "REVIEW").toLowerCase()}`}>{String(shop.status || "REVIEW").replace("_", " ")}</span>
-        </div>
-        <p>{ecommerce ? "Website source" : ([shop.address, shop.city, shop.state].filter(Boolean).join(", ") || "Address not recorded")}</p>
-        <div className="shop-card-footer">
-          <span>{shop.productCount ?? 0} products</span>
-          <span>{shop.inspectionCount ?? 0} inspections</span>
-          <span>{shop.lastInspection ? new Date(shop.lastInspection).toLocaleDateString() : "No inspection"}</span>
-        </div>
-      </Link>)}
+      {shops.map((shop) => <article key={shop.id} className="shop-card">
+        <Link to={`/shops/${shop.id}`} className="shop-card-main">
+          <div className="shop-card-header">
+            <h2>{shop.name}</h2>
+            <span className={`shop-status ${String(shop.status || "REVIEW").toLowerCase()}`}>{String(shop.status || "REVIEW").replace("_", " ")}</span>
+          </div>
+          <p>{ecommerce ? "Website source" : ([shop.address, shop.city, shop.state].filter(Boolean).join(", ") || "Address not recorded")}</p>
+          <div className="shop-card-footer">
+            <span>{shop.productCount ?? 0} products</span>
+            <span>{shop.inspectionCount ?? 0} inspections</span>
+            <span>{shop.lastInspection ? new Date(shop.lastInspection).toLocaleDateString() : "No inspection"}</span>
+          </div>
+        </Link>
+        <button type="button" className="shop-delete" onClick={(event) => deleteShop(event, shop)} disabled={deletingId === shop.id} aria-label={`Delete ${shop.name}`}>
+          {deletingId === shop.id ? "Deleting..." : "Delete"}
+        </button>
+      </article>)}
     </div>}
   </div>;
 }
