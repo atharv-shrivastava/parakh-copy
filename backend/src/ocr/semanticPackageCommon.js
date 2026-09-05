@@ -48,23 +48,23 @@ export function buildSemanticSchema(categoryOptions = []) {
 }
 
 export function buildSemanticPrompt({ detections = [], rawText = "", categoryOptions = [] } = {}) {
-  const compactDetections = detections.slice(0, 220).map((item) => ({
+  const compactDetections = detections.slice(0, 160).map((item) => ({
     imageIndex: item.imageIndex,
     text: item.text,
     confidence: item.confidence,
   }));
-  const categories = categoryOptions.slice(0, 300).map((item) => ({
+  const categories = categoryOptions.slice(0, 250).map((item) => ({
     id: String(item.id),
     name: text(item.name),
     path: text(item.path),
   }));
-  return `PARAKH semantic package mapper. Inspect the supplied package image(s) AND the RapidOCR text together.
+  return `PARAKH semantic package mapper. Inspect the package image(s) AND RapidOCR text together.
 
-Map only fields that are actually supported by the image/OCR. Use visual context and nearby headings, not just literal keyword matching. A value can belong to a label on another line or nearby, e.g. "READ MRP HERE" followed by a price. Correct obvious OCR mistakes only when the image supports the correction. Never invent or autocomplete values.
+Map only fields supported by the image/OCR. Use visual context and nearby headings, not literal keyword matching. A value can belong to a label on another line or nearby, such as "READ MRP HERE" followed by a price. Correct OCR mistakes only when the image supports the correction. Never invent values.
 
-For each detected field return: value, confidence (0..1), status (found/absent/unreadable/ambiguous), and optionally raw, evidence, imageIndex. OMIT unsupported fields instead of returning long absent objects. Product name and brand are separate. Distinguish manufacturer/packer/marketer/importer. Distinguish net quantity from serving size. Distinguish MRP from sale/offer price. Do not assess legal compliance.
+For detected fields return value, confidence (0..1), status (found/absent/unreadable/ambiguous), with optional raw, evidence, imageIndex. OMIT unsupported fields. Keep product name and brand separate. Distinguish manufacturer/packer/marketer/importer, net quantity vs serving size, and MRP vs sale/offer price. Do not assess legal compliance.
 
-suggestedCategory must use only one supplied category id. Omit it when uncertain.
+suggestedCategory must use only a supplied category id and should be omitted when uncertain.
 
 RapidOCR detections:
 ${JSON.stringify(compactDetections)}
@@ -75,7 +75,7 @@ ${text(rawText)}
 Final categories:
 ${JSON.stringify(categories)}
 
-Return compact JSON only. No markdown, no commentary.`;
+Return compact JSON only. No markdown or commentary.`;
 }
 
 export function normalizeSemanticResult(parsed, categoryOptions = []) {
@@ -95,24 +95,53 @@ export function normalizeSemanticResult(parsed, categoryOptions = []) {
       ...(Number.isInteger(value?.imageIndex) ? { imageIndex: value.imageIndex } : {}),
     };
   }
-
   const suggestion = parsed?.suggestedCategory || {};
   const allowed = categoryOptions.find((item) => String(item.id) === String(suggestion.categoryId));
-  const suggestedCategory = {
-    categoryId: allowed ? String(allowed.id) : null,
-    categoryName: allowed ? text(allowed.name) : text(suggestion.categoryName) || null,
-    categoryPath: allowed ? text(allowed.path) : text(suggestion.categoryPath) || null,
-    confidence: confidence(suggestion.confidence),
-    reason: text(suggestion.reason) || null,
+  return {
+    fields: normalized,
+    suggestedCategory: {
+      categoryId: allowed ? String(allowed.id) : null,
+      categoryName: allowed ? text(allowed.name) : text(suggestion.categoryName) || null,
+      categoryPath: allowed ? text(allowed.path) : text(suggestion.categoryPath) || null,
+      confidence: confidence(suggestion.confidence),
+      reason: text(suggestion.reason) || null,
+    },
   };
-
-  return { fields: normalized, suggestedCategory };
 }
 
-export function parseJsonContent(content) {
+function recoverJson(raw) {
+  let s = raw.trim();
+  const first = s.indexOf("{");
+  if (first > 0) s = s.slice(first);
+  const last = s.lastIndexOf("}");
+  if (last >= 0) s = s.slice(0, last + 1);
+  try { return JSON.parse(s); } catch {}
+
+  let inString = false;
+  let escaped = false;
+  const stack = [];
+  for (const ch of s) {
+    if (escaped) { escaped = false; continue; }
+    if (ch === "\\") { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") stack.push("}");
+    else if (ch === "[") stack.push("]");
+    else if ((ch === "}" || ch === "]") && stack.at(-1) === ch) stack.pop();
+  }
+  if (inString) s += '"';
+  while (stack.length) s += stack.pop();
+  return JSON.parse(s);
+}
+
+export function parseJsonContent(content, { recoverTruncated = false } = {}) {
   if (typeof content === "object" && content) return content;
   const raw = text(content);
   if (!raw) throw new Error("Semantic model returned an empty response.");
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  return JSON.parse(fenced ? fenced[1] : raw);
+  const candidate = (fenced ? fenced[1] : raw).trim();
+  try { return JSON.parse(candidate); } catch (error) {
+    if (recoverTruncated) return recoverJson(candidate);
+    throw error;
+  }
 }
