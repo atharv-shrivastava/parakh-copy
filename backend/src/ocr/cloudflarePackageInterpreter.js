@@ -15,7 +15,7 @@ async function buildContactSheet(images) {
     const buffer = Buffer.from(image.base64, "base64");
     const output = await sharp(buffer, { failOn: "none" })
       .resize({ width, height: width, fit: "inside", withoutEnlargement: false })
-      .jpeg({ quality: 76, chromaSubsampling: "4:2:0" })
+      .jpeg({ quality: 72, chromaSubsampling: "4:2:0" })
       .toBuffer();
     const meta = await sharp(output).metadata();
     const height = Number(meta.height || 1);
@@ -31,7 +31,7 @@ async function buildContactSheet(images) {
     },
   })
     .composite(rendered)
-    .jpeg({ quality: 76, chromaSubsampling: "4:2:0" })
+    .jpeg({ quality: 72, chromaSubsampling: "4:2:0" })
     .toBuffer();
   return `data:image/jpeg;base64,${sheet.toString("base64")}`;
 }
@@ -54,86 +54,70 @@ export async function interpretPackageWithCloudflare({
     || process.env.CLOUDFLARE_SEMANTIC_MODEL
     || "@cf/google/gemma-4-26b-a4b-it";
 
-  if (!apiToken || !accountId) {
-    return { enabled: false, provider: providerName, model, reason: "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required." };
-  }
-  if (!images.length) {
-    return { enabled: false, provider: providerName, model, reason: "No package images supplied." };
-  }
+  if (!apiToken || !accountId) return { enabled: false, provider: providerName, model, reason: "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required." };
+  if (!images.length) return { enabled: false, provider: providerName, model, reason: "No package images supplied." };
 
   try {
     const image = await buildContactSheet(images);
     const prompt = buildSemanticPrompt({ detections, rawText, categoryOptions });
     if (signal?.aborted) throw new DOMException("The request was aborted.", "AbortError");
 
+    let endpoint;
     let body;
     if (model === "@cf/moondream/moondream3.1-9B-A2B") {
+      endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`;
       body = {
         task: "query",
         image,
-        question: `${prompt}\n\nReturn ONLY the JSON object. Do not include markdown fences or explanation.`,
+        question: `${prompt}\n\nReturn ONLY compact JSON for supported fields. No markdown or explanation.`,
         reasoning: false,
         temperature: 0,
-        max_tokens: 1400,
+        max_tokens: 1100,
       };
     } else {
+      endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1/chat/completions`;
       body = {
-        messages: [
-          { role: "system", content: "Return only valid JSON matching the requested package-field structure. Do not add commentary." },
-          { role: "user", content: prompt },
-        ],
-        image,
-        response_format: {
-          type: "json_schema",
-          json_schema: buildSemanticSchema(categoryOptions),
-        },
-        chat_template_kwargs: { enable_thinking: false },
-        max_tokens: 1800,
+        model,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: image } },
+          ],
+        }],
+        response_format: { type: "json_schema", json_schema: buildSemanticSchema(categoryOptions) },
+        max_completion_tokens: 1200,
         temperature: 0,
+        chat_template_kwargs: { enable_thinking: false },
       };
     }
 
-    const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal,
-      },
-    );
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    });
 
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data?.success === false) {
       throw new Error(
         data?.errors?.map((item) => item?.message).filter(Boolean).join("; ")
+          || data?.error?.message
           || data?.result?.error
           || `Cloudflare Workers AI failed (${response.status}).`,
       );
     }
 
-    const content = data?.result?.response
-      ?? data?.result?.content
-      ?? data?.result?.text
-      ?? data?.result?.answer
-      ?? data?.response;
+    const content = model === "@cf/moondream/moondream3.1-9B-A2B"
+      ? data?.result?.answer ?? data?.result?.response
+      : data?.choices?.[0]?.message?.content ?? data?.result?.response ?? data?.result?.content;
     const parsed = parseJsonContent(content);
     const normalized = normalizeSemanticResult(parsed, categoryOptions);
-    return {
-      enabled: true,
-      provider: providerName,
-      model,
-      fields: normalized.fields,
-      suggestedCategory: normalized.suggestedCategory,
-    };
+    return { enabled: true, provider: providerName, model, fields: normalized.fields, suggestedCategory: normalized.suggestedCategory };
   } catch (error) {
     if (error?.name === "AbortError") throw error;
     console.error(`[ocr:${providerName}-semantic]`, error);
-    return {
-      enabled: false,
-      provider: providerName,
-      model,
-      reason: error?.message || "Cloudflare semantic interpretation failed.",
-    };
+    return { enabled: false, provider: providerName, model, reason: error?.message || "Cloudflare semantic interpretation failed." };
   }
 }
