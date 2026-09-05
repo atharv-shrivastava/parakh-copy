@@ -161,14 +161,22 @@ function Shops() {
     event.stopPropagation();
     const confirmed = window.confirm(`Delete ${shop.name}? This will also delete its inspection records.`);
     if (!confirmed) return;
+
     setDeletingId(shop.id);
     setError("");
+
+    // Optimistic removal keeps the interface instant while the database finishes the deletion.
+    setShops((current) => current.filter((item) => item.id !== shop.id));
+
     try {
       const response = await apiFetch(`${API_URL}/shops/${shop.id}`, { method: "DELETE" });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data?.error || "Could not delete shop");
-      setShops((current) => current.filter((item) => item.id !== shop.id));
     } catch (e) {
+      setShops((current) => {
+        if (current.some((item) => item.id === shop.id)) return current;
+        return [...current, shop].sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+      });
       setError(e?.message || "Could not delete shop");
     } finally {
       setDeletingId(null);
