@@ -270,6 +270,7 @@ function buildStructuredResult(rapid, aiSemantic = null) {
     semanticReconciliation: aiSemantic?.enabled ? { providerCount: aiSemantic.providerCount, providers: aiSemantic.providers } : reconciliation?.metadata || null,
     candidateEvidence: reconciliation?.candidateEvidence || {},
     aiSemantic: aiSemantic?.enabled ? { providerCount: aiSemantic.providerCount, providers: aiSemantic.providers, suggestedCategory: aiSemantic.suggestedCategory } : null,
+    suggestedCategory: aiSemantic?.suggestedCategory || null,
     presentationChecks,
   };
 }
