@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { clearSession, getUser } from "../lib/auth";
 import { useLanguage } from "./LanguageProvider";
@@ -23,7 +24,15 @@ function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { t } = useLanguage();
+  const [dataRevision, setDataRevision] = useState(0);
   function logout() { clearSession(); navigate("/login", { replace: true }); }
+
+  useEffect(() => {
+    const refresh = () => setDataRevision((value) => value + 1);
+    window.addEventListener("parakh:data-invalidated", refresh);
+    return () => window.removeEventListener("parakh:data-invalidated", refresh);
+  }, []);
+
   return <div className="app-layout">
     <aside className="sidebar">
       <div className="logo">
@@ -46,7 +55,7 @@ function Layout() {
       </nav>
       <div className="sidebar-user"><strong>{user?.name || "User"}</strong><span>{user?.role || "USER"}</span><button type="button" onClick={logout}><span className="nav-icon" aria-hidden="true">↪</span>{t("signOut")}</button></div>
     </aside>
-    <main className="main-content"><Outlet />{location.pathname === "/scan" && <ScanVisualCheck />}</main>
+    <main className="main-content"><Outlet key={`${location.pathname}:${dataRevision}`} />{location.pathname === "/scan" && <ScanVisualCheck />}</main>
   </div>;
 }
 export default Layout;
