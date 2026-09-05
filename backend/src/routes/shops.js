@@ -18,11 +18,22 @@ router.get("/", async (req, res) => {
         ...(sourceType !== "ALL" ? { sourceType: sourceType === "ECOMMERCE" ? "ECOMMERCE" : "OFFLINE" } : {}),
         ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { city: { contains: q, mode: "insensitive" } }, { address: { contains: q, mode: "insensitive" } }] } : {}),
       },
-      include: { inspections: { include: { product: true }, orderBy: { inspectedAt: "desc" } } },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        city: true,
+        state: true,
+        sourceType: true,
+        inspections: {
+          select: { productId: true, status: true, inspectedAt: true },
+          orderBy: { inspectedAt: "desc" },
+        },
+      },
       orderBy: { name: "asc" },
     });
     const data = shops.map((shop) => {
-      const products = new Map(shop.inspections.map((i) => [i.productId, i.product]));
+      const products = new Set(shop.inspections.map((i) => i.productId));
       const statuses = shop.inspections.map((i) => i.status);
       const computedStatus = statuses.includes("VIOLATION") ? "NON_COMPLIANT" : statuses.includes("NEEDS_REVIEW") || statuses.includes("UNABLE_TO_VERIFY") ? "REVIEW" : "COMPLIANT";
       return { id: shop.id, name: shop.name, address: shop.address, city: shop.city, state: shop.state, sourceType: shop.sourceType || "OFFLINE", productCount: products.size, inspectionCount: shop.inspections.length, lastInspection: shop.inspections[0]?.inspectedAt || null, status: computedStatus };
