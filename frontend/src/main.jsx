@@ -11,6 +11,7 @@ import "./styles/performance-overrides.css";
 import "./styles/modern-system.css";
 import "./styles/dark-contrast.css";
 import "./styles/dashboard-polish.css";
+import "./styles/visual-polish.css";
 import { applyTheme, getTheme } from "./lib/theme";
 import { LanguageProvider } from "./components/LanguageProvider";
 
