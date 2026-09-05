@@ -51,7 +51,7 @@ function Profile() {
       <div className="theme-settings">
         <div className="theme-settings-heading"><div><h2>{t("setTheme")}</h2><p>{t("themeHelp")}</p></div><span className="theme-current-badge">{THEMES.find((item) => item.id === theme)?.name || theme}</span></div>
         <select className="theme-select" value={theme} onChange={changeTheme} aria-label="Application theme">
-          {THEMES.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          {THEME_GROUPS.map((group) => <optgroup key={group.id} label={group.label}>{THEMES.filter((item) => group.ids.includes(item.id)).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}
         </select>
         <div className="theme-groups">
           {THEME_GROUPS.map((group) => {
