@@ -32,9 +32,9 @@ function normalizeText(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
-async function analyzeWithPaddle(images) {
+async function analyzeWithRapid(images) {
   const formData = new FormData();
-  const paddleUrl = process.env.PADDLE_OCR_URL || "http://localhost:8081";
+  const ocrUrl = process.env.RAPID_OCR_URL || process.env.PADDLE_OCR_URL || "http://localhost:8081";
 
   images.forEach((image, imageIndex) => {
     const bytes = Buffer.from(image.base64, "base64");
@@ -45,15 +45,15 @@ async function analyzeWithPaddle(images) {
     );
   });
 
-  const response = await fetch(`${paddleUrl}/api/ocr/analyze`, {
+  const response = await fetch(`${ocrUrl}/api/ocr/analyze`, {
     method: "POST",
     body: formData,
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw Object.assign(
-      new Error(data?.error || data?.message || data?.detail || `PaddleOCR failed (${response.status}).`),
-      { code: "OCR_PADDLE_ERROR", statusCode: 502 },
+      new Error(data?.error || data?.message || data?.detail || `RapidOCR failed (${response.status}).`),
+      { code: "OCR_RAPID_ERROR", statusCode: 502 },
     );
   }
 
@@ -62,7 +62,7 @@ async function analyzeWithPaddle(images) {
       .map((item, index) => {
         const serviceImageIndex = Number(item?.imageIndex);
         return {
-          id: String(item?.id ?? `paddle-evidence-${index}`),
+          id: String(item?.id ?? `rapid-evidence-${index}`),
           imageIndex: Number.isFinite(serviceImageIndex) && serviceImageIndex >= 1
             ? serviceImageIndex - 1
             : 0,
@@ -75,7 +75,7 @@ async function analyzeWithPaddle(images) {
 
   const rawText = normalizeText(data?.result?.rawText) || evidence.map((item) => item.text).join("\n");
   return {
-    provider: "paddleocr",
+    provider: "rapidocr",
     model: "RapidOCR",
     rawText,
     evidence,
@@ -160,10 +160,10 @@ function buildSemanticDeclarationEvidence(fields) {
     .filter(Boolean);
 }
 
-function buildStructuredResult(paddle, aiSemantic = null) {
+function buildStructuredResult(rapid, aiSemantic = null) {
   const reconciliation = interpretOcrFields({
-    detections: paddle.evidence,
-    rawText: paddle.rawText,
+    detections: rapid.evidence,
+    rawText: rapid.rawText,
   });
 
   const fields = mergeSemanticFields(reconciliation?.fields || {}, aiSemantic?.fields || {});
@@ -177,7 +177,7 @@ function buildStructuredResult(paddle, aiSemantic = null) {
     result[key] = normalizeField(fields[key]);
   }
 
-  const rawDeclarationEvidence = paddle.evidence
+  const rawDeclarationEvidence = rapid.evidence
     .filter((item) => item.text)
     .map((item, index) => ({
       id: String(item.id || `ocr-evidence-${index}`),
@@ -207,7 +207,7 @@ function buildStructuredResult(paddle, aiSemantic = null) {
     otherDeclarations: rawDeclarationEvidence.map((item) => item.text),
     declarationEvidence,
     rawOcrEvidence: rawDeclarationEvidence,
-    rawText: paddle.rawText,
+    rawText: rapid.rawText,
     warnings,
     unreadableFields: Object.entries(result).filter(([, field]) => field?.status === "unreadable").map(([key]) => key),
     needsReview,
@@ -244,32 +244,25 @@ async function handleFastAnalyze(req, res, files) {
     }
 
     const uploadMs = Date.now() - startedAt;
-    const parallelStart = Date.now();
-    const paddleStart = parallelStart;
-    const geminiStart = parallelStart;
 
-    const paddlePromise = analyzeWithPaddle(images).then((value) => ({
-      value,
-      durationMs: Date.now() - paddleStart,
-    }));
-    const geminiPromise = interpretPackageWithGemini({
+    const rapidStart = Date.now();
+    const rapid = await analyzeWithRapid(images);
+    const rapidMs = Date.now() - rapidStart;
+
+    const geminiStart = Date.now();
+    const aiSemantic = await interpretPackageWithGemini({
       images,
+      detections: rapid.evidence,
+      rawText: rapid.rawText,
       categoryOptions,
-    }).then((value) => ({
-      value,
-      durationMs: Date.now() - geminiStart,
-    }));
+    });
+    const geminiMs = Date.now() - geminiStart;
 
-    const [{ value: paddle, durationMs: paddleMs }, { value: aiSemantic, durationMs: geminiMs }] = await Promise.all([
-      paddlePromise,
-      geminiPromise,
-    ]);
-    const parallelMs = Date.now() - parallelStart;
-
-    const result = buildStructuredResult(paddle, aiSemantic);
+    const result = buildStructuredResult(rapid, aiSemantic);
     const totalMs = Date.now() - startedAt;
+    const parallelMs = totalMs - uploadMs;
 
-    console.log(`[ocr:fast] images=${files.length} evidence=${paddle.evidence.length} paddle=${paddleMs}ms gemini=${geminiMs}ms parallel=${parallelMs}ms total=${totalMs}ms aiEnabled=${Boolean(aiSemantic.enabled)}`);
+    console.log(`[ocr:fast] images=${files.length} evidence=${rapid.evidence.length} rapid=${rapidMs}ms gemini=${geminiMs}ms total=${totalMs}ms aiEnabled=${Boolean(aiSemantic.enabled)}`);
 
     res.json({
       result,
@@ -277,7 +270,7 @@ async function handleFastAnalyze(req, res, files) {
       model: "RapidOCR",
       detectionProvider: "rapidocr",
       detectionProviders: ["rapidocr"],
-      rawText: paddle.rawText,
+      rawText: rapid.rawText,
       semantic: aiSemantic?.enabled ? {
         provider: aiSemantic.provider,
         model: aiSemantic.model,
@@ -286,7 +279,7 @@ async function handleFastAnalyze(req, res, files) {
       aiSuggestedCategory: aiSemantic?.suggestedCategory || null,
       aiSemanticEnabled: Boolean(aiSemantic?.enabled),
       aiSemanticError: aiSemantic?.enabled ? null : aiSemantic?.reason || null,
-      timing: { uploadMs, paddleMs, geminiMs, parallelMs, totalMs },
+      timing: { uploadMs, rapidMs, geminiMs, totalMs, parallelMs },
       fallbackReason: result.warnings?.find((item) => item.includes("AI semantic assist unavailable")) || null,
     });
   } catch (error) {
