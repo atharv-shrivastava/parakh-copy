@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { saveSession } from "../lib/auth";
+import { LANGUAGES } from "../lib/language";
+import { useLanguage } from "../components/LanguageProvider";
 import "../styles/auth.css";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
@@ -12,6 +14,7 @@ function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const { language, setLanguage, t } = useLanguage();
 
   async function submit(event) {
     event.preventDefault(); setLoading(true); setError("");
@@ -20,10 +23,32 @@ function Login() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Login failed");
       saveSession(data.token, data.user);
+      setLanguage(language);
       navigate(location.state?.from || "/", { replace: true });
     } catch (err) { setError(err.message); } finally { setLoading(false); }
   }
 
-  return <div className="auth-page"><div className="auth-card"><p className="eyebrow">PARAKH</p><h1>Sign in</h1><p>Sign in as a user or administrator.</p><form onSubmit={submit}><label>Email<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></label><label>Password<input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>{error && <div className="status-message">{error}</div>}<button className="primary-button" disabled={loading}>{loading ? "Signing in..." : "Sign in"}</button></form><p>New user? <Link to="/register">Create an account</Link></p></div></div>;
+  return <div className="auth-page">
+    <div className="auth-glow auth-glow-one" aria-hidden="true" />
+    <div className="auth-glow auth-glow-two" aria-hidden="true" />
+    <div className="auth-card">
+      <div className="auth-card-topline"><p className="eyebrow">{t("parakh")}</p><span className="auth-orb" aria-hidden="true">P</span></div>
+      <h1>{t("signIn")}</h1>
+      <p>{t("signInSubtitle")}</p>
+      <div className="language-picker language-picker-login">
+        <label htmlFor="login-language">{t("chooseLanguage")}</label>
+        <select id="login-language" value={language} onChange={(e) => setLanguage(e.target.value)} aria-label={t("chooseLanguage")}>
+          {LANGUAGES.map((item) => <option key={item.code} value={item.code}>{item.nativeName} · {item.name}</option>)}
+        </select>
+      </div>
+      <form onSubmit={submit}>
+        <label>{t("email")}<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+        <label>{t("password")}<input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+        {error && <div className="status-message">{error}</div>}
+        <button className="primary-button" disabled={loading}>{loading ? t("signingIn") : t("signIn")}</button>
+      </form>
+      <p>{t("newUser")} <Link to="/register">{t("createAccount")}</Link></p>
+    </div>
+  </div>;
 }
 export default Login;
