@@ -63,7 +63,7 @@ export default function Dashboard() {
   return <main className="dashboard dashboard-modern">
     <header className="dashboard-hero">
       <div className="dashboard-hero-copy"><p className="eyebrow">PARAKH · INSPECTION WORKSPACE</p><h1>{t("welcome")}, {user?.name || "Inspector"}.</h1><p>{t("inspectSubtitle")}</p></div>
-      <div className="dashboard-hero-actions"><Link className="dashboard-primary-action" to="/scan"><span>＋</span> New inspection</Link><Link className="dashboard-secondary-action" to="/products/manual-register">Manual registration</Link></div>
+      <div className="dashboard-hero-actions"><Link className="dashboard-primary-action" to="/scan"><span>＋</span> New scan</Link><Link className="dashboard-secondary-action" to="/products/manual-register">Manual registration</Link></div>
     </header>
     {error && <div className="dashboard-alert">{error}</div>}
     <section className="dashboard-stat-grid">
