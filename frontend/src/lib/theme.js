@@ -21,6 +21,10 @@ export const THEMES = [
   { id: "black-grey", name: "Black & Grey", primary: "#d1d5db", background: "#101112", surface: "#1b1d20", text: "#f5f5f5", muted: "#a1a1aa", border: "#303237", sidebar: "#000000" },
   { id: "red-black", name: "Red & Black", primary: "#f43f5e", background: "#11090b", surface: "#1b1013", text: "#ffe4e6", muted: "#c59aa1", border: "#432129", sidebar: "#050304" },
   { id: "rainbow", name: "Rainbow", primary: "#6366f1", background: "#f8fafc", surface: "#ffffff", text: "#111827", muted: "#475569", border: "#dbe4ef", sidebar: "#111827" },
+  { id: "sunset-gradient", name: "Sunset Gradient", primary: "#f97316", background: "#fff7ed", surface: "#ffffff", text: "#2b1720", muted: "#6b5360", border: "#f7d9cb", sidebar: "#4a1021" },
+  { id: "ocean-gradient", name: "Ocean Gradient", primary: "#0ea5e9", background: "#eff9ff", surface: "#ffffff", text: "#082f49", muted: "#46677a", border: "#cfeaf6", sidebar: "#082f49" },
+  { id: "aurora-gradient", name: "Aurora Gradient", primary: "#10b981", background: "#f0fdfa", surface: "#ffffff", text: "#102722", muted: "#526f69", border: "#d3ebe5", sidebar: "#12332d" },
+  { id: "candy-gradient", name: "Candy Gradient", primary: "#ec4899", background: "#fff5fb", surface: "#ffffff", text: "#31152b", muted: "#72596e", border: "#f3d6ea", sidebar: "#3b1734" },
 ];
 
 const KEY = "parakh_theme";
