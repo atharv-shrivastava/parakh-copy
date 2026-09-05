@@ -50,7 +50,7 @@ function buildSchema(categoryOptions) {
   };
 }
 
-function buildPrompt({ detections, rawText, categoryOptions }) {
+function buildPrompt({ detections = [], rawText = "", categoryOptions = [] }) {
   const compactDetections = detections.slice(0, 350).map((item) => ({
     id: item.id,
     imageIndex: item.imageIndex,
@@ -65,7 +65,7 @@ function buildPrompt({ detections, rawText, categoryOptions }) {
     path: text(item.path),
   }));
 
-  return `You are PARAKH's package interpretation assistant. Use the supplied package images as the primary visual evidence and the PaddleOCR detections as supporting text evidence. This is semantic interpretation, not compliance adjudication.\n\nSTRICT RULES:\n- Read only information visibly present on the package images or supported by the supplied OCR detections.\n- Never invent, autocomplete, or infer a declaration that is not supported by visible evidence.\n- If a field is not visible, status=absent and value=null.\n- If visible but illegible, status=unreadable and value=null.\n- If conflicting evidence exists, status=ambiguous and preserve the best evidence in raw/evidence.\n- Preserve printed wording as closely as possible.\n- You may correct obvious OCR character errors only when the image itself clearly supports the correction.\n- For MRP, quantity, dates, FSSAI, barcode and contact details, prioritize exact visual text and nearby OCR evidence.\n- Product name and brand are independent fields. Use package layout, typography, surrounding descriptors and repeated evidence across images. Do not assume the largest text is always the product name.\n- Do not confuse manufacturer names with brands.\n- Do not confuse generic descriptors such as Natural, Premium, Foods, Toothpaste, etc. with a brand unless the package clearly presents them as branding.\n- Do not assess legal compliance.\n- suggestedCategory MUST be selected only from the supplied final-category list. Never invent a categoryId.\n- Choose the most specific category supported by visible product identity. If uncertain, use the closest available category with lower confidence.\n\nPADDLE OCR DETECTIONS:\n${JSON.stringify(compactDetections)}\n\nRAW OCR TEXT:\n${text(rawText)}\n\nAVAILABLE FINAL CATEGORIES:\n${JSON.stringify(categories)}\n\nReturn ONLY JSON matching the supplied schema.`;
+  return `You are PARAKH's package interpretation assistant. Use the supplied package images as the primary visual evidence and the PaddleOCR detections as optional supporting evidence. This request may run in parallel with OCR, so the OCR evidence can be empty. The images are authoritative for visible text and layout.\n\nSTRICT RULES:\n- Read only information visibly present on the package images or supported by supplied OCR detections.\n- Never invent, autocomplete, or infer a declaration that is not supported by visible evidence.\n- If a field is not visible, status=absent and value=null.\n- If visible but illegible, status=unreadable and value=null.\n- If conflicting evidence exists, status=ambiguous and preserve the best evidence in raw/evidence.\n- Preserve printed wording as closely as possible.\n- You may correct obvious OCR character errors only when the image itself clearly supports the correction.\n- For MRP, quantity, dates, FSSAI, barcode and contact details, prioritize exact visual text and nearby spatial context.\n- Product name and brand are independent fields. Use package layout, typography, surrounding descriptors and repeated evidence across images. Do not assume the largest text is always the product name.\n- Do not confuse manufacturer names with brands.\n- Do not confuse generic descriptors such as Natural, Premium, Foods, Toothpaste, etc. with a brand unless the package clearly presents them as branding.\n- Do not assess legal compliance.\n- suggestedCategory MUST be selected only from the supplied final-category list. Never invent a categoryId.\n- Choose the most specific category supported by visible product identity. If uncertain, use the closest available category with lower confidence.\n\nPADDLE OCR DETECTIONS (may be empty because OCR runs in parallel):\n${JSON.stringify(compactDetections)}\n\nRAW OCR TEXT (may be empty because OCR runs in parallel):\n${text(rawText)}\n\nAVAILABLE FINAL CATEGORIES:\n${JSON.stringify(categories)}\n\nReturn ONLY JSON matching the supplied schema.`;
 }
 
 export async function interpretPackageWithGemini({ images = [], detections = [], rawText = "", categoryOptions = [], signal } = {}) {
@@ -75,8 +75,7 @@ export async function interpretPackageWithGemini({ images = [], detections = [],
   }
 
   const model = process.env.GEMINI_SEMANTIC_MODEL || "gemini-2.5-flash-lite";
-  const timeoutMs = Number(process.env.GEMINI_SEMANTIC_TIMEOUT_MS || "25000");
-  const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: timeoutMs } });
+  const ai = new GoogleGenAI({ apiKey });
   const prompt = buildPrompt({ detections, rawText, categoryOptions });
 
   const contents = [
@@ -94,7 +93,6 @@ export async function interpretPackageWithGemini({ images = [], detections = [],
         responseSchema: buildSchema(categoryOptions),
         temperature: 0.1,
         maxOutputTokens: 4096,
-        httpOptions: { timeout: timeoutMs },
       },
     });
 
