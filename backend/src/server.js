@@ -7,6 +7,7 @@ import authRouter from "./routes/auth.js";
 import shopsRouter from "./routes/shops.js";
 import adminRouter from "./routes/admin.js";
 import rulesRouter from "./routes/rules.js";
+import translateRouter from "./routes/translate.js";
 import fastOcrRouter from "./ocr/fastRoutes.js";
 import ocrRouter from "./ocr/routes.js";
 import ecommerceOcrRouter from "./routes/ecommerceOcr.js";
@@ -23,6 +24,7 @@ app.use("/api/products", productsRouter);
 app.use("/api/shops", shopsRouter);
 app.use("/api/rules", rulesRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/translate", translateRouter);
 app.use("/api/products/ecommerce-ocr", ecommerceOcrRouter);
 // Production OCR uses only local PaddleOCR + local semantic mapping.
 app.use("/api/ocr", fastOcrRouter);
