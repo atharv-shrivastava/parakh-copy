@@ -54,6 +54,9 @@ async function analyzeWithRapid(images) {
           imageIndex: Number.isFinite(serviceImageIndex) && serviceImageIndex >= 1 ? serviceImageIndex - 1 : 0,
           text: normalizeText(item?.text),
           confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
+          ...(item?.boundingBox ? { boundingBox: item.boundingBox } : {}),
+          ...(item?.imageWidth ? { imageWidth: Number(item.imageWidth) } : {}),
+          ...(item?.imageHeight ? { imageHeight: Number(item.imageHeight) } : {}),
         };
       }).filter((item) => item.text)
     : [];
@@ -116,6 +119,115 @@ function buildSemanticDeclarationEvidence(fields) {
   }).filter(Boolean);
 }
 
+function buildPresentationChecks(rapid, fields) {
+  const relevant = [
+    "productName", "brandName", "manufacturer", "packer", "importer",
+    "netQuantity", "mrp", "dateOfManufacture", "dateOfPacking", "bestBefore",
+    "expiryDate", "consumerCarePhone", "consumerCareEmail", "countryOfOrigin",
+    "fssaiLicenseNumber", "batchNumber",
+  ];
+
+  const normalize = (value) => normalizeText(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const similarity = (a, b) => {
+    const left = normalize(a);
+    const right = normalize(b);
+    if (!left || !right) return 0;
+    if (left === right) return 1;
+    if (left.includes(right) || right.includes(left)) return 0.92;
+    const leftWords = new Set(left.split(" ").filter((x) => x.length > 2));
+    const rightWords = new Set(right.split(" ").filter((x) => x.length > 2));
+    const intersection = [...leftWords].filter((x) => rightWords.has(x)).length;
+    return intersection / Math.max(1, Math.max(leftWords.size, rightWords.size));
+  };
+
+  const byImage = new Map();
+  for (const item of rapid.evidence || []) {
+    if (!item?.boundingBox) continue;
+    if (!byImage.has(item.imageIndex)) byImage.set(item.imageIndex, []);
+    byImage.get(item.imageIndex).push(item);
+  }
+
+  const rows = {};
+  for (const key of relevant) {
+    const field = normalizeField(fields?.[key]);
+    const target = field.value || field.raw || field.evidence || "";
+    let best = null;
+    for (const item of rapid.evidence || []) {
+      if (!item?.boundingBox || (Number.isInteger(field.imageIndex) && item.imageIndex !== field.imageIndex)) continue;
+      const score = Math.max(
+        similarity(target, item.text),
+        similarity(field.raw, item.text),
+        similarity(field.evidence, item.text),
+      );
+      if (score < 0.45) continue;
+      if (!best || score > best.score || (score === best.score && item.confidence > best.item.confidence)) best = { item, score };
+    }
+
+    const box = best?.item?.boundingBox || null;
+    const width = Number(best?.item?.imageWidth || 0);
+    const height = Number(best?.item?.imageHeight || 0);
+    const lineHeightRatio = box && height ? box.height / height : null;
+    const imageKey = best?.item?.imageIndex ?? field.imageIndex ?? 0;
+    const imageLines = byImage.get(imageKey) || [];
+    const medianHeight = imageLines.length
+      ? [...imageLines].map((x) => Number(x.boundingBox?.height || 0)).filter(Boolean).sort((a, b) => a - b)[Math.floor(imageLines.length / 2)]
+      : null;
+    const relativeSize = box && medianHeight ? box.height / Math.max(1, medianHeight) : null;
+
+    let readability = "NOT_ESTABLISHED";
+    if (field.status === "unreadable" || field.status === "ambiguous" || field.confidence < 0.6) readability = "REVIEW";
+    else if (box && relativeSize !== null && relativeSize < 0.55) readability = "SMALL_TEXT_REVIEW";
+    else if (field.value) readability = "LIKELY_READABLE";
+
+    let fontSizeScreening = "NOT_MEASURED";
+    if (box && lineHeightRatio !== null) {
+      fontSizeScreening = lineHeightRatio < 0.006 ? "VERY_SMALL_REVIEW" : lineHeightRatio < 0.010 ? "SMALL_TEXT_REVIEW" : "DETECTED";
+    }
+
+    let placement = "NOT_LOCATED";
+    let zone = null;
+    if (box && width && height) {
+      const cx = box.left + box.width / 2;
+      const cy = box.top + box.height / 2;
+      const horizontal = cx < width / 3 ? "LEFT" : cx > (width * 2) / 3 ? "RIGHT" : "CENTER";
+      const vertical = cy < height / 3 ? "TOP" : cy > (height * 2) / 3 ? "BOTTOM" : "MIDDLE";
+      zone = vertical + "-" + horizontal;
+      placement = "LOCATED_FOR_REVIEW";
+    }
+
+    rows[key] = {
+      field: key,
+      value: field.value ?? null,
+      status: field.status,
+      confidence: field.confidence,
+      imageIndex: best?.item?.imageIndex ?? field.imageIndex ?? null,
+      readability,
+      fontSizeScreening,
+      placement,
+      zone,
+      relativeLineHeight: lineHeightRatio,
+      relativeTextSize: relativeSize,
+      evidenceText: best?.item?.text || field.raw || field.evidence || null,
+    };
+  }
+
+  const values = Object.values(rows);
+  const summary = {
+    fieldsChecked: values.length,
+    likelyReadable: values.filter((x) => x.readability === "LIKELY_READABLE").length,
+    readabilityReview: values.filter((x) => x.readability === "REVIEW" || x.readability === "SMALL_TEXT_REVIEW").length,
+    smallTextReview: values.filter((x) => x.fontSizeScreening === "SMALL_TEXT_REVIEW" || x.fontSizeScreening === "VERY_SMALL_REVIEW").length,
+    located: values.filter((x) => x.placement === "LOCATED_FOR_REVIEW").length,
+    notLocated: values.filter((x) => x.placement === "NOT_LOCATED").length,
+  };
+
+  return {
+    disclaimer: "Visual screening is assistive. Relative text-size signals are not a calibrated statutory measurement in millimetres; final font-size and placement compliance must be verified by the inspector against the applicable commodity and display-panel requirements.",
+    rows,
+    summary,
+  };
+}
+
 function buildStructuredResult(rapid, aiSemantic = null) {
   const reconciliation = interpretOcrFields({ detections: rapid.evidence, rawText: rapid.rawText });
   const fields = mergeSemanticFields(reconciliation?.fields || {}, aiSemantic?.fields || {}, Boolean(aiSemantic?.enabled));
@@ -136,11 +248,14 @@ function buildStructuredResult(rapid, aiSemantic = null) {
     source: "rapidocr",
   }));
   const declarationEvidence = buildSemanticDeclarationEvidence(fields);
+  const presentationChecks = buildPresentationChecks(rapid, fields);
 
   const warnings = [];
   if (reconciliation?.metadata?.innerPackReference) warnings.push("Package text refers to an individual/inner pack for additional batch, date, price, or related details.");
   if (!aiSemantic?.enabled) warnings.push("All remote AI semantic providers unavailable; using local deterministic field mapping only.");
   if (aiSemantic?.enabled && aiSemantic.providerCount < 3) warnings.push(`Semantic verification used ${aiSemantic.providerCount} available AI provider(s); unavailable providers did not block the scan.`);
+  if (presentationChecks.summary.smallTextReview > 0) warnings.push(`Visual screening flagged ${presentationChecks.summary.smallTextReview} declaration(s) for small-text review.`);
+  if (presentationChecks.summary.notLocated > 0) warnings.push(`${presentationChecks.summary.notLocated} declaration(s) could not be spatially located from OCR evidence.`);
 
   const needsReview = Object.values(result).some((field) => field?.status === "unreadable" || field?.status === "ambiguous" || (field?.status === "found" && Number(field.confidence || 0) < 0.6));
   return {
@@ -155,6 +270,7 @@ function buildStructuredResult(rapid, aiSemantic = null) {
     semanticReconciliation: aiSemantic?.enabled ? { providerCount: aiSemantic.providerCount, providers: aiSemantic.providers } : reconciliation?.metadata || null,
     candidateEvidence: reconciliation?.candidateEvidence || {},
     aiSemantic: aiSemantic?.enabled ? { providerCount: aiSemantic.providerCount, providers: aiSemantic.providers, suggestedCategory: aiSemantic.suggestedCategory } : null,
+    presentationChecks,
   };
 }
 
