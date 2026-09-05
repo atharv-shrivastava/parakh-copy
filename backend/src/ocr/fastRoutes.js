@@ -76,7 +76,7 @@ async function analyzeWithPaddle(images) {
   const rawText = normalizeText(data?.result?.rawText) || evidence.map((item) => item.text).join("\n");
   return {
     provider: "paddleocr",
-    model: "PaddleOCR",
+    model: "RapidOCR",
     rawText,
     evidence,
   };
@@ -139,6 +139,27 @@ function mergeSemanticFields(deterministicFields, aiFields) {
   return merged;
 }
 
+function buildSemanticDeclarationEvidence(fields) {
+  return Object.entries(fields || {})
+    .map(([key, field], index) => {
+      const normalized = normalizeField(field);
+      const value = normalized.value == null ? "" : normalizeText(normalized.value);
+      if (!value) return null;
+      return {
+        id: `semantic-${key}-${index}`,
+        imageIndex: Number.isInteger(normalized.imageIndex) ? normalized.imageIndex : 0,
+        type: key.toUpperCase(),
+        label: key.replace(/([A-Z])/g, " $1").replace(/^./, (char) => char.toUpperCase()),
+        text: value,
+        value,
+        confidence: normalized.confidence,
+        status: normalized.status,
+        source: field?.source || "SEMANTIC_FIELD_MAPPING",
+      };
+    })
+    .filter(Boolean);
+}
+
 function buildStructuredResult(paddle, aiSemantic = null) {
   const reconciliation = interpretOcrFields({
     detections: paddle.evidence,
@@ -156,16 +177,17 @@ function buildStructuredResult(paddle, aiSemantic = null) {
     result[key] = normalizeField(fields[key]);
   }
 
-  const declarationEvidence = paddle.evidence
+  const rawDeclarationEvidence = paddle.evidence
     .filter((item) => item.text)
     .map((item, index) => ({
-      id: String(item.id || `paddle-evidence-${index}`),
-      imageIndex: Number(item.imageIndex || 0) + 1,
+      id: String(item.id || `ocr-evidence-${index}`),
+      imageIndex: Number(item.imageIndex || 0),
       type: "OCR_TEXT",
       text: item.text,
       confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0.55)),
-      source: "paddleocr",
+      source: "rapidocr",
     }));
+  const declarationEvidence = buildSemanticDeclarationEvidence(fields);
 
   const warnings = [];
   if (reconciliation?.metadata?.innerPackReference) {
@@ -182,8 +204,9 @@ function buildStructuredResult(paddle, aiSemantic = null) {
 
   return {
     ...result,
-    otherDeclarations: declarationEvidence.map((item) => item.text),
+    otherDeclarations: rawDeclarationEvidence.map((item) => item.text),
     declarationEvidence,
+    rawOcrEvidence: rawDeclarationEvidence,
     rawText: paddle.rawText,
     warnings,
     unreadableFields: Object.entries(result).filter(([, field]) => field?.status === "unreadable").map(([key]) => key),
@@ -250,10 +273,10 @@ async function handleFastAnalyze(req, res, files) {
 
     res.json({
       result,
-      provider: "paddleocr",
-      model: "PaddleOCR",
-      detectionProvider: "paddleocr",
-      detectionProviders: ["paddleocr"],
+      provider: "rapidocr",
+      model: "RapidOCR",
+      detectionProvider: "rapidocr",
+      detectionProviders: ["rapidocr"],
       rawText: paddle.rawText,
       semantic: aiSemantic?.enabled ? {
         provider: aiSemantic.provider,
