@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import "../styles/scan-visual-check.css";
+import "../styles/scan-theme.css";
 
 const STORAGE_KEY = "parakhVisualInspection";
 const DECLARATION_KEY = "parakhDeclarationEvidence";
