@@ -22,7 +22,13 @@ function Login() {
     try {
       const response = await fetch(`${API_URL}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Login failed");
+      if (!response.ok) {
+        if (data.requiresEmailVerification) {
+          navigate(`/verify-email?email=${encodeURIComponent(data.email || email.trim().toLowerCase())}`, { replace: true });
+          return;
+        }
+        throw new Error(data.error || "Login failed");
+      }
       saveSession(data.token, data.user);
       const savedUserLanguage = getUserLanguagePreference(data.user.id);
       setLanguage(savedUserLanguage || language);
