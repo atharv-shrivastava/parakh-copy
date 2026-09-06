@@ -1,226 +1,48 @@
 # PARAKH UI/UX Specification
 
 ## 1. UX Goal
+PARAKH is an inspection-focused interface for field and desktop use. Important actions, uncertainty, evidence, and compliance state should be immediately understandable.
 
-PARAKH is designed for government enforcement officers who may use it in the field. The interface must minimize unnecessary typing and make the scan-to-verification workflow obvious.
-
-## 2. Platform Principle
-
-There is one product, not a separate web product and mobile product.
-
-The same feature set must be available on:
-
-- Phone
-- Tablet
-- Laptop
-- Desktop
-
-The layout and input method adapt to screen size and device capabilities.
+## 2. Platform
+One responsive application serves phone, tablet, laptop, and desktop. Layout adapts rather than creating separate products.
 
 ## 3. Navigation
+The current UI uses a persistent desktop sidebar and compact responsive navigation on smaller screens. Primary destinations are Dashboard, Scan, Shops, Products, History, and Reports, with E-commerce, Profile, and authorized Admin areas.
 
-Primary navigation:
+Navigation uses icons plus text and follows the active theme.
 
-- Dashboard
-- Scan
-- Shops
-- Products
-- Inspections / History
-- Reports
-- Analytics
-- Administration (authorized users)
+## 4. Themes
+The application supports light, dark, dark-gradient, gradient, and rainbow themes. Themes affect backgrounds, surfaces, text, borders, inputs, sidebar, accents, and shadows. Dark themes must maintain strong contrast across every major page, including scan controls and visual inspection.
 
-The mobile navigation may use a bottom navigation bar or compact navigation, while desktop can use a sidebar. Both expose the same functional destinations.
+## 5. Dashboard
+The dashboard uses real stored inspection data and can show inspection volume/trend, total inspections, violations, compliance information, recent inspections, product hierarchy, highest-violation shop, highest-violation brand, highest-violation rule, and quick actions. Admin dashboards can aggregate platform-wide data; normal user dashboards are scoped appropriately.
 
-## 4. Dashboard
+## 6. Scan
+The core workflow is:
+`Capture/Upload → Review → Analyze → OCR → Extraction → Visual Screening → Rules/Findings → Officer Review → Registration`
 
-Desktop should use cards and charts; mobile should stack them vertically.
+The UI supports multiple images, edit/remove actions, editable extracted fields, confidence/status indicators, evidence, and manual violations.
 
-Key cards:
+## 7. Visual Inspection
+The scan result can show assistive readability, placement, declaration detection, text-region, and relative-size signals. Approximate measurements must be labeled as estimates unless reliable calibration exists.
 
-- Total inspections
-- Today's inspections
-- Potential non-compliance
-- Pending verification
-- Compliance rate
+## 8. Product Hierarchy
+`Category → Subcategory → Product Type → Brand → Product → Pack Size / Variant` must remain visually obvious and navigable.
 
-Quick actions:
+## 9. Shops
+Shops use real stored data. Listing/detail views should expose inspection and product history and work correctly with dark themes. Safe deletions should update optimistically without a full page reload.
 
-- Scan product
-- Add shop
-- Search product
-- View history
+## 10. Reports and History
+History supports inspection search/filtering and evidence review. Reports use structured inspection information and distinguish extraction, rule findings, and officer decisions.
 
-## 5. Scan Screen
+## 11. Admin
+Admin pages share the same design system while exposing additional platform controls, rules, users, products, inspections, and analytics.
 
-The scan interface should prioritize the camera/upload action.
+## 12. Performance
+Use skeleton/loading states where useful. Use short-lived GET caching, mutation-triggered invalidation, bounded provider waits, and targeted UI updates. Avoid unnecessary full-page remounts/refetches.
 
-```text
-Shop
- ↓
-Capture image
- ↓
-Add additional side
- ↓
-Processing
- ↓
-Extracted information
- ↓
-Compliance results
- ↓
-Officer verification
-```
+## 13. Accessibility
+Maintain strong contrast, touch targets, keyboard access, clear labels, non-color-only status communication, actionable errors, and reduced-motion support.
 
-The interface should indicate which package side is being captured when useful, such as front, back, side, or declaration panel.
-
-## 6. Image Quality UX
-
-Before processing, provide useful guidance:
-
-- Move closer
-- Reduce glare
-- Keep package steady
-- Capture the declaration clearly
-- Rotate the package if information is missing
-
-Do not bury these instructions inside technical error messages.
-
-## 7. Extraction Review
-
-Display extracted fields in a form-like layout.
-
-Each field should show:
-
-- Value
-- Confidence indicator
-- Source/evidence link when available
-- Editable control
-
-Low-confidence fields should be visually prominent but not alarming.
-
-## 8. Compliance Result UX
-
-Use clear status labels:
-
-- Compliant
-- Potential Non-Compliance
-- Needs Manual Verification
-- Not Applicable
-- Unable to Determine
-
-A result should show the applicable requirement and evidence, not just a red/green icon.
-
-## 9. Shop Section
-
-Shop list should support search and location filtering.
-
-Shop details should show:
-
-- Shop information
-- Map/location where available
-- Inspection count
-- Last inspection
-- Products scanned
-- Category breakdown
-- Compliance history
-- Violations
-
-Products should be grouped by category.
-
-## 10. Product Section
-
-The catalogue navigation should follow:
-
-`Category → Subcategory → Product Type → Brand → Product → Variant`
-
-The interface should make the hierarchy visually obvious.
-
-Example:
-
-`Food → Ready to Eat → Chips → Lay's → Classic Salted → 50 g`
-
-## 11. Add New Product
-
-Provide a guided flow rather than a huge form.
-
-```text
-Choose category
- ↓
-Choose/create subcategory
- ↓
-Choose/create product type
- ↓
-Choose/create brand
- ↓
-Enter product name
- ↓
-Enter pack size/variant
- ↓
-Review
- ↓
-Save / submit for approval
-```
-
-## 12. History
-
-History should support filtering by:
-
-- Date
-- Location
-- Shop
-- Product category
-- Product type
-- Brand
-- Product
-- Compliance status
-- Violation
-
-The user should be able to open an inspection and inspect its evidence and verification trail.
-
-## 13. Reports
-
-The report screen should provide:
-
-- Preview
-- Generate
-- Download/export
-- Report status
-
-## 14. Analytics
-
-Charts should remain understandable on small screens. On mobile, complex tables can become horizontally scrollable or transform into cards.
-
-## 15. Accessibility
-
-- High text readability
-- Adequate touch target size
-- Keyboard accessibility on desktop
-- Clear labels
-- Avoid relying on color alone
-- Meaningful error messages
-- Loading states for AI processing
-
-## 16. Loading States
-
-AI processing may take time. The interface should communicate the stage:
-
-`Uploading → Improving image → Reading package → Extracting fields → Checking rules → Preparing results`
-
-## 17. Empty States
-
-Every empty page should explain what the user can do next.
-
-Examples:
-
-- No shops yet → Add a shop
-- No inspections → Start an inspection
-- Product not found → Register product
-- No reports → Complete an inspection first
-
-## 18. Confirmation and Destructive Actions
-
-Require confirmation for destructive administrative actions. Inspection evidence should not be casually deleted.
-
-## 19. Visual Direction
-
-The visual style should be professional, restrained, and suitable for a government inspection system. Avoid excessive gradients, gaming-style dashboards, unnecessary animation, or decorative elements that compete with evidence and compliance findings.
+## 14. Visual Direction
+Professional, precise, modern, restrained, and information-dense. Animations should be short and purposeful.
