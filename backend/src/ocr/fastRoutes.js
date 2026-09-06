@@ -41,11 +41,54 @@ async function analyzeWithRapid(images) {
     const bytes = Buffer.from(image.base64, "base64");
     formData.append("images", new Blob([bytes], { type: image.mediaType }), `parakh-${imageIndex + 1}.${extension(image.mediaType)}`);
   });
-  const response = await fetch(`${ocrUrl}/api/ocr/analyze`, { method: "POST", body: formData });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw Object.assign(new Error(data?.error || data?.message || data?.detail || `RapidOCR failed (${response.status}).`), { code: "OCR_RAPID_ERROR", statusCode: 502 });
-  }
+  console.log("[RapidOCR] Target:", `${ocrUrl}/api/ocr/analyze`);
+
+let response;
+
+try {
+  response = await fetch(`${ocrUrl}/api/ocr/analyze`, {
+    method: "POST",
+    body: formData,
+  });
+} catch (error) {
+  console.error("[RapidOCR] Connection error:", error);
+
+  throw Object.assign(
+    new Error(`Could not reach RapidOCR: ${error.message}`),
+    {
+      code: "OCR_RAPID_CONNECTION_ERROR",
+      statusCode: 502,
+    }
+  );
+}
+
+const responseText = await response.text();
+
+console.log("[RapidOCR] HTTP status:", response.status);
+console.log("[RapidOCR] Response:", responseText);
+
+let data = {};
+
+try {
+  data = JSON.parse(responseText);
+} catch {
+  // RapidOCR returned non-JSON content.
+}
+
+if (!response.ok) {
+  throw Object.assign(
+    new Error(
+      data?.error ||
+      data?.message ||
+      data?.detail ||
+      `RapidOCR returned HTTP ${response.status}`
+    ),
+    {
+      code: "OCR_RAPID_ERROR",
+      statusCode: 502,
+    }
+  );
+}
   const evidence = Array.isArray(data?.result?.declarationEvidence)
     ? data.result.declarationEvidence.map((item, index) => {
         const serviceImageIndex = Number(item?.imageIndex);
