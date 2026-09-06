@@ -56,8 +56,6 @@ function makeRulesEvidence(ocr) {
     });
   }
 
-  // Supply canonical legal-rule aliases for the structured extraction fields.
-  // A field being present is evidence of presence, not a violation.
   addEvidence(evidence, "mrp", ocr.mrp, "OCR", "declarations.retailSalePrice");
   addEvidence(evidence, "netQuantity", ocr.netQuantity, "OCR", "declarations.netQuantity");
   addEvidence(evidence, "unit", ocr.unit, "OCR", "declarations.netQuantityUnit");
@@ -114,7 +112,10 @@ async function evaluateRules(req, ocr) {
     body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.error || data?.message || `Rules Engine failed (${response.status}).`);
+  if (!response.ok) {
+    const detail = data?.error || data?.message || data?.detail || `Rules Engine failed (${response.status}).`;
+    throw new Error(`${detail} [status=${response.status}; url=${rulesEngineUrl}]`);
+  }
   return data;
 }
 
@@ -126,7 +127,12 @@ router.post("/evaluate-structured", authenticate, async (req, res) => {
     res.json({ compliance, complianceError: null });
   } catch (error) {
     console.error("[ocr:evaluate-structured]", error);
-    res.status(502).json({ compliance: null, complianceError: { message: error.message || "Rules Engine evaluation failed." } });
+    // OCR fields remain usable even when the compliance dependency is unavailable.
+    // Return 200 so ScanV2 can display/edit/register the extracted data and surface the compliance error separately.
+    res.status(200).json({
+      compliance: null,
+      complianceError: { message: error?.message || "Rules Engine evaluation failed." },
+    });
   }
 });
 
