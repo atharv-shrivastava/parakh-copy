@@ -1,211 +1,70 @@
 # PARAKH API Specification
 
 ## 1. API Principles
+The API is the contract between the responsive React/Vite client and the Node.js/Express backend. Protected resources require authentication/authorization. Current base path is `/api`.
 
-The API is the contract between the responsive client and backend services. APIs should be resource-oriented, validated, authenticated, documented, and versionable.
-
-Base path:
-
-`/api/v1`
-
-## 2. Authentication
-
+## 2. Current Route Groups
 ```text
-POST /auth/login
-POST /auth/logout
-GET  /auth/me
+/api/auth
+/api/categories
+/api/products
+/api/shops
+/api/rules
+/api/admin
+/api/analytics
+/api/translate
+/api/products/ecommerce-ocr
+/api/ocr
+```
+The running source code is authoritative for exact endpoint paths and payloads.
+
+## 3. Authentication
+Authentication and authorization are handled by the backend auth routes/middleware. Secrets must never be committed.
+
+## 4. Categories and Products
+Category APIs provide the hierarchical catalogue:
+`Category → Subcategory → Product Type → Brand → Product → Variant`
+Product APIs support catalogue listing, registration, detail/update/delete where authorized, hierarchy relationships, and inspection-linked information.
+
+## 5. Shops
+Shop APIs support listing/search, creation, detail, inspection history, products, statistics, and authorized deletion. Statistics are derived from stored inspection data.
+
+## 6. Scanning and OCR
+Current fast scan endpoint:
+`POST /api/ocr/analyze`
+
+Flow:
+```text
+Images → RapidOCR → OCR evidence → deterministic field reconciliation
+      → Gemini / Cloudflare semantic providers → consensus → structured result
 ```
 
-The exact token/session mechanism may be selected during implementation. Secrets must never be committed to the repository.
+Responses can include structured fields, evidence, semantic-provider state/timing, category suggestion, visual screening, and warnings.
 
-## 3. Dashboard
+## 7. Compliance and Rules
+Rule APIs expose the configurable compliance rule set. Compliance logic belongs in the backend/rules layer, not the React UI. Manual violations must remain auditable.
 
-```text
-GET /dashboard/summary
-GET /dashboard/recent-inspections
-GET /dashboard/compliance-trends
-```
+## 8. Analytics
+Analytics are derived from real inspection records and include inspection trends, totals, violation totals, highest-violation shop/source, brand, and rule. User views are scoped appropriately; admin views can be platform-wide.
 
-## 4. Shops
+## 9. E-commerce
+`/api/products/ecommerce-ocr` handles online listing analysis.
 
-```text
-GET    /shops
-POST   /shops
-GET    /shops/{shop_id}
-PATCH  /shops/{shop_id}
-GET    /shops/{shop_id}/inspections
-GET    /shops/{shop_id}/products
-GET    /shops/{shop_id}/statistics
-```
+## 10. Administration
+`/api/admin` contains authorized administrative operations.
 
-Supported filters should include location, date range, and status where relevant.
-
-## 5. Categories
-
-```text
-GET    /categories/tree
-POST   /categories
-GET    /categories/{category_id}
-PATCH  /categories/{category_id}
-```
-
-## 6. Products
-
-```text
-GET    /products
-POST   /products
-GET    /products/{product_id}
-PATCH  /products/{product_id}
-GET    /products/{product_id}/inspections
-```
-
-Filters:
-
-- Category
-- Subcategory
-- Product type
-- Brand
-- Product name
-- Pack size
-
-## 7. Scanning
-
-```text
-POST /scans
-POST /scans/{scan_id}/images
-GET  /scans/{scan_id}
-POST /scans/{scan_id}/process
-GET  /scans/{scan_id}/status
-```
-
-A scan should not block the HTTP request while a long AI operation executes. Processing can be asynchronous.
-
-## 8. Extraction
-
-```text
-GET  /inspections/{inspection_id}/items/{item_id}/extractions
-PATCH /inspections/{inspection_id}/items/{item_id}/extractions/{field_id}
-```
-
-Corrections must preserve the original AI extraction in the audit history.
-
-## 9. Compliance
-
-```text
-GET /inspections/{inspection_id}/items/{item_id}/checks
-POST /compliance/evaluate/{inspection_item_id}
-GET /compliance/rules
-```
-
-## 10. Verification
-
-```text
-POST /compliance/checks/{check_id}/verify
-POST /extractions/{field_id}/verify
-```
-
-Verification payloads should include the decision and optional reason/correction.
-
-## 11. Inspections
-
-```text
-GET    /inspections
-POST   /inspections
-GET    /inspections/{inspection_id}
-PATCH  /inspections/{inspection_id}
-POST   /inspections/{inspection_id}/complete
-GET    /inspections/{inspection_id}/evidence
-```
-
-Filters:
-
-- Date range
-- Shop
-- Location
-- Product
-- Brand
-- Category
-- Compliance status
-- Violation type
-- Officer
-
-## 12. Reports
-
-```text
-POST /inspections/{inspection_id}/reports
-GET  /reports/{report_id}
-GET  /reports/{report_id}/download
-```
-
-Supported prototype formats:
-
-- PDF
-- Editable document format
-
-## 13. Analytics
-
-```text
-GET /analytics/overview
-GET /analytics/by-category
-GET /analytics/by-product
-GET /analytics/by-brand
-GET /analytics/by-location
-GET /analytics/by-shop
-GET /analytics/violations
-```
-
-## 14. Administration
-
-```text
-GET   /admin/users
-POST  /admin/users
-PATCH /admin/users/{user_id}
-GET   /admin/rules
-POST  /admin/rules
-PATCH /admin/rules/{rule_id}
-```
-
-Only authorized roles can access administrative endpoints.
-
-## 15. Error Format
-
-Use a consistent structure:
-
+## 11. Error Handling
+Preferred shape:
 ```json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Human-readable explanation",
-    "details": {}
-  }
-}
+{"error":{"code":"VALIDATION_ERROR","message":"Human-readable explanation","details":{}}}
 ```
-
 Do not return stack traces or secrets to clients.
 
-## 16. Pagination
+## 12. Upload Validation
+Server-side validation covers supported MIME types, file size, and image constraints. The current OCR upload path accepts JPEG, PNG, and WebP.
 
-List endpoints should support pagination. Example query parameters:
+## 13. Caching
+The frontend uses short-lived GET caching. Persisted mutations invalidate relevant cache entries so dashboards, shops, products, history, and reports can return current server data without forcing unnecessary full-page remounts.
 
-`?page=1&page_size=25`
-
-Large lists should never require the client to download the complete database.
-
-## 17. Filtering
-
-Filtering parameters should use predictable names and documented semantics. Date ranges should use an unambiguous ISO format.
-
-## 18. File Uploads
-
-Uploads must validate:
-
-- MIME type
-- File size
-- Image dimensions
-- Extension
-
-Never trust a client-provided filename or MIME type alone.
-
-## 19. API Security
-
-Every protected endpoint should perform authentication and authorization. Server-side validation is mandatory even when the frontend validates the same input.
+## 14. Versioning Note
+Older documentation described a planned `/api/v1` contract. The current implementation uses `/api`.
