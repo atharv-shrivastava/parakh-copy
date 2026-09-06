@@ -2,7 +2,7 @@ const TOKEN_KEY = "parakh_token";
 const USER_KEY = "parakh_user";
 const CACHE_PREFIX = "parakh_api_cache:";
 const CACHE_TTL = 5 * 60 * 1000;
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || "https://parakh-backend-p4mx.onrender.com/api";
 
 export function getToken() { return localStorage.getItem(TOKEN_KEY); }
 export function getUser() { try { return JSON.parse(localStorage.getItem(USER_KEY) || "null"); } catch { return null; } }
@@ -95,7 +95,12 @@ async function optimizeOcrBody(body) {
 
 export async function apiFetch(url, options = {}) {
   const rawUrl = String(url);
-  const resolvedUrl = rawUrl.startsWith("http://localhost:5000/api") ? rawUrl.replace("http://localhost:5000/api", API_URL) : rawUrl;
+  let resolvedUrl = rawUrl;
+  if (rawUrl.startsWith("http://localhost:5000/api")) {
+    resolvedUrl = rawUrl.replace("http://localhost:5000/api", API_URL);
+  } else if (rawUrl.startsWith("http://localhost:8080/api/ocr/evaluate-structured")) {
+    resolvedUrl = `${API_URL}/ocr/evaluate-structured`;
+  }
   const method = String(options.method || "GET").toUpperCase();
   const isRead = ["GET", "HEAD"].includes(method);
   if (isRead && typeof window !== "undefined") {
