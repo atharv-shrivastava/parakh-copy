@@ -2,198 +2,245 @@
 
 ## 1. AI Philosophy
 
-PARAKH uses AI where it provides value: visual text recognition, extraction, classification, confidence estimation, and assistance in interpreting unstructured package imagery. It should use deterministic software for deterministic checks.
+PARAKH uses AI where it adds value: semantic interpretation, structured field extraction, classification assistance, uncertainty handling, and package understanding.
 
-The system must not fabricate missing declarations. Unknown information should remain unknown and be presented for verification.
+Deterministic software is preferred for deterministic checks.
 
-## 2. AI Pipeline
+The system must never fabricate missing declarations.
+
+## 2. Current Pipeline
 
 ```text
-Package Image(s)
+Package image(s)
       ↓
-Quality Assessment
+RapidOCR
       ↓
-Preprocessing
+OCR evidence + confidence + geometry
       ↓
-Text/Region Detection
+Local deterministic field reconciliation
       ↓
-OCR
+Gemini + Cloudflare semantic providers
       ↓
-Normalization
+Semantic consensus
       ↓
-Field Extraction
+Structured inspection fields
       ↓
-Confidence Scoring
-      ↓
-Product Matching / Classification
-      ↓
-Rule Engine
+Visual screening + compliance
 ```
 
-## 3. Image Quality Assessment
+## 3. OCR Layer
 
-Detect:
+The current production path uses the configured RapidOCR service.
 
-- Blur
-- Low resolution
-- Extreme perspective
-- Rotation
-- Glare
-- Severe shadow
-- Occlusion
-- Cropped text
-- Unreadable regions
-
-The UI should guide the officer to recapture poor images.
-
-## 4. OCR
-
-The OCR layer should support printed package text and, where feasible, multiple Indian scripts. Model choice should be based on measured prototype accuracy rather than marketing claims.
-
-The OCR output should retain:
+OCR evidence can include:
 
 - Text
 - Confidence
-- Bounding boxes
-- Page/image reference
+- Image index
+- Bounding box
+- Image dimensions
 
-## 5. Text Normalization
+RapidOCR is responsible for detection/OCR evidence, not legal interpretation.
 
-Normalize common variations without destroying the original OCR value.
+## 4. Deterministic Field Reconciliation
 
-Examples include:
+The local reconciler maps OCR detections into structured fields.
 
-- Whitespace normalization
-- Currency symbol normalization
-- Unit normalization
-- Case normalization for matching
-- Date format normalization
+Current matching strategies include:
 
-Always preserve the raw OCR output separately.
+- Declaration label anchors
+- Spatial proximity
+- Relative position
+- Text similarity
+- Confidence weighting
+- Product/brand candidate scoring
+- Quantity/date/MRP/batch/barcode patterns
+- Geometry-aware evidence selection
 
-## 6. Field Extraction
+The reconciler intentionally preserves uncertainty.
 
-Target fields include, where applicable:
+## 5. Target Fields
+
+Where applicable, the system can extract:
 
 - Brand
 - Product name
 - Net quantity
+- Unit
 - MRP
 - Manufacturer
+- Manufacturer address
 - Packer
+- Packer address
+- Marketer
+- Marketer address
 - Importer
-- Address
-- Date/month/year information
-- Consumer-care details
-- Other mandatory declarations represented in the active rule set
+- Importer address
+- Manufacturing date
+- Packing date
+- Best-before / expiry
+- Batch number
+- Consumer-care phone
+- Consumer-care email
+- Country of origin
+- FSSAI license number
+- Barcode
 
-Extraction should produce structured objects rather than free-form summaries.
+## 6. Semantic Providers
 
-## 7. Confidence Scoring
+The current semantic fan-out supports:
 
-Confidence should reflect the reliability of extraction, not legal compliance.
+- Gemini
+- Cloudflare Gemma
+- Cloudflare Moondream
 
-For example:
+Each provider runs independently.
 
-```text
-OCR confidence:        0.97
-Field extraction:      0.94
-Product match:         0.91
-Rule applicability:    deterministic / confirmed
-```
+A provider can be unavailable because of:
 
-Do not combine unrelated scores into a misleading single number without defining the methodology.
+- Missing credentials
+- Quota/rate limits
+- Authentication failures
+- Provider errors
+- Model errors
+- Empty responses
+- Timeout
 
-## 8. Product Matching
+Provider failures are logged with the provider and model name.
 
-The matching pipeline should compare normalized OCR text against the product catalogue using deterministic matching and, if useful, fuzzy/semantic matching.
+Moondream is currently treated as a best-effort provider with a bounded timeout so a slow vision model does not block the rest of the pipeline indefinitely.
 
-Possible outcomes:
+## 7. Semantic Consensus
 
-- Exact match
-- Strong candidate
-- Multiple candidates
-- New product suggested
-- Unable to classify
+Successful provider outputs are reconciled field by field.
 
-An officer can confirm classification.
+The consensus logic can:
 
-## 9. Layout and Font Analysis
+- select majority agreement
+- preserve a single-provider result with reduced confidence
+- mark conflicting successful values as ambiguous
+- ignore unavailable providers
 
-Computer vision may estimate:
+Consensus does not convert an AI prediction into a legal determination.
 
-- Text region size
-- Relative text height
-- Character visibility
-- Contrast/readability
-- Position of relevant declarations
+## 8. Confidence
 
-Where an exact physical font-size determination cannot be reliably inferred from a photograph, the system must label the result as an estimate or manual-verification requirement rather than claiming exact measurement.
+Confidence describes the reliability of extraction or interpretation.
 
-## 10. Compliance AI Boundary
+It is not legal certainty.
 
-AI can identify likely missing or suspicious declarations. The rule engine decides whether a configured requirement is satisfied based on structured inputs and deterministic checks where possible.
+The system should preserve separate concepts for:
+
+- OCR confidence
+- Field confidence
+- Product/category confidence
+- Rule applicability
+- Compliance result
+- Officer verification
+
+## 9. Visual Screening
+
+The current scanning result can include assistive visual screening for:
+
+- Readability
+- Relative text size
+- Declaration placement
+- Detected text regions
+- Image quality-related review signals
+
+Approximate physical measurements derived from a photograph must be labeled as estimates unless reliable calibration exists.
+
+## 10. Evidence Localization
+
+Whenever geometry is available, extracted values should retain source image and bounding-box information.
+
+This supports:
+
+- Evidence highlighting
+- Source-image review
+- Declaration evidence
+- Auditable field correction
+
+## 11. Human Review Triggers
+
+Manual review should be considered for:
+
+- Low OCR confidence
+- Low semantic confidence
+- Conflicting providers
+- Conflicting package images
+- Missing critical fields
+- Ambiguous classification
+- Poor image quality
+- Uncertain placement/readability
+- Context-dependent legal requirements
+
+## 12. Compliance Boundary
+
+AI may suggest a likely declaration or issue.
+
+The compliance engine determines rule outcomes from structured data and configured rule logic.
 
 Example:
 
 ```text
-OCR detects MRP = ₹20
-       ↓
-Rule engine checks applicable MRP requirement
-       ↓
-Result + evidence
-       ↓
+OCR:
+MRP = ₹20
+      ↓
+Field reconciliation
+      ↓
+Applicable rule
+      ↓
+Deterministic / configured validation
+      ↓
+Finding + evidence
+      ↓
 Officer verification
 ```
 
-## 11. Evidence Localization
+## 13. Failure Observability
 
-Whenever technically possible, extracted fields should retain their source image and bounding box. This allows the interface to draw an evidence rectangle around the text that produced a finding.
+Every semantic provider should produce enough backend logging to answer:
 
-## 12. Human Review Triggers
+- Which provider ran?
+- Which model ran?
+- Did it succeed?
+- How long did it take?
+- If it failed, what status/code/reason was returned?
 
-Trigger manual review for:
-
-- Low OCR confidence
-- Conflicting values across package images
-- Multiple product matches
-- Missing critical fields
-- Uncertain applicability
-- Suspected image manipulation
-- Font/readability measurements outside reliable bounds
-- Any rule requiring contextual judgment
-
-## 13. Learning Loop
-
-Corrections made by officers can be collected as labelled feedback for future model improvement, subject to appropriate governance.
-
-The prototype should not silently retrain production models from every officer edit. Feedback should be stored separately and used in a controlled training/evaluation process.
+This is especially important when multiple providers are used in parallel.
 
 ## 14. Evaluation Metrics
 
 Track separately:
 
-- OCR character/word accuracy
-- Field extraction precision/recall
+- OCR accuracy
+- Field precision/recall
 - Product classification accuracy
 - Rule evaluation correctness
 - False-positive rate
 - False-negative rate
-- Average processing time
+- Processing time
 - Manual correction rate
+- Provider success/failure rates
 
-A compliance system should emphasize false-negative analysis because missed violations can be operationally important.
+## 15. Privacy and Security
 
-## 15. Model Versioning
+Package images may contain commercially sensitive information.
 
-Every AI-derived result should be associated with a model/service version where feasible. This allows later investigation of why an old inspection produced a particular extraction.
+Do not copy them to unnecessary services.
 
-## 16. Privacy and Security
+Protect:
 
-Images may contain commercially sensitive information. Access should be controlled and unnecessary raw data should not be copied between services.
+- uploaded images
+- API credentials
+- inspection records
+- audit information
 
-## 17. SIH Prototype Strategy
+## 16. AI Governance
 
-Do not attempt to train a huge proprietary vision-language model. Demonstrate a reliable pipeline using existing OCR/vision capabilities, carefully designed extraction, a representative product catalogue, and a transparent rule engine.
+Officer corrections should be preserved as feedback data where appropriate.
 
-The innovation should be the integrated inspection workflow and explainable compliance architecture, not a claim that PARAKH invented OCR.
+The prototype should not silently retrain production models from every correction.
+
+Model/provider changes should be documented and evaluated separately.
