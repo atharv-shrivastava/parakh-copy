@@ -17,6 +17,7 @@ import Reports from "./pages/Reports";
 import Profile from "./pages/Profile";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import VerifyEmail from "./pages/VerifyEmail";
 import AdminCategories from "./pages/AdminCategories";
 import AdminGlobalCategoryType from "./pages/AdminGlobalCategoryType";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -29,7 +30,7 @@ function AdminOnly() { return getUser()?.role === "ADMIN" ? <Outlet /> : <Naviga
 
 function App() {
   return <BrowserRouter><Routes>
-    <Route path="/login" element={<Login />} /><Route path="/register" element={<Register />} />
+    <Route path="/login" element={<Login />} /><Route path="/register" element={<Register />} /><Route path="/verify-email" element={<VerifyEmail />} />
     <Route element={<Protected />}><Route element={<Layout />}>
       <Route path="/" element={<Dashboard />} /><Route path="/scan" element={<Scan />} />
       <Route path="/ecommerce-inspection" element={<EcommerceInspection />} />
