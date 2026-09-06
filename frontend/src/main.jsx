@@ -20,6 +20,7 @@ import "./styles/motion-polish.css";
 import "./styles/layout-mobile-polish.css";
 import "./styles/product-experience.css";
 import "./styles/scan-theme.css";
+import "./styles/obsidian-contrast-fix.css";
 import { applyTheme, getTheme } from "./lib/theme";
 import { LanguageProvider } from "./components/LanguageProvider";
 
