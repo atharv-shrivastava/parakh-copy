@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/auth";
 import "../styles/ecommerce.css";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || "https://parakh-backend-p4mx.onrender.com/api";
 const MAX_IMAGES = 6;
 const EDITABLE_FIELDS = [
   ["productName", "Product name"], ["brand", "Brand / Manufacturer"], ["manufacturer", "Manufacturer"],
