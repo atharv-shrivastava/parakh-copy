@@ -3,135 +3,60 @@
 This file is the contract for human developers and AI coding tools contributing to PARAKH.
 
 ## 1. Source of Truth
-
-`README.md` gives the project overview. `PROJECT_SPEC.md` is the canonical functional specification. `ARCHITECTURE.md` is the canonical architecture. Other specification documents define their respective domains.
-
-Do not invent features that contradict these documents.
+`README.md` gives the overview. `PROJECT_SPEC.md` defines functional requirements. `ARCHITECTURE.md` defines the current technical architecture. The working source code is authoritative for implemented behavior.
 
 ## 2. Before Coding
-
-Read the relevant specification before changing code. Understand existing components before creating new ones.
+Inspect existing code and read the relevant specification before editing. Reuse existing components/modules.
 
 ## 3. Feature Parity
-
-Never create a feature that exists only on mobile or only on desktop unless there is a genuine hardware limitation. Camera access can be optimized for mobile, but the inspection workflow must remain available on larger screens through image upload/camera support where possible.
+Keep the inspection workflow usable across phone, tablet, laptop, and desktop.
 
 ## 4. AI Coding Rules
+Inspect before editing; avoid unnecessary dependencies and duplicated logic; keep API contracts synchronized; never invent legal requirements; never commit secrets.
 
-AI coding assistants must:
+## 5. Frontend
+Current stack: React + Vite + React Router using JSX/JavaScript.
+Preserve shared components, theme variables, responsive behavior, loading/empty/error states, and reduced-motion support.
 
-- Inspect existing code before editing
-- Reuse existing components
-- Avoid unnecessary dependencies
-- Avoid duplicated business logic
-- Keep API contracts synchronized
-- Explain breaking architectural changes
-- Never invent legal requirements
-- Never commit secrets
+## 6. Backend
+Current stack: Node.js + Express.
+Keep routes understandable, validate server-side, preserve authentication/authorization, and keep reusable business logic out of UI code.
 
-## 5. Naming
+## 7. Database
+Current persistence: PostgreSQL through Prisma.
+Use migrations, preserve inspection history, separate master catalogue data from inspection events, and avoid unnecessary full-table queries.
 
-Use clear, descriptive names. Avoid meaningless names such as `data2`, `tempFinal`, `componentNew`, or `final_final`.
+## 8. Legal Metrology
+Legal requirements belong in the configurable compliance/rules layer. Do not hard-code legal logic into React or hide deterministic checks inside LLM prompts. Maintain rule source/reference and version.
 
-## 6. Frontend
+## 9. AI Safety
+AI must not fabricate fields. Unknown stays unknown. AI confidence is not legal certainty. Insufficient evidence should trigger manual review or unable-to-determine states.
 
-- TypeScript strictness should be enabled where practical.
-- Keep reusable UI in shared components.
-- Keep API calls in service modules rather than scattering fetch logic throughout pages.
-- Keep domain types centralized.
-- Handle loading, empty, success, and error states.
-- Do not put large business-rule calculations directly in JSX.
+## 10. Evidence
+Preserve original OCR/AI extraction and source evidence when an officer edits or verifies a result.
 
-## 7. Backend
+## 11. Security
+Never commit API keys, passwords, production DB credentials, private certificates, or real sensitive inspection data. Use environment variables.
 
-- Keep route handlers thin.
-- Put business logic in services.
-- Use schemas for validation.
-- Use repository/data-access abstractions where beneficial.
-- Never trust client-side validation.
-- Return consistent API errors.
+## 12. Uploads
+Validate file type, size, and dimensions server-side.
 
-## 8. Database
+## 13. Errors
+User-facing errors should be understandable. Provider/model/database diagnostics belong in server logs. Provider failures should identify provider/model where practical.
 
-- Use migrations.
-- Do not silently mutate schema.
-- Preserve inspection and verification history.
-- Keep master catalogue data separate from inspection events.
-
-## 9. Legal Metrology Rules
-
-Legal requirements belong in the configurable compliance engine. Do not hard-code legal logic into React components or AI prompts.
-
-Every implemented legal rule must have a source/reference and version information.
-
-## 10. AI Safety and Accuracy
-
-AI must not fabricate fields. Unknown information stays unknown.
-
-AI confidence is not the same as legal certainty.
-
-When evidence is insufficient, return `NEEDS_MANUAL_VERIFICATION` or `UNABLE_TO_DETERMINE`.
-
-## 11. Evidence
-
-Potential compliance findings should retain source evidence whenever technically possible.
-
-Do not discard original AI extraction after an officer edits it.
-
-## 12. Security
-
-Never commit:
-
-- API keys
-- Passwords
-- Private certificates
-- Production database credentials
-- Personal real-world inspection data
-
-Use environment variables and provide safe example configuration files.
-
-## 13. File Uploads
-
-Validate file type, size, and dimensions server-side. Never trust filenames.
-
-## 14. Error Handling
-
-Errors must be understandable to the user. Technical details belong in server logs, not in production UI.
+## 14. Performance
+Prefer targeted queries, parallel independent reads, bounded external-provider timeouts, short-lived GET caching, mutation-triggered invalidation, optimistic UI where safe, and avoiding unnecessary page remounts.
 
 ## 15. Testing
+Test new business logic where practical. Compliance rules should have explicit unit tests. API behavior should be testable independently of the frontend.
 
-New business logic should have tests where practical. Compliance rules should have explicit unit tests. API behavior should be tested independently of the frontend.
+## 16. Git
+Use focused commits:
+`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`.
+Use feature branches and pull requests for team work.
 
-## 16. Git Practices
+## 17. No Fake Functionality
+Do not present mocks as live AI or claim integrations are operational when they are not.
 
-Use focused commits. Suggested style:
-
-- `feat:` new functionality
-- `fix:` bug fix
-- `docs:` documentation
-- `refactor:` restructuring without intended behavior change
-- `test:` tests
-- `chore:` maintenance
-
-Do not commit generated build artifacts unless explicitly required.
-
-## 17. Pull Requests
-
-A pull request should state:
-
-- What changed
-- Why it changed
-- How it was tested
-- Any known limitations
-
-## 18. Prototype Discipline
-
-Prefer a complete working vertical slice over ten unfinished features. The SIH prototype must demonstrate the core journey from package capture to officer-verified compliance result.
-
-## 19. No Fake Functionality
-
-Do not label a static mock as an AI result or claim an integration is operational when it is not. Clearly identify prototype/mock/demo behavior.
-
-## 20. Documentation
-
-When architecture, API, database, AI behavior, or legal-rule behavior changes, update the relevant documentation in the same development cycle.
+## 18. Documentation
+When architecture, API, database, AI, UI, or compliance behavior changes, update the relevant documentation in the same development cycle.
