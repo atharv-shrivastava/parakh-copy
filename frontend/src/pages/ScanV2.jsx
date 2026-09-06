@@ -5,8 +5,8 @@ import ImageEditor from "../components/ImageEditor";
 import "../styles/scan.css";
 import "../styles/ai-category.css";
 
-const API_URL = "http://localhost:5000/api";
-const OCR_URL = "http://localhost:5000";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const OCR_URL = API_URL.replace(/\/api\/?$/, "");
 const MAX_IMAGES = 4;
 const OCR_FIELDS = ["productName", "brandName", "manufacturer", "manufacturerAddress", "marketer", "packer", "packerAddress", "importer", "importerAddress", "netQuantity", "unit", "mrp", "currency", "dateOfManufacture", "dateOfPacking", "bestBefore", "expiryDate", "batchNumber", "consumerCarePhone", "consumerCareEmail", "countryOfOrigin", "fssaiLicenseNumber", "barcode"];
 const EMPTY_FORM = { brandName: "", productName: "", description: "", netQuantity: "", unit: "", mrp: "", barcode: "", shopName: "", shopAddress: "", shopCity: "", shopState: "", notes: "" };
