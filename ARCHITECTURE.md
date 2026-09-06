@@ -2,413 +2,331 @@
 
 ## 1. Architecture Goals
 
-PARAKH must be modular, explainable, maintainable, secure, responsive, and practical for an SIH prototype. The architecture should allow the prototype to demonstrate the complete inspection workflow without requiring a national-scale deployment on day one.
+PARAKH separates presentation, API/business logic, OCR/AI processing, compliance rules, persistence, evidence, reporting, and analytics.
 
-The design separates the user interface, application APIs, AI/OCR processing, compliance rules, persistent data, evidence storage, reporting, and analytics. This prevents the AI model from becoming the application's source of truth.
+The application is intentionally modular while remaining practical for an SIH prototype.
 
-## 2. High-Level Architecture
+The AI layer must not become the application's source of truth.
+
+## 2. Current High-Level Architecture
 
 ```text
-┌──────────────────────────────────────────────────────────────┐
-│                     PARAKH CLIENT                           │
-│ React + TypeScript + Vite                                   │
-│ Responsive UI: Mobile / Tablet / Desktop                   │
-│ Dashboard | Scan | Shops | Products | History | Reports     │
-└───────────────────────────┬──────────────────────────────────┘
-                            │ HTTPS / REST
-                            ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    FASTAPI BACKEND                           │
-│ Authentication | Authorization | Business Logic | APIs      │
-│ Inspection Service | Shop Service | Product Service         │
-│ Report Service | Audit Service                              │
-└───────┬──────────────────┬───────────────────┬───────────────┘
-        │                  │                   │
-        ▼                  ▼                   ▼
-┌───────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│ PostgreSQL    │  │ AI/OCR Pipeline  │  │ Evidence Storage │
-│ Core records  │  │ OCR + CV + NLP   │  │ Package images   │
-│ Rules         │  │ Extraction       │  │ Reports          │
-│ History       │  │ Classification   │  │ Evidence crops   │
-└───────────────┘  └─────────┬────────┘  └──────────────────┘
-                             │
-                             ▼
-                   ┌──────────────────────┐
-                   │ Compliance Engine     │
-                   │ Versioned rule set    │
-                   │ Applicability checks  │
-                   │ Validation            │
-                   └──────────┬───────────┘
-                              ▼
-                   ┌──────────────────────┐
-                   │ Findings + Confidence │
-                   │ Evidence + Rule refs  │
-                   └──────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                         PARAKH CLIENT                         │
+│ React + Vite + React Router                                  │
+│ Responsive UI / themes / cached GET data                     │
+│ Dashboard | Scan | Shops | Products | History | Reports      │
+│ E-commerce | Admin                                           │
+└───────────────────────────────┬───────────────────────────────┘
+                                │ REST / JSON / multipart
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                     NODE + EXPRESS BACKEND                    │
+│ Auth | Business Logic | Products | Shops | Categories         │
+│ Inspections | Rules | Analytics | Reports | E-commerce        │
+└───────────────┬────────────────────┬──────────────────────────┘
+                │                    │
+                │                    ├───────────────┐
+                ▼                    ▼               ▼
+        ┌──────────────┐    ┌────────────────┐  ┌──────────────┐
+        │ PostgreSQL   │    │ OCR / AI       │  │ Evidence /   │
+        │ via Prisma   │    │ processing     │  │ report data  │
+        └──────────────┘    └───────┬────────┘  └──────────────┘
+                                    │
+                                    ▼
+                          ┌──────────────────────┐
+                          │ Compliance Engine    │
+                          │ Rule evaluation       │
+                          │ Evidence + findings   │
+                          └──────────────────────┘
 ```
 
 ## 3. Frontend Architecture
 
-Use React with TypeScript and Vite.
+Current frontend stack:
 
-Suggested feature-oriented structure:
+- React 19
+- Vite
+- React Router
+- JavaScript/JSX in the current repository
+- Shared CSS theme system
+- Responsive layouts
+- Client-side caching helpers
+- jsPDF where client-side report generation is used
 
-```text
-frontend/
-  src/
-    app/
-    components/
-    layouts/
-    features/
-      auth/
-      dashboard/
-      scanning/
-      shops/
-      products/
-      inspections/
-      reports/
-      analytics/
-      administration/
-    services/
-    hooks/
-    types/
-    utils/
-    assets/
-```
+The UI currently contains shared layout/theme infrastructure and feature-oriented pages for dashboard, scan, shops, products, history, reports, e-commerce, profile, and administration.
 
-The frontend should use reusable components rather than page-specific duplicated UI.
-
-The responsive design should be mobile-first because package scanning is primarily a field activity. Desktop layouts should expose the same capabilities using larger panels, tables, filters, and multi-column views.
+The frontend should reuse shared components and theme variables rather than creating page-specific versions of the same control.
 
 ## 4. Backend Architecture
 
-Use Python + FastAPI.
+Current backend stack:
 
-Suggested structure:
+- Node.js
+- Express 5
+- ES modules
+- REST endpoints
+- Multer
+- Sharp
+- Prisma 7
+- PostgreSQL driver adapter
 
-```text
-backend/
-  app/
-    main.py
-    api/
-    core/
-    models/
-    schemas/
-    services/
-    repositories/
-    ai/
-    compliance/
-    reports/
-    security/
-    workers/
-    utils/
-```
-
-Responsibilities:
-
-- API routing
-- Authentication and authorization
-- Input validation
-- Inspection workflow
-- Product and shop management
-- AI pipeline orchestration
-- Compliance evaluation
-- Report generation
-- Audit logging
-- Database access
-
-Business rules should not be hidden inside route handlers.
-
-## 5. AI/OCR Pipeline
-
-The AI pipeline should be treated as a processing service with explicit stages.
-
-```text
-Input Images
-    ↓
-Image Quality Assessment
-    ↓
-Preprocessing
-    ↓
-Text / Region Detection
-    ↓
-OCR
-    ↓
-Text Normalization
-    ↓
-Field Extraction
-    ↓
-Field Confidence Scoring
-    ↓
-Product Classification
-    ↓
-Compliance Engine
-```
-
-If multiple package images are submitted, the system should maintain image-level evidence and associate extracted fields with their source image and region where possible.
-
-## 6. Image Processing
-
-Before OCR, the pipeline may perform:
-
-- Orientation correction
-- Perspective correction
-- Cropping
-- Resolution checks
-- Denoising
-- Contrast normalization
-- Blur detection
-- Glare detection
-
-The system should avoid silently producing low-quality results. If the image is unsuitable, it should request another capture.
-
-## 7. OCR and Extraction
-
-OCR produces raw text and optionally bounding boxes. A separate extraction stage maps the text into structured fields.
-
-Example:
-
-```json
-{
-  "field": "mrp",
-  "value": "₹20",
-  "confidence": 0.98,
-  "source_image_id": "img_123",
-  "source_region": [120, 450, 340, 510]
-}
-```
-
-This separation allows OCR models to change without rewriting the product and compliance layers.
-
-## 8. Product Classification Architecture
-
-Classification should not depend exclusively on an AI model. The system should combine:
-
-1. Existing catalogue matching
-2. OCR-derived brand/product information
-3. Category hierarchy
-4. Optional AI suggestions
-5. Officer confirmation
-
-The canonical hierarchy is:
-
-`Category → Subcategory → Product Type → Brand → Product → Pack Size / Variant`
-
-## 9. Compliance Engine
-
-The compliance engine is deterministic where possible.
-
-```text
-Product Record
-      +
-Extracted Fields
-      +
-Applicable Rules
-      ↓
-Validation Functions
-      ↓
-Compliance Findings
-```
-
-AI may assist with extraction and interpretation, but deterministic checks should be used for straightforward validations.
-
-Each finding should store:
-
-- Rule identifier
-- Rule version
-- Input field(s)
-- Expected condition
-- Actual value
-- Result
-- Confidence where relevant
-- Evidence reference
-- Verification status
-
-## 10. Rule Applicability
-
-Not every requirement applies identically to every commodity. The rule engine must first determine which rules are applicable based on structured product attributes and the configured rule set.
-
-Avoid a single giant conditional function such as `if food and chips and ...`. Rules should be data-driven and modular.
-
-## 11. Human-in-the-Loop Workflow
-
-```text
-AI Extraction
-     ↓
-AI Confidence
-     ↓
-High confidence ──────→ Automated rule evaluation
-     │
-Low confidence
-     ↓
-Officer review
-     ↓
-Correct / confirm
-     ↓
-Rule evaluation
-```
-
-A finding that requires human review must be visually distinguishable from a confirmed result.
-
-## 12. Evidence Model
-
-Evidence is a first-class object.
-
-Evidence can include:
-
-- Original package image
-- Cropped region
-- OCR text
-- Extracted field
-- Rule reference
-- Officer note
-- Verification action
-
-Evidence should not be deleted simply because an AI finding is rejected; the audit record should preserve what the system originally detected and what the officer decided.
-
-## 13. Database Architecture
-
-PostgreSQL stores structured application data.
-
-Main logical areas:
-
-- Identity and access
-- Shops and locations
-- Product catalogue
-- Inspections
-- Images and evidence metadata
-- Extracted fields
-- Rules
-- Compliance checks
-- Violations
-- Verification
-- Reports
-- Audit logs
-
-Binary files should preferably be stored in object/file storage, with metadata and references in PostgreSQL.
-
-## 14. API Layer
-
-Use REST APIs with consistent JSON schemas.
-
-Example resource groups:
+Current route groups include:
 
 ```text
 /api/auth
-/api/dashboard
-/api/shops
-/api/products
 /api/categories
-/api/inspections
-/api/scans
-/api/compliance
+/api/products
+/api/shops
 /api/rules
-/api/reports
-/api/analytics
 /api/admin
+/api/analytics
+/api/translate
+/api/products/ecommerce-ocr
+/api/ocr
 ```
 
-API contracts should be documented and versionable.
+The backend owns:
 
-## 15. Authentication and Authorization
-
-Authentication establishes identity. Authorization determines what that identity can do.
-
-At minimum:
-
-- Inspector
-- Administrator
-
-Every protected API should verify both authentication and authorization.
-
-## 16. Audit Logging
-
-Important events should be logged:
-
-- Login/logout
-- Product creation/edit
-- Shop creation/edit
-- Inspection creation
-- Image upload
-- AI processing result
+- Authentication and authorization
+- Product/category/shop operations
+- Inspection persistence
 - Rule evaluation
-- Officer verification
-- Report generation
-- Administrative changes
+- Analytics aggregation
+- OCR/semantic orchestration
+- Report-related data operations
+- Validation and error handling
 
-Each event should have actor, timestamp, action, target, and relevant metadata.
+## 5. Database Architecture
 
-## 17. Report Generation
+PostgreSQL stores the structured application state through Prisma.
 
-The report service converts structured inspection data into a reproducible document. Reports should include a report identifier and inspection timestamp and should reference evidence.
+Logical areas include:
 
-The report should clearly distinguish:
+- Users and roles
+- Shops
+- Category hierarchy
+- Products and variants
+- Inspections
+- Inspection items
+- Inspection images
+- Extracted fields
+- Compliance rules and checks
+- Violations
+- Evidence
+- Verification records
+- Reports
+- Audit information
+- Analytics source data
 
-- AI-generated extraction
-- Rule-engine findings
-- Officer-confirmed findings
+Analytics are derived from inspection records rather than maintained as manually edited counters.
 
-## 18. Analytics Architecture
+## 6. OCR / AI Pipeline
 
-Analytics should be derived from inspection records rather than maintained as manually updated counters.
+The current fast analysis path is:
 
-Prototype analytics can use PostgreSQL aggregation queries. A separate analytics warehouse or stream-processing platform is unnecessary for the first SIH version.
+```text
+Input image(s)
+      ↓
+RapidOCR service
+      ↓
+OCR evidence
+(text + confidence + geometry)
+      ↓
+Local deterministic reconciliation
+      ↓
+Semantic provider fan-out
+ ├── Gemini
+ ├── Cloudflare Gemma
+ └── Cloudflare Moondream
+      ↓
+Semantic consensus
+      ↓
+Structured result
+      ↓
+Visual screening + compliance workflow
+```
 
-## 19. Scalability Path
+The semantic providers run independently. A failed provider should not prevent the remaining providers from producing a result when enough information is available.
 
-The SIH prototype can use a modular monolith with background AI jobs. If deployment scales later:
+Provider failures are logged with provider/model details in the backend terminal.
+
+## 7. Local Deterministic Reconciliation
+
+The local OCR reconciler maps OCR detections into structured fields using:
+
+- Declaration anchors
+- Spatial relationships
+- Text similarity
+- Confidence
+- Product/brand candidate scoring
+- Quantity/date/MRP/batch/barcode patterns
+- Bounding-box geometry
+
+It preserves uncertainty instead of inventing values.
+
+## 8. Semantic Consensus
+
+Remote semantic providers can produce structured field interpretations and category suggestions.
+
+The consensus layer:
+
+- ignores failed providers
+- compares field values across successful providers
+- uses majority agreement when available
+- marks conflicts as ambiguous
+- reduces confidence when only one provider returns a result
+
+AI interpretation therefore acts as an assistive semantic layer rather than a legal decision-maker.
+
+## 9. Image Processing and Evidence
+
+The scanning system retains image-level evidence where available.
+
+Evidence can include:
+
+- OCR text
+- confidence
+- source image
+- bounding box
+- semantic field mapping
+- declaration evidence
+- visual screening information
+
+This enables the UI to show source evidence and supports later verification.
+
+## 10. Product Classification
+
+Classification combines:
+
+1. Existing catalogue matching
+2. OCR-derived product/brand information
+3. Category hierarchy
+4. Semantic suggestions where available
+5. Officer confirmation
+
+The canonical hierarchy remains:
+
+`Category → Subcategory → Product Type → Brand → Product → Pack Size / Variant`
+
+## 11. Compliance Engine
+
+Compliance is kept separate from OCR and AI.
+
+```text
+Structured product data
+        +
+Applicable rules
+        ↓
+Validation
+        ↓
+Compliance findings
+        ↓
+Officer verification
+```
+
+Deterministic checks should remain deterministic.
+
+The UI must not hard-code legal requirements.
+
+## 12. Human-in-the-Loop
+
+The intended workflow is:
+
+```text
+OCR / AI extraction
+        ↓
+Confidence + evidence
+        ↓
+Rule evaluation
+        ↓
+Inspector reviews uncertain values/findings
+        ↓
+Correct / accept / reject / add manual violation
+        ↓
+Registration / completion
+```
+
+The final legal responsibility remains with the authorized inspector.
+
+## 13. Frontend Data and Performance
+
+The current client keeps successful GET responses in session storage for a short TTL and invalidates the cache after data mutations.
+
+The application uses targeted optimistic UI updates for selected mutations, especially deletions, to avoid unnecessary full-page remounts.
+
+This is a UI/data freshness optimization only. It does not replace server-side persistence.
+
+## 14. Analytics
+
+The dashboard analytics are derived from actual inspection records.
+
+Examples include:
+
+- Inspection counts over time
+- Total inspections
+- Total violations
+- Highest violating shop/source
+- Highest violating brand
+- Highest violating rule
+
+User-facing analytics are scoped to the authenticated user where applicable. Administrative analytics can be platform-wide.
+
+## 15. Reports
+
+Reports consume structured inspection data and should distinguish:
+
+- AI-extracted data
+- Rule-engine results
+- Officer-confirmed decisions
+
+## 16. Failure Handling
+
+The runtime must handle:
+
+- OCR failure
+- AI provider timeout
+- Provider quota/authentication errors
+- Missing provider credentials
+- Poor image quality
+- Unsupported image formats
+- Database failures
+- Duplicate or invalid data
+- Report generation failures
+
+Backend logs should contain technical provider details. User-facing errors should remain understandable.
+
+## 17. Scalability Path
+
+The current prototype is a modular monolith with external/local OCR and semantic providers.
+
+A future scale-out architecture can move OCR/AI work into background workers:
 
 ```text
 Responsive Client
       ↓
-API Gateway / Load Balancer
+API / Load Balancer
       ↓
-Multiple API Instances
+Multiple API instances
       ↓
-Job Queue → AI Workers
+Job Queue → OCR / AI Workers
       ↓
 PostgreSQL + Object Storage
 ```
 
-This allows OCR/AI workloads to scale independently from the API.
+The prototype does not require this complexity yet.
 
-## 20. Processing States
+## 18. Security
 
-An inspection should have explicit states such as:
+- Never commit secrets
+- Validate uploads server-side
+- Authenticate protected APIs
+- Authorize role-sensitive operations
+- Preserve evidence and verification history
+- Do not expose stack traces or credentials to clients
 
-`CREATED → UPLOADED → PROCESSING → EXTRACTED → REVIEW_REQUIRED → VERIFIED → COMPLETED`
+## 19. Current vs Target Documentation
 
-Failure states should also be represented, for example `PROCESSING_FAILED`.
+Earlier versions of PARAKH documentation described a Python/FastAPI implementation. The working repository has since moved to the Node.js/Express runtime described above.
 
-## 21. Failure Handling
-
-The application must handle:
-
-- Blurry images
-- Missing package sides
-- OCR failure
-- Unsupported image format
-- AI service timeout
-- Duplicate upload
-- Database failure
-- Report generation failure
-
-The user should receive an actionable error rather than an unexplained technical message.
-
-## 22. Security Principles
-
-- HTTPS in deployment
-- Password hashing
-- Short-lived access tokens where token authentication is used
-- Role-based authorization
-- Server-side input validation
-- File type and size validation
-- Safe filename handling
-- No secrets in source code
-- Audit logs for sensitive operations
-- Least-privilege database access
-
-## 23. Prototype Boundary
-
-Do not attempt to build a national production system during the SIH prototype phase. Demonstrate a complete, reliable vertical slice using representative rules and realistic package images.
-
-The architecture must make future expansion possible without pretending the prototype already provides national-level legal or AI coverage.
+The specification files remain useful for requirements, but implementation details in this document and the source code should be treated as the current technical reference.
