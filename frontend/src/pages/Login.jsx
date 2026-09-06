@@ -49,7 +49,7 @@ function Login() {
       <form onSubmit={submit}>
         <label>{t("email")}<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
         <label>{t("password")}<input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-        <div className="auth-inline-link"><Link to={email ? `/reset-password?email=${encodeURIComponent(email.trim().toLowerCase())}` : "/reset-password"}>Forgot password?</Link></div>
+        <div className="auth-inline-link"><Link to={email ? `/forgot-password?email=${encodeURIComponent(email.trim().toLowerCase())}` : "/forgot-password"}>Forgot password?</Link></div>
         {error && <div className="status-message">{error}</div>}
         <button className="primary-button" disabled={loading}>{loading ? t("signingIn") : t("signIn")}</button>
       </form>
