@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import AutoTranslate from "./components/AutoTranslate";
+import StartupSplash from "./components/StartupSplash";
 import "./styles/global.css";
 import "./styles/components.css";
 import "./styles/theme.css";
@@ -27,8 +28,10 @@ applyTheme(getTheme());
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <LanguageProvider>
-      <AutoTranslate />
-      <App />
+      <StartupSplash>
+        <AutoTranslate />
+        <App />
+      </StartupSplash>
     </LanguageProvider>
   </StrictMode>
 );
