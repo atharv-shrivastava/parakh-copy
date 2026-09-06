@@ -1,0 +1,192 @@
+.startup-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(34, 211, 238, 0.11), transparent 28%),
+    radial-gradient(circle at 18% 20%, rgba(99, 102, 241, 0.12), transparent 30%),
+    radial-gradient(circle at 82% 82%, rgba(168, 85, 247, 0.12), transparent 28%),
+    #061117;
+  color: #f8fafc;
+  opacity: 1;
+  transition: opacity 260ms ease, transform 260ms ease;
+}
+
+.startup-splash--exiting {
+  opacity: 0;
+  transform: scale(1.015);
+  pointer-events: none;
+}
+
+.startup-splash__ambient {
+  position: absolute;
+  width: 42vw;
+  height: 42vw;
+  max-width: 620px;
+  max-height: 620px;
+  border-radius: 50%;
+  filter: blur(55px);
+  opacity: 0.22;
+  animation: startup-drift 8s ease-in-out infinite alternate;
+}
+
+.startup-splash__ambient--one {
+  top: -18vw;
+  left: -12vw;
+  background: #22d3ee;
+}
+
+.startup-splash__ambient--two {
+  right: -14vw;
+  bottom: -20vw;
+  background: #8b5cf6;
+  animation-delay: -3s;
+}
+
+.startup-splash__content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 32px;
+  animation: startup-content-in 500ms cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.startup-splash__logo-wrap {
+  position: relative;
+  width: 108px;
+  height: 108px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 24px;
+}
+
+.startup-splash__logo-card {
+  position: relative;
+  z-index: 2;
+  width: 74px;
+  height: 74px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 24px;
+  background: rgba(10, 23, 31, 0.8);
+  box-shadow: 0 20px 55px rgba(0, 0, 0, 0.4), 0 0 45px rgba(34, 211, 238, 0.15);
+  backdrop-filter: blur(14px);
+  animation: startup-logo-float 2.5s ease-in-out infinite;
+}
+
+.startup-splash__logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
+.startup-splash__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(34, 211, 238, 0.2);
+}
+
+.startup-splash__ring--outer {
+  animation: startup-ring 2.4s linear infinite;
+}
+
+.startup-splash__ring--inner {
+  inset: 9px;
+  border-color: rgba(139, 92, 246, 0.22);
+  animation: startup-ring-reverse 1.8s linear infinite;
+}
+
+.startup-splash__brand {
+  font-size: clamp(2rem, 5vw, 3rem);
+  line-height: 1;
+  font-weight: 850;
+  letter-spacing: 0.18em;
+  margin-left: 0.18em;
+  background: linear-gradient(100deg, #ffffff 0%, #b6f3ff 45%, #c4b5fd 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.startup-splash__tagline {
+  margin-top: 10px;
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 0.88rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.startup-splash__loader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 30px;
+}
+
+.startup-splash__loader span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #a5f3fc;
+  box-shadow: 0 0 14px rgba(165, 243, 252, 0.6);
+  animation: startup-dot 900ms ease-in-out infinite;
+}
+
+.startup-splash__loader span:nth-child(2) { animation-delay: 120ms; }
+.startup-splash__loader span:nth-child(3) { animation-delay: 240ms; }
+
+.startup-splash__status {
+  margin-top: 12px;
+  color: rgba(203, 213, 225, 0.62);
+  font-size: 0.78rem;
+}
+
+@keyframes startup-content-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes startup-logo-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes startup-ring {
+  from { transform: rotate(0deg) scale(0.98); }
+  to { transform: rotate(360deg) scale(1.02); }
+}
+
+@keyframes startup-ring-reverse {
+  from { transform: rotate(360deg) scale(1.02); }
+  to { transform: rotate(0deg) scale(0.98); }
+}
+
+@keyframes startup-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-5px); opacity: 1; }
+}
+
+@keyframes startup-drift {
+  from { transform: translate3d(-2%, -2%, 0) scale(1); }
+  to { transform: translate3d(3%, 3%, 0) scale(1.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .startup-splash,
+  .startup-splash__content,
+  .startup-splash__logo-card,
+  .startup-splash__ring,
+  .startup-splash__ambient,
+  .startup-splash__loader span {
+    animation: none;
+    transition-duration: 1ms;
+  }
+}
