@@ -1,103 +1,82 @@
 # PARAKH Development Roadmap
 
-## Phase 0 — Foundation
+## Current status
+PARAKH is a working SIH prototype with a responsive UI, real database-backed products/shops/inspections, product hierarchy, OCR/AI scanning, compliance workflow, reports, analytics, caching, and administrative functionality.
 
-- Finalize repository documentation
-- Establish frontend/backend structure
-- Configure environment variables
-- Establish database migrations
-- Establish authentication model
-- Create shared UI components
-
-## Phase 1 — Core Application
-
-- Login
-- Dashboard shell
+## Completed / implemented
+- React/Vite responsive frontend
+- Node/Express backend
+- Prisma/PostgreSQL persistence
+- Authentication and role-aware access
+- Product/category hierarchy
+- Shop management and inspection history
+- Multi-image scanning
+- RapidOCR integration
+- Deterministic OCR field reconciliation
+- Gemini semantic integration
+- Cloudflare Gemma semantic integration
+- Cloudflare Moondream best-effort integration
+- Semantic consensus and confidence handling
+- Visual inspection screening
+- Editable extraction results
+- Manual violation entry
+- Product registration
+- Real-data dashboard analytics
+- Inspection trends
+- Highest-violation shop/brand/rule analytics
+- Reports/PDF support
+- E-commerce inspection workflow
 - Responsive navigation
-- Shop creation and listing
-- Product catalogue
-- Category hierarchy
-- Inspection creation
-- Inspection history
+- Light/dark/gradient/rainbow themes
+- Dark-theme contrast improvements
+- Client GET caching
+- Mutation-triggered cache invalidation
+- Optimistic deletion for selected operations
+- Shop query optimization
+- Backend provider/model failure logging
 
-## Phase 2 — Scanning Vertical Slice
+## Next priorities
 
-- Mobile-friendly camera/upload interface
-- Multi-image inspection capture
-- Image validation
-- OCR processing
-- Structured field extraction
-- Extraction review UI
-- Confidence indicators
+### 1. Scan performance
+- Reduce RapidOCR latency
+- Ensure slow semantic providers cannot unnecessarily delay a usable result
+- Improve staged processing feedback
+- Continue measuring provider performance
 
-## Phase 3 — Product Intelligence
+### 2. Evidence experience
+- Stronger field-to-image highlighting
+- Better bounding-box visualization
+- Clearer source/evidence provenance
 
-- Product matching
-- Category/subcategory/product-type hierarchy
-- Brand management
-- Product variant management
-- New product registration
-- Unknown-product workflow
+### 3. Inspection/product detail
+- Richer inspection record pages
+- Better timelines
+- Stronger evidence presentation
 
-## Phase 4 — Compliance Engine
+### 4. Compliance
+- Expand representative official rules
+- Improve rule applicability configuration
+- Add automated rule tests
+- Preserve rule source/version information
 
-- Rule data model
-- Representative Legal Metrology rules
-- Applicability evaluation
-- Deterministic validation functions
-- Compliance findings
-- Evidence linkage
-- Manual verification workflow
+### 5. Reliability
+- Frontend/backend automated tests
+- API integration tests
+- Database performance testing
+- OCR/AI failure tests
+- Mobile/browser regression testing
 
-## Phase 5 — Reports and History
+### 6. Deployment
+- Production environment hardening
+- Pooled database configuration
+- OCR deployment strategy
+- Monitoring and structured logs
 
-- Complete inspection records
-- Shop product history
-- Advanced history filters
-- Evidence viewer
-- PDF reports
-- Editable reports
+## Priority principle
+Protect the end-to-end path:
 
-## Phase 6 — Analytics
+```text
+Scan → OCR → Extract → Classify → Rules → Review → Register → History → Analytics/Report
+```
 
-- Dashboard metrics
-- Category analytics
-- Product/brand analytics
-- Shop analytics
-- Location analytics
-- Violation trends
-- Repeat violation analysis
-
-## Phase 7 — Hardening
-
-- Authentication hardening
-- Authorization tests
-- File-upload security
-- Error handling
-- Database indexes
-- Performance testing
-- Responsive testing
-- Accessibility checks
-- Audit-log validation
-
-## Phase 8 — SIH Demonstration
-
-The demonstration should show one coherent story:
-
-1. Officer logs in.
-2. Officer selects or adds a shop.
-3. Officer scans a packaged commodity.
-4. PARAKH processes package images.
-5. OCR extracts declarations.
-6. AI/classification identifies the product.
-7. Rule engine evaluates representative requirements.
-8. Potential issues are highlighted with evidence.
-9. Officer verifies/corrects the result.
-10. Inspection is saved.
-11. Shop and product histories update.
-12. Report is generated.
-13. Dashboard analytics reflect the inspection.
-
-## Priority Principle
-
-If time becomes limited, protect the complete vertical slice. Advanced AI features should not be allowed to prevent the core inspection workflow from working reliably.
+New features should not destabilize this vertical slice.
