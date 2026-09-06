@@ -5,6 +5,13 @@ import hashlib
 import time
 from typing import Any
 
+# Render free instances expose very little CPU. Limit ONNX Runtime thread pools
+# to avoid oversubscription on the small CPU allocation.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+os.environ.setdefault("ORT_INTRA_OP_NUM_THREADS", "1")
+os.environ.setdefault("ORT_INTER_OP_NUM_THREADS", "1")
+
 import numpy as np
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,12 +35,11 @@ app.add_middleware(
 
 _lang_type = os.getenv("RAPIDOCR_LANG_TYPE", "en")
 _max_ocr_side = max(768, int(os.getenv("RAPIDOCR_MAX_SIDE", "768")))
-_cache_ttl = max(5, int(os.getenv("RAPIDOCR_CACHE_TTL_SECONDS", "30")))
+_cache_ttl = max(30, int(os.getenv("RAPIDOCR_CACHE_TTL_SECONDS", "120")))
 _cache_limit = max(1, int(os.getenv("RAPIDOCR_CACHE_ITEMS", "8")))
 _use_cls = os.getenv("RAPIDOCR_USE_CLS", "false").lower() == "true"
 _text_score = max(0.0, min(1.0, float(os.getenv("RAPIDOCR_TEXT_SCORE", "0.5"))))
 
-_engine_name = "rapidocr"
 _rapid_ocr = None
 _result_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _inflight: dict[str, asyncio.Task] = {}
@@ -163,12 +169,15 @@ async def _analyze_contents(items: list[tuple[bytes, str]]):
     for image_index, array in enumerate(prepared):
         image_started = time.monotonic()
         result = await asyncio.to_thread(lambda arr=array: rapid(arr))
-        engine_ms += round((time.monotonic() - image_started) * 1000)
+        one_engine_ms = round((time.monotonic() - image_started) * 1000)
+        engine_ms += one_engine_ms
         entries = extract_result(result, image_index, array.shape[1], array.shape[0])
+        print(f"[ocr:rapid] image={image_index + 1} size={array.shape[1]}x{array.shape[0]} engine={one_engine_ms}ms entries={len(entries)}")
         all_entries.extend(entries)
         raw_text_parts.append("\n".join(entry["text"] for entry in entries))
 
     elapsed_ms = round((time.monotonic() - started_at) * 1000)
+    print(f"[ocr:rapid] request images={len(prepared)} engine={engine_ms}ms total={elapsed_ms}ms entries={len(all_entries)}")
     return {
         "provider": "rapidocr",
         "model": "RapidOCR",
@@ -192,7 +201,7 @@ async def warmup():
         warm_image = np.full((192, 192, 3), 255, dtype=np.uint8)
         await asyncio.to_thread(lambda: rapid(warm_image))
         elapsed_ms = round((time.monotonic() - started_at) * 1000)
-        print(f"[ocr:rapid] warmup complete in {elapsed_ms}ms useCls={_use_cls} textScore={_text_score} maxSide={_max_ocr_side}")
+        print(f"[ocr:rapid] warmup complete in {elapsed_ms}ms useCls={_use_cls} textScore={_text_score} maxSide={_max_ocr_side} omp={os.getenv('OMP_NUM_THREADS')}")
     except Exception as exc:
         print(f"[ocr:rapid] warmup skipped: {exc}")
 
@@ -213,10 +222,12 @@ async def analyze(images: list[UploadFile] = File(...)):
     key = _cache_key(items)
     cached = _get_cached(key)
     if cached is not None:
+        print("[ocr:rapid] cache hit")
         return {**cached, "cached": True}
     existing = _inflight.get(key)
     if existing is not None:
         result = await existing
+        print("[ocr:rapid] reused in-flight request")
         return {**result, "cached": True}
     task = asyncio.create_task(_analyze_contents(items))
     _inflight[key] = task
