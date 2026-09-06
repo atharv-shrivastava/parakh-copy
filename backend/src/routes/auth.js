@@ -11,7 +11,7 @@ const MAX_OTP_ATTEMPTS = 5;
 
 function normalizeEmail(email) { return String(email || "").trim().toLowerCase(); }
 
-async function issueOtp(user, subject, intro, heading) {
+async function issueOtp(user, purpose = "verification") {
   const now = new Date();
   if (user.emailVerificationLastSentAt && now.getTime() - user.emailVerificationLastSentAt.getTime() < RESEND_COOLDOWN_MS) {
     const retryAfter = Math.ceil((RESEND_COOLDOWN_MS - (now.getTime() - user.emailVerificationLastSentAt.getTime())) / 1000);
@@ -19,8 +19,13 @@ async function issueOtp(user, subject, intro, heading) {
     error.status = 429;
     throw error;
   }
-  const { otp, hash } = createEmailOtp(user.email);
-  await sendVerificationEmail({ to: user.email, name: user.name, otp, subject, heading, intro });
+  const { otp, hash } = createEmailOtp(`${purpose}:${user.email}`);
+  await sendVerificationEmail({
+    to: user.email,
+    name: user.name,
+    otp,
+    ...(purpose === "reset" ? { subject: "Reset your PARAKH password", heading: "Reset your PARAKH password", intro: "Your password reset code is:" } : {})
+  });
   await prisma.user.update({ where: { id: user.id }, data: { emailVerificationOtpHash: hash, emailVerificationOtpExpiresAt: new Date(Date.now() + OTP_TTL_MS), emailVerificationLastSentAt: now, emailVerificationAttempts: 0 } });
 }
 
@@ -33,7 +38,7 @@ router.post("/register", async (req, res) => {
     const exists = await prisma.user.findUnique({ where: { email } });
     if (exists) return res.status(409).json({ error: "An account with this email already exists" });
     const user = await prisma.user.create({ data: { name, email, role: "USER", passwordHash: makePasswordHash(password), emailVerified: false } });
-    try { await issueOtp(user, "Verify your PARAKH account", "Your email verification code is:", "Verify your PARAKH account"); } catch (mailError) { await prisma.user.delete({ where: { id: user.id } }).catch(() => {}); throw mailError; }
+    try { await issueOtp(user); } catch (mailError) { await prisma.user.delete({ where: { id: user.id } }).catch(() => {}); throw mailError; }
     res.status(201).json({ id: user.id, name: user.name, email: user.email, role: user.role, emailVerified: false, requiresEmailVerification: true });
   } catch (error) { console.error(error); res.status(error?.status || 500).json({ error: error?.code === "P2002" ? "An account with this email already exists" : (error?.message || "Registration failed") }); }
 });
@@ -47,7 +52,8 @@ router.post("/verify-email", async (req, res) => {
     if (user.emailVerified) return res.json({ message: "Email is already verified" });
     if (!user.emailVerificationOtpHash || !user.emailVerificationOtpExpiresAt || user.emailVerificationOtpExpiresAt < new Date()) return res.status(400).json({ error: "This code has expired. Request a new verification code." });
     if (user.emailVerificationAttempts >= MAX_OTP_ATTEMPTS) return res.status(429).json({ error: "Too many incorrect attempts. Request a new verification code." });
-    if (!verifyEmailOtp(email, otp, user.emailVerificationOtpHash)) { await prisma.user.update({ where: { id: user.id }, data: { emailVerificationAttempts: { increment: 1 } } }); return res.status(400).json({ error: "Invalid verification code" }); }
+    const valid = verifyEmailOtp(`verification:${email}`, otp, user.emailVerificationOtpHash);
+    if (!valid) { await prisma.user.update({ where: { id: user.id }, data: { emailVerificationAttempts: { increment: 1 } } }); return res.status(400).json({ error: "Invalid verification code" }); }
     await prisma.user.update({ where: { id: user.id }, data: { emailVerified: true, emailVerificationOtpHash: null, emailVerificationOtpExpiresAt: null, emailVerificationLastSentAt: null, emailVerificationAttempts: 0 } });
     res.json({ message: "Email verified successfully" });
   } catch (error) { console.error(error); res.status(500).json({ error: error?.message || "Email verification failed" }); }
@@ -58,32 +64,32 @@ router.post("/resend-verification", async (req, res) => {
     const email = normalizeEmail(req.body.email); const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(404).json({ error: "No account found for this email" });
     if (user.emailVerified) return res.json({ message: "Email is already verified" });
-    await issueOtp(user, "Verify your PARAKH account", "Your email verification code is:", "Verify your PARAKH account");
-    res.json({ message: "A new verification code has been sent" });
+    await issueOtp(user); res.json({ message: "A new verification code has been sent" });
   } catch (error) { console.error(error); res.status(error?.status || 500).json({ error: error?.message || "Unable to resend verification code" }); }
 });
 
-router.post("/request-password-reset", async (req, res) => {
+router.post("/forgot-password", async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
-    if (!email) return res.status(400).json({ error: "Enter your email address" });
+    if (!email) return res.status(400).json({ error: "Email is required" });
     const user = await prisma.user.findUnique({ where: { email } });
-    if (user) await issueOtp(user, "Reset your PARAKH password", "Your password reset code is:", "Reset your PARAKH password");
-    res.json({ message: "If an account exists for that email, a password reset code has been sent." });
-  } catch (error) { console.error(error); res.status(error?.status || 500).json({ error: error?.message || "Unable to send password reset code" }); }
+    if (user) await issueOtp(user, "reset");
+    res.json({ message: "If an account exists for that email, a reset code has been sent" });
+  } catch (error) { console.error(error); res.status(error?.status || 500).json({ error: error?.message || "Unable to send reset code" }); }
 });
 
 router.post("/reset-password", async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email); const otp = String(req.body.otp || "").trim(); const password = String(req.body.password || "");
-    if (!email || !/^\d{6}$/.test(otp) || password.length < 6) return res.status(400).json({ error: "Enter a valid 6-digit code and a password of at least 6 characters" });
+    if (!email || !/^\d{6}$/.test(otp) || password.length < 6) return res.status(400).json({ error: "Email, 6-digit code and a password of at least 6 characters are required" });
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !user.emailVerificationOtpHash || !user.emailVerificationOtpExpiresAt || user.emailVerificationOtpExpiresAt < new Date()) return res.status(400).json({ error: "This reset code has expired. Request a new code." });
     if (user.emailVerificationAttempts >= MAX_OTP_ATTEMPTS) return res.status(429).json({ error: "Too many incorrect attempts. Request a new reset code." });
-    if (!verifyEmailOtp(email, otp, user.emailVerificationOtpHash)) { await prisma.user.update({ where: { id: user.id }, data: { emailVerificationAttempts: { increment: 1 } } }); return res.status(400).json({ error: "Invalid reset code" }); }
+    const valid = verifyEmailOtp(`reset:${email}`, otp, user.emailVerificationOtpHash);
+    if (!valid) { await prisma.user.update({ where: { id: user.id }, data: { emailVerificationAttempts: { increment: 1 } } }); return res.status(400).json({ error: "Invalid reset code" }); }
     await prisma.$transaction([
       prisma.user.update({ where: { id: user.id }, data: { passwordHash: makePasswordHash(password), emailVerificationOtpHash: null, emailVerificationOtpExpiresAt: null, emailVerificationLastSentAt: null, emailVerificationAttempts: 0 } }),
-      prisma.session.deleteMany({ where: { userId: user.id } }),
+      prisma.session.deleteMany({ where: { userId: user.id } })
     ]);
     res.json({ message: "Password reset successfully" });
   } catch (error) { console.error(error); res.status(500).json({ error: error?.message || "Password reset failed" }); }
@@ -101,10 +107,7 @@ router.post("/login", async (req, res) => {
   } catch (error) { console.error(error); res.status(500).json({ error: error?.message || "Login failed" }); }
 });
 
-router.get("/me", authenticate, async (req, res) => {
-  res.json({ id: req.user.id, name: req.user.name, email: req.user.email, role: req.user.role, emailVerified: req.user.emailVerified });
-});
-
+router.get("/me", authenticate, async (req, res) => { res.json({ id: req.user.id, name: req.user.name, email: req.user.email, role: req.user.role, emailVerified: req.user.emailVerified }); });
 router.post("/logout", authenticate, async (req, res) => { await prisma.session.delete({ where: { id: req.session.id } }); res.json({ message: "Logged out" }); });
 
 export default router;
